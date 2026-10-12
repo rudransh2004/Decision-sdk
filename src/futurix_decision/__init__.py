@@ -6,6 +6,7 @@ evaluation load on first access and need ``futurix-decision[torch]``.
 
 __version__ = "0.1.0"
 
+import logging
 from typing import TYPE_CHECKING
 
 from futurix_decision._lazy import lazy_exports
@@ -26,6 +27,8 @@ from futurix_decision.errors import (
 )
 from futurix_decision.inference import DecisionResult
 from futurix_decision.models import Calibrated, DecisionBackend, FamilyAdapter, register_family
+
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 if TYPE_CHECKING:
     from futurix_decision.evaluation import evaluate, fit_temperature

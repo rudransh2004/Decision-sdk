@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from collections.abc import Iterator, Sequence
@@ -21,6 +22,8 @@ from futurix_decision.rewards import ProperScoringRule
 from futurix_decision.trainers.calibration import CalibrationConfig, CalibrationTrainer
 from futurix_decision.trainers.rlcd import RLCDConfig, RLCDTrainer
 from futurix_decision.trainers.sft import DatasetSource, SFTConfig, SFTTrainer
+
+logger = logging.getLogger(__name__)
 
 
 class DecisionTrainer:
@@ -102,6 +105,7 @@ class DecisionTrainer:
                 "provide a separate calibration_dataset for held-out temperature fitting"
             )
         for stage in stages:
+            logger.info("starting stage %s", stage)
             if stage == "decision_sft":
                 current = self.sft
                 result = current.train(self.dataset)
@@ -159,6 +163,7 @@ class DecisionTrainer:
                         self.model, heldout, batch_size=config.batch_size
                     )
             self.history[stage] = result
+            logger.info("finished stage %s", stage)
             self._active = current
             validation = self._validation()
             if validation is not None:

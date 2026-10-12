@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import sys
+import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import nullcontext
@@ -19,6 +19,8 @@ from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.metrics import DEFAULT_THRESHOLDS, compute_metrics
 from futurix_decision.models import Calibrated, DecisionBackend, DecisionBatch, DecisionModel
 from futurix_decision.models.batching import token_budget_batches
+
+logger = logging.getLogger(__name__)
 
 EvaluationSource = str | Path | Mapping[str, Any] | Iterable[DecisionExample | Mapping[str, Any]]
 
@@ -239,7 +241,7 @@ def evaluate(
             if stream is not None:
                 stream.flush()
             if progress_every and len(predicted) >= next_progress:
-                print(f"evaluated {len(predicted)} rows", file=sys.stderr, flush=True)
+                logger.info("evaluated %d rows", len(predicted))
                 next_progress = len(predicted) + progress_every
     result = compute_metrics(predicted, targets, bins=bins, thresholds=thresholds)
     for group_name, named_indices in groups.items():

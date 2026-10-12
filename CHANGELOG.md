@@ -6,6 +6,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The package logs through `logging.getLogger("futurix_decision")` and its child loggers,
+  with a `NullHandler` on the package logger, so importing it never configures logging.
+  `TrainingLogger` and the evaluator send progress output to the logger instead of
+  `print`; the JSONL metrics files are unchanged. Per-step metrics log at INFO when
+  `log_stdout` is set and at DEBUG otherwise.
+- The CLI has a global `--log-level` flag (default `INFO`) that sends progress and status
+  messages to stderr. Command results (JSON for `train`, `evaluate`, `export`) still go to
+  stdout. The "serving without an API key" notice is now a `logger.warning`.
+
 ### Added
 
 - `DecisionModelConfig` (exported from the top-level package): a dataclass that holds a

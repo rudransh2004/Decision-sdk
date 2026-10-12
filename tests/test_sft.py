@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -164,6 +166,23 @@ class SFTTrainingTests(unittest.TestCase):
             other = loaded.choice(state="test", choices=["approve", "reject"])
             self.assertEqual(result.decision, other.decision)
             self.assertAlmostEqual(result.confidence, other.confidence, places=5)
+
+    def test_training_logs_progress_without_printing(self):
+        trainer = DecisionTrainer(
+            model=tiny_model(),
+            dataset=[example("approve", "a"), example("reject", "b")] * 2,
+            sft_config=SFTConfig(epochs=1, batch_size=2, log_stdout=True),
+        )
+        with (
+            self.assertLogs("futurix_decision", level="INFO") as logs,
+            contextlib.redirect_stdout(io.StringIO()) as printed,
+        ):
+            trainer.train(stages=["decision_sft"])
+        messages = [record.getMessage() for record in logs.records]
+        self.assertIn("starting stage decision_sft", messages)
+        self.assertTrue(any('"step": 1' in message for message in messages))
+        self.assertTrue(all(record.name.startswith("futurix_decision") for record in logs.records))
+        self.assertEqual(printed.getvalue(), "")
 
     def test_reiterable_stream_and_one_shot_rejection(self):
         def source():

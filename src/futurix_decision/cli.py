@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import shutil
-import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from itertools import islice
@@ -28,6 +28,8 @@ from futurix_decision.models.registry import get_family, registered_families, re
 from futurix_decision.rewards import BrierScore, LogScore, RankedProbabilityScore, SphericalScore
 from futurix_decision.trainers import CalibrationConfig, RLCDConfig, SFTConfig
 from futurix_decision.utils.config import load_config
+
+logger = logging.getLogger(__name__)
 
 
 def _source(path: str, *, split: str = "train", revision: str | None = None):
@@ -449,19 +451,36 @@ def _serve(args: argparse.Namespace) -> None:
     api_key = args.api_key or os.environ.get("FUTURIX_API_KEY") or None
     host = args.host or ("0.0.0.0" if api_key else "127.0.0.1")
     if api_key is None and host not in ("127.0.0.1", "localhost", "::1"):
-        print(
-            f"warning: serving on {host} without an API key; set --api-key or FUTURIX_API_KEY",
-            file=sys.stderr,
-        )
+        logger.warning("serving on %s without an API key; set --api-key or FUTURIX_API_KEY", host)
     app = create_app(
         engine, api_key=api_key, batch_window_ms=args.batch_window_ms, max_batch=args.max_batch
     )
     uvicorn.run(app, host=host, port=args.port)
 
 
+def _configure_logging(level: str) -> None:
+    package = logging.getLogger("futurix_decision")
+    for existing in package.handlers:
+        if getattr(existing, "_futurix_cli", False):
+            package.removeHandler(existing)
+    handler = logging.StreamHandler()
+    handler._futurix_cli = True
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    package.addHandler(handler)
+    package.setLevel(level)
+    package.propagate = False
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="futurix-decision")
     formats = _model_formats()
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        type=str.upper,
+        choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
+        help="Verbosity of progress and status messages on stderr",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     train = commands.add_parser("train", help="Run SFT, calibration, and/or RLCD")
     train.add_argument("--config")
@@ -580,6 +599,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     serve.set_defaults(run=_serve)
     args = parser.parse_args(argv)
+    _configure_logging(args.log_level)
     args.run(args)
 
 

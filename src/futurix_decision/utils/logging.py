@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from futurix_decision.errors import MissingDependencyError
+
+logger = logging.getLogger(__name__)
 
 
 class TrainingLogger:
@@ -33,7 +36,9 @@ class TrainingLogger:
     def log(self, values: dict) -> None:
         line = json.dumps(values, allow_nan=False)
         if self.stdout:
-            print(line, flush=True)
+            logger.info("%s", line)
+        else:
+            logger.debug("%s", line)
         if self._stream:
             self._stream.write(line + "\n")
             self._stream.flush()
