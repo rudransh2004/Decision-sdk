@@ -7,9 +7,7 @@ intact; the SDK uses the existing next-token label logits, not new slots.
 
 from __future__ import annotations
 
-import hashlib
 import itertools
-import json
 import random
 import string
 import uuid
@@ -23,6 +21,7 @@ from transformers import AutoTokenizer
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import CheckpointError, ConfigError, MissingDependencyError
 from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
+from futurix_decision.models.tokenizer import row_seed
 
 FORMAT = "jpt-llm2jev-chat"
 TEMPERATURES = {"kirp/jpt-4b": 1.036, "kirp/jpt-9b": 1.087}
@@ -249,23 +248,16 @@ class JPTDecisionModel(DecisionModel):
             if assignment_seed is not None:
                 if example.kind == "noul" and set(example.options) != {"true", "false"}:
                     raise ConfigError("JPT noul requires literal true/false options")
-                identity = json.dumps(
-                    [
-                        self.seed,
-                        assignment_seed,
-                        example.kind,
-                        example.state,
-                        example.question,
-                        example.options,
-                    ],
-                    sort_keys=True,
-                    ensure_ascii=False,
-                )
-                row_seed = int.from_bytes(
-                    hashlib.sha256(identity.encode("utf-8")).digest()[:8], "big"
+                seed = row_seed(
+                    self.seed,
+                    assignment_seed,
+                    example.kind,
+                    example.state,
+                    example.question,
+                    example.options,
                 )
                 order = list(range(len(example.options)))
-                random.Random(row_seed).shuffle(order)
+                random.Random(seed).shuffle(order)
             prepared.append(
                 prepare_jpt_row(
                     example,

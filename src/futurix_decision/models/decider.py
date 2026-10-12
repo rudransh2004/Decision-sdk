@@ -7,7 +7,6 @@ state-first prompt and isolated score-level readout. Text/JSON states only.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import random
@@ -26,6 +25,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
+from futurix_decision.models.tokenizer import row_seed
 
 FORMAT = "decider-v2.1"
 MAX_OPTIONS = 255
@@ -305,22 +305,15 @@ class DeciderDecisionModel(DecisionModel):
                 else list(range(len(example.options)))
             )
             if assignment_seed is not None and example.kind != "score":
-                identity = json.dumps(
-                    [
-                        self.seed,
-                        assignment_seed,
-                        example.kind,
-                        example.state,
-                        example.question,
-                        example.options,
-                    ],
-                    sort_keys=True,
-                    ensure_ascii=False,
+                seed = row_seed(
+                    self.seed,
+                    assignment_seed,
+                    example.kind,
+                    example.state,
+                    example.question,
+                    example.options,
                 )
-                row_seed = int.from_bytes(
-                    hashlib.sha256(identity.encode("utf-8")).digest()[:8], "big"
-                )
-                random.Random(row_seed).shuffle(order)
+                random.Random(seed).shuffle(order)
             orders.append(order)
             groups.append(
                 prepare_decider_rows(

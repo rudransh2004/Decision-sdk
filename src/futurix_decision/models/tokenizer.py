@@ -13,6 +13,16 @@ from futurix_decision.models.custom_head import CANDIDATE_MARKER
 from futurix_decision.models.decision_head import assign_slots, decision_token
 
 
+def row_seed(*identity: Any) -> int:
+    """A 64-bit seed that depends only on ``identity``, stable across processes and runs.
+
+    Callers pass the model seed, the assignment seed, and the row's content, so
+    a row's candidate order is reproducible without a shared RNG.
+    """
+    text = json.dumps(list(identity), sort_keys=True, ensure_ascii=False)
+    return int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "big")
+
+
 def format_decision_prompt(
     example: DecisionInput,
     *,
@@ -24,12 +34,11 @@ def format_decision_prompt(
         raise ConfigError("more options supplied than available decision tokens")
     state = json.dumps(example.state, ensure_ascii=False, sort_keys=True)
     question = json.dumps(example.question, ensure_ascii=False)
-    identity = json.dumps(
-        [seed, assignment_seed, example.kind, state, question, example.options],
-        ensure_ascii=False,
+    slots = assign_slots(
+        example.options,
+        total_slots=decision_tokens,
+        seed=row_seed(seed, assignment_seed, example.kind, state, question, example.options),
     )
-    row_seed = int.from_bytes(hashlib.sha256(identity.encode("utf-8")).digest()[:8], "big")
-    slots = assign_slots(example.options, total_slots=decision_tokens, seed=row_seed)
     candidates = "\n".join(
         f"{decision_token(slot)}: {json.dumps(option, ensure_ascii=False)}"
         for option, slot in zip(example.options, slots)
@@ -53,13 +62,10 @@ def _candidate_order(
     choices = [json.dumps(option, ensure_ascii=False) for option in example.options]
     if reject_marker and any(CANDIDATE_MARKER in text for text in (state, question, *choices)):
         raise ConfigError("input contains the reserved decision candidate marker")
-    identity = json.dumps(
-        [seed, assignment_seed, example.kind, state, question, example.options],
-        ensure_ascii=False,
-    )
-    row_seed = int.from_bytes(hashlib.sha256(identity.encode("utf-8")).digest()[:8], "big")
     order = list(range(len(choices)))
-    random.Random(row_seed).shuffle(order)
+    random.Random(
+        row_seed(seed, assignment_seed, example.kind, state, question, example.options)
+    ).shuffle(order)
     positions = [0] * len(order)
     for position, original_index in enumerate(order):
         positions[original_index] = position
