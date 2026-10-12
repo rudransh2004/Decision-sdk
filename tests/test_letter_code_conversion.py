@@ -25,6 +25,7 @@ from futurix_decision import (
 )
 from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.letter_code import answer_codes
+from test_model_sources import Loaded
 
 
 def raw_checkpoint(path: Path) -> None:
@@ -389,12 +390,11 @@ class LetterCodeConversionTests(unittest.TestCase):
             patch("futurix_decision.models.loader.require_transformers"),
             patch(
                 "futurix_decision.models.decision_model.DecisionModel.from_pretrained",
-                return_value="prepared",
+                return_value=(prepared := Loaded()),
             ) as loader,
         ):
-            self.assertEqual(
-                load_model("Qwen/Qwen3.8-27B", convert=True, strategy="letter_code"),
-                "prepared",
+            self.assertIs(
+                load_model("Qwen/Qwen3.8-27B", convert=True, strategy="letter_code"), prepared
             )
             loader.assert_called_once_with(
                 "Qwen/Qwen3.8-27B",

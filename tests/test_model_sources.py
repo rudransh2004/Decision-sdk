@@ -68,6 +68,13 @@ def cached_file(root: Path, filename: str) -> str:
     return str(candidate)
 
 
+class Loaded:
+    """Stands in for a loaded ``DecisionModel``; loaders may move it to a device."""
+
+    def to(self, device):
+        return self
+
+
 class SourceTests(unittest.TestCase):
     def test_explicit_missing_local_path_and_non_directory_never_use_hub(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -247,6 +254,8 @@ class SourceTests(unittest.TestCase):
             put(root, "tokenizer/tokenizer.json")
             with self.assertRaisesRegex(CheckpointError, "decision_embeddings.safetensors"):
                 load_model(root)
+            with self.assertRaisesRegex(CheckpointError, "decision_embeddings.safetensors"):
+                DecisionModel.from_bosun(root)
             put(root, "decision_embeddings.safetensors")
             with patch(
                 "futurix_decision.models.decision_model.AutoModelForCausalLM.from_pretrained",
@@ -286,7 +295,7 @@ class SourceTests(unittest.TestCase):
                         with self.assertRaisesRegex(CheckpointError, "calib.json"):
                             load_model(variant)
                         put(variant, "calib.json")
-                    marker_value = object()
+                    marker_value = Loaded()
                     with patch.object(
                         get_family(family).model_class(), "from_native", return_value=marker_value
                     ) as loader:
@@ -463,9 +472,9 @@ class SourceTests(unittest.TestCase):
 
     def test_supported_remote_letter_release_uses_its_native_importer(self):
         with patch.object(
-            DeciderDecisionModel, "from_native", return_value="native-readout"
+            DeciderDecisionModel, "from_native", return_value=(native := Loaded())
         ) as loader:
-            self.assertEqual(load_model("Mapika/decider-4b"), "native-readout")
+            self.assertIs(load_model("Mapika/decider-4b"), native)
         loader.assert_called_once_with("Mapika/decider-4b")
         with self.assertRaisesRegex(ValueError, "unknown selected"):
             load_model("Cloudflare/clef-omni")
@@ -478,9 +487,11 @@ class SourceTests(unittest.TestCase):
                     "architecture": "futurix-decision",
                 },
             ),
-            patch.object(DecisionModel, "from_pretrained", return_value="loaded") as loader,
+            patch.object(
+                DecisionModel, "from_pretrained", return_value=(loaded := Loaded())
+            ) as loader,
         ):
-            self.assertEqual(load_model("example/typed-decisions"), "loaded")
+            self.assertIs(load_model("example/typed-decisions"), loaded)
         loader.assert_called_once_with("example/typed-decisions")
         with patch("futurix_decision.utils.config.load_decision_config", return_value={}):
             with self.assertRaisesRegex(CheckpointError, "decision_config.json"):
@@ -492,7 +503,7 @@ class SourceTests(unittest.TestCase):
             is_encoder_decoder=False,
             vision_config=None,
         )
-        converted = object()
+        converted = Loaded()
         with (
             patch("futurix_decision.utils.config.load_decision_config", return_value={}),
             patch(
@@ -549,13 +560,10 @@ class SourceTests(unittest.TestCase):
             patch.object(
                 DecisionModel,
                 "from_pretrained",
-                return_value="bosun-style",
+                return_value=(converted := Loaded()),
             ) as loader,
         ):
-            self.assertEqual(
-                load_model("qwen3.5-9b", convert=True, strategy="bosun"),
-                "bosun-style",
-            )
+            self.assertIs(load_model("qwen3.5-9b", convert=True, strategy="bosun"), converted)
             loader.assert_called_once_with(
                 "Qwen/Qwen3.5-9B",
                 head_type="tokens",

@@ -22,7 +22,6 @@ from futurix_decision.inference.schemas import (
     score_input,
 )
 from futurix_decision.inference.system_one import system_one_answers, system_one_inputs
-from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA
 from futurix_decision.models.decision_config import LOADABLE, DecisionModelConfig
 from futurix_decision.models.families import reject_native_checkpoint
 from futurix_decision.models.families.futurix import QWEN35
@@ -34,14 +33,10 @@ from futurix_decision.models.readouts import (
     TokenReadout,
     input_device,
 )
-from futurix_decision.models.sources import checkpoint_source, tokenizer_kwargs
+from futurix_decision.models.sources import tokenizer_kwargs
 from futurix_decision.utils.config import load_decision_config
 
 DECISION_CONFIG = "decision_config.json"
-BOSUN_RELEASES = {
-    "Hanno-Labs/bosun-v3.1-1.7b": "1d8dc82a20e4a32ed60927a47272d6efff48eed2",
-    "Hanno-Labs/bosun-v3.1-0.6b": "5e78a37c8d86860ebac9ef2d5327d6299498498e",
-}
 
 
 class DecisionModel:
@@ -109,6 +104,14 @@ class DecisionModel:
     @decision_head.setter
     def decision_head(self, head: torch.nn.Module | None) -> None:
         self.readout.head = head
+
+    def to(self, device: str | torch.device | None) -> DecisionModel:
+        """Move the backbone and head to ``device`` and return ``self``. ``None`` does nothing."""
+        if device is not None:
+            self.backbone.to(device)
+            if self.decision_head is not None:
+                self.decision_head.to(device)
+        return self
 
     @classmethod
     def from_pretrained(
@@ -208,65 +211,17 @@ class DecisionModel:
 
     @classmethod
     def from_bosun(
-        cls,
-        checkpoint: str | Path = "Hanno-Labs/bosun-v3.1-1.7b",
-        *,
-        revision: str | None = None,
-        max_sequence_length: int = 4096,
-        learn_abstain: bool = False,
-        check_files: bool = True,
-        **hf_kwargs: Any,
+        cls, checkpoint: str | Path = "Hanno-Labs/bosun-v3.1-1.7b", **kwargs: Any
     ) -> DecisionModel:
-        """Load a pinned Hub release or a trusted local Bosun copy with its readout.
+        """Load a pinned Bosun v3.1 release or a trusted local copy; see ``BosunAdapter.load``."""
+        from futurix_decision.models.families.bosun import BosunAdapter
+        from futurix_decision.models.sources import checkpoint_source
 
-        Bosun is not a plain LM repository: its custom loader reconstructs a
-        Qwen base, a PEFT adapter, and two sets of trained decision-token rows.
-        Local copies still need their referenced Qwen base available on disk
-        or downloadable by Transformers. ``check_files=False`` skips the local
-        file check for callers that already ran it, such as ``load_model``.
-        """
         source, local = checkpoint_source(checkpoint)
-        revision = revision or BOSUN_RELEASES.get(source)
-        if (not local and revision is None) or (
-            revision is not None
-            and (
-                len(revision) != 40
-                or any(digit not in "0123456789abcdefABCDEF" for digit in revision)
-            )
-        ):
-            raise ConfigError("pin the Bosun repository to a full 40-character commit revision")
-        if local and check_files:
-            from futurix_decision.models.registry import get_family
-
-            get_family("bosun").requires(Path(source))
-        package = AutoModelForCausalLM.from_pretrained(
-            source,
-            trust_remote_code=True,
-            **({"revision": revision} if revision else {}),
-            **hf_kwargs,
-        )
-        if (
-            getattr(package.config, "prompt_schema", None) != BOSUN_PROMPT_SCHEMA
-            or getattr(package.config, "decision_token_count", None) != 256
-            or getattr(package.config, "null_token_index", None) != 255
-        ):
-            raise CheckpointError(
-                "checkpoint does not implement the supported Bosun v3 decision contract"
-            )
-        if package.tokenizer is None:
-            raise CheckpointError("Bosun checkpoint did not load its tokenizer")
-        config = DecisionModelConfig(
-            decision_tokens=256,
-            max_sequence_length=max_sequence_length,
-            base_checkpoint=package.config.base_model_name_or_path,
-            source_checkpoint=source,
-            source_revision=revision,
-            base_model_revision=package.config.base_model_revision,
-            prompt_format="bosun-v3",
-            prompt_schema=package.config.prompt_schema,
-            learn_abstain=learn_abstain,
-        )
-        return cls(package.model, package.tokenizer, config)
+        adapter = BosunAdapter()
+        if local:
+            adapter.requires(Path(source))
+        return adapter.load(source, **kwargs)
 
     @classmethod
     def from_decider(

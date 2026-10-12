@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, get_args, overload
 from futurix_decision._lazy import require_transformers, torch_required
 from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.families import identify_family, reject_native_checkpoint
-from futurix_decision.models.families.futurix import QWEN35, on_device
+from futurix_decision.models.families.futurix import QWEN35
 from futurix_decision.models.families.publisher import pinned_remote
 from futurix_decision.models.protocol import DecisionBackend
 from futurix_decision.models.registry import family_for_checkpoint, get_family
@@ -136,7 +136,7 @@ def _load_model(
                 "contains a trained decision head; convert=True would discard its native "
                 "readout. Load it without convert"
             )
-        return on_device(_convert(name, local=local, strategy=strategy, **kwargs), device)
+        return _convert(name, local=local, strategy=strategy, **kwargs).to(device)
     if name in QWEN35:
         raise ConfigError(
             "Qwen3.5-9B is not decision-trained; pass convert=True and train before inference"

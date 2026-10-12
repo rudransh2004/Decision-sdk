@@ -17,15 +17,6 @@ if TYPE_CHECKING:
 QWEN35 = ("Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B-Base")
 
 
-def on_device(model: DecisionModel, device: str | None) -> DecisionModel:
-    """Move a loaded ``DecisionModel`` and its head to ``device`` when one is given."""
-    if device is not None:
-        model.backbone.to(device)
-        if model.decision_head is not None:
-            model.decision_head.to(device)
-    return model
-
-
 class FuturixAdapter(FamilyAdapter):
     """The SDK's own format. ``load`` also starts a new model from a plain causal LM."""
 
@@ -35,7 +26,7 @@ class FuturixAdapter(FamilyAdapter):
     def load(self, checkpoint: str, *, device: str | None = None, **kwargs: Any) -> DecisionModel:
         from futurix_decision.models.decision_model import DecisionModel
 
-        return on_device(DecisionModel.from_pretrained(checkpoint, **kwargs), device)
+        return DecisionModel.from_pretrained(checkpoint, **kwargs).to(device)
 
     def requires(self, path: Path) -> None:
         files = CheckpointFiles(path)

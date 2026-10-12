@@ -107,8 +107,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of `require_checkpoint_files(path, name)`; import `load_model` from
   `futurix_decision` or `futurix_decision.models`.
 - A local publisher or Bosun checkpoint has its files checked once per `load_model`
-  call instead of two or three times. `DecisionModel.from_bosun` gains
-  `check_files=True`.
+  call instead of two or three times.
+- Bosun loading lives in `BosunAdapter.load` (`futurix_decision.models.families.bosun`),
+  which also holds `BOSUN_RELEASES` (moved from `futurix_decision.models.decision_model`).
+  `DecisionModel.from_bosun` checks a local copy's files and calls it.
+- `DecisionModel.to(device)` moves the backbone and any decision head and returns the
+  model; `device=None` leaves them in place. It replaces
+  `futurix_decision.models.families.futurix.on_device`.
 - `load_model(..., convert=True)` on any known decision-model family raises one
   `ConfigError` that names the family. Bosun, Decider, JPT, Eikos, and Futurix
   checkpoints used to raise per-family messages.

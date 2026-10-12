@@ -12,8 +12,8 @@ from transformers import AutoModelForCausalLM
 from futurix_decision import DecisionInput, DecisionModel, load_model
 from futurix_decision.datasets import DecisionExample
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA, format_bosun_prompt
-from futurix_decision.models.decision_model import BOSUN_RELEASES
 from futurix_decision.models.families import identify_family
+from futurix_decision.models.families.bosun import BOSUN_RELEASES
 from futurix_decision.trainers import SFTConfig, SFTTrainer
 from test_decision_model import tiny_checkpoint
 
@@ -50,7 +50,7 @@ class BosunContractTests(unittest.TestCase):
                     ),
                 )
                 with patch(
-                    "futurix_decision.models.decision_model.AutoModelForCausalLM.from_pretrained",
+                    "transformers.AutoModelForCausalLM.from_pretrained",
                     return_value=package,
                 ) as loader:
                     model = load_model(checkpoint)

@@ -13,7 +13,6 @@ from futurix_decision.models.families.base import (
     reject_futurix_options,
     supported_checkpoints,
 )
-from futurix_decision.models.families.futurix import on_device
 from futurix_decision.models.sources import CheckpointFiles
 
 if TYPE_CHECKING:
@@ -44,7 +43,7 @@ class LetterAdapter(FamilyAdapter):
 
     def load(self, checkpoint: str, *, device: str | None = None, **kwargs: Any) -> DecisionModel:
         reject_futurix_options(kwargs, self.name)
-        return on_device(self.model_class().from_native(checkpoint, **kwargs), device)
+        return self.model_class().from_native(checkpoint, **kwargs).to(device)
 
     def requires(self, path: Path) -> None:
         files = CheckpointFiles(path)
