@@ -25,7 +25,7 @@ from futurix_decision.errors import (
     MissingDependencyError,
 )
 from futurix_decision.inference import DecisionResult
-from futurix_decision.models import DecisionBackend
+from futurix_decision.models import Calibrated, DecisionBackend
 
 if TYPE_CHECKING:
     from futurix_decision.evaluation import evaluate, fit_temperature
@@ -72,6 +72,7 @@ __getattr__ = lazy_exports(
 
 __all__ = [
     "AsyncDecisionClient",
+    "Calibrated",
     "DecisionBackend",
     "BackendError",
     "CheckpointError",

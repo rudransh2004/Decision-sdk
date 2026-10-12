@@ -10,8 +10,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `DecisionBackend`, a runtime-checkable protocol exported from the top-level package
   (no torch needed): `decide`, `batch_decide`, `choice`, `noul`, `score`, and `close`.
-  `DecisionModel`, `NativeDecisionModel`, `VLLMEngine`, and `DecisionClient`
-  implement it. `DecisionModel.close()` and `VLLMEngine.close()` do nothing.
+  `DecisionModel`, `NativeDecisionModel`, `VLLMEngine`, `DecisionClient`, and
+  `Calibrated` implement it. `DecisionModel.close()` and `VLLMEngine.close()` do nothing.
+- `Calibrated(backend, temperature)` wraps any backend and rescales its probabilities to
+  `softmax(log p / T)`, then recomputes the decision, confidence, and abstention.
 - `DecisionResult.kind` and `DecisionResult.from_probabilities(example, probabilities,
   latency_ms=..., confidence_threshold=...)`.
 - `DecisionClient` and `AsyncDecisionClient` (`futurix_decision.client`, no torch needed)
@@ -49,6 +51,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Breaking:** `latency_ms` is always wall time per row. `DecisionModel` and
   `VLLMEngine` batches used to stamp the whole batch time on every row. Migration:
   multiply by the batch size for the batch total.
+- **Breaking:** `fit_temperature(backend, heldout)` fits on the probabilities any backend
+  returns and returns the temperature, relative to the backend's current output. It no
+  longer sets `DecisionModel.temperature`. Migration: wrap with
+  `Calibrated(backend, fit_temperature(backend, heldout))`, or persist into a checkpoint
+  with `model.temperature *= fit_temperature(model, heldout)`. `CalibrationTrainer` and
+  `DecisionTrainer` still store the fitted temperature on the model.
 - **Breaking:** `load_model` has an explicit signature: `family`, `convert`,
   `strategy: Literal["pointer", "bosun", "letter_code"] | None`, `head_type`,
   `train_backbone`, `revision`, `device`, and `**family_kwargs`. It is typed to return
@@ -59,6 +67,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ConfigError`. Migration: drop `head_type` and `train_backbone` where a release
   rejects them, and narrow the result with `isinstance` before calling
   family-specific methods such as `NativeDecisionModel.finetune`.
+- `evaluate` and `fit_temperature` take any `DecisionBackend`. `max_batch_tokens` in
+  `evaluate` needs a `DecisionModel` or `VLLMEngine` (optionally inside `Calibrated`) and
+  raises `ConfigError` for other backends.
+- OpenJev's published server temperatures live in the family table
+  (`ModelFamily.server_calibration`). The SDK still only verifies that the helper reports
+  them; it never applies them a second time.
 - The native HTTP runtime (`load_model(..., base_url=...)`) uses the client's transport:
   new `timeout` (default 60 s, as before) and `max_retries` (default 3) arguments, the
   same retry policy, and `BackendError` instead of `httpx.HTTPStatusError` for failed

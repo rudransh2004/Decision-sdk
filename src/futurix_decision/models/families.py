@@ -8,10 +8,22 @@ training a new Futurix model.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from futurix_decision.errors import CheckpointError, ConfigError
+
+
+@dataclass(frozen=True)
+class ServerCalibration:
+    """Temperatures a publisher's server applies before it returns probabilities.
+
+    The SDK checks that the server reports them and never applies them again.
+    """
+
+    temperature: float  # choice and score
+    noul_temperature: float
 
 
 @dataclass(frozen=True)
@@ -24,6 +36,7 @@ class ModelFamily:
     inference: bool = False
     training: bool = False
     vllm_export: bool = False
+    server_calibration: Mapping[str, ServerCalibration] = field(default_factory=dict, hash=False)
 
     def supports(self, checkpoint: str, capability: str) -> bool:
         if capability not in ("inference", "training", "vllm_export"):
@@ -91,6 +104,12 @@ FAMILIES = (
         ("openjev/openjev", "openjev/OpenJev-Flash-9B"),
         supported_checkpoints=("openjev/openjev", "openjev/OpenJev-Flash-9B"),
         inference=True,
+        server_calibration={
+            "openjev/openjev": ServerCalibration(temperature=0.85, noul_temperature=1.829074),
+            "openjev/OpenJev-Flash-9B": ServerCalibration(
+                temperature=1.07, noul_temperature=1.074766
+            ),
+        },
     ),
     ModelFamily(
         "decider",
@@ -134,6 +153,16 @@ FAMILIES = (
         training=True,
     ),
 )
+
+
+def server_calibration(family_name: str, checkpoint: str) -> ServerCalibration:
+    """Look up a served checkpoint's published calibration by Hub ID or directory name."""
+    family = next(family for family in FAMILIES if family.name == family_name)
+    name = checkpoint.rstrip("/").rsplit("/", 1)[-1].lower()
+    for hub_id, calibration in family.server_calibration.items():
+        if hub_id.rsplit("/", 1)[-1].lower() == name:
+            return calibration
+    raise CheckpointError(f"no published {family_name} calibration matches {checkpoint}")
 
 
 def identify_family(checkpoint: str | Path) -> ModelFamily | None:

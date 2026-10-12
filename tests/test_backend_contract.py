@@ -8,21 +8,43 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
+import torch
 from pydantic import ValidationError
 
 from futurix_decision import (
+    Calibrated,
     DecisionBackend,
     DecisionClient,
     DecisionInput,
     DecisionResult,
     NativeDecisionModel,
+    evaluate,
+    fit_temperature,
+    load_model,
 )
+from futurix_decision.datasets import DecisionExample
 from futurix_decision.datasets.benchmarks import normalize_decisionbench
-from futurix_decision.errors import InvalidOutputError
+from futurix_decision.errors import BackendError, ConfigError, InvalidOutputError
+from futurix_decision.evaluation import fit_temperature_from_logits
+from futurix_decision.models.families import server_calibration
 from futurix_decision.vllm import VLLMEngine
 from test_sft import tiny_model
 
 CHOICE = DecisionInput(state="ticket", question="Next?", options=["approve", "reject"])
+
+
+def rows(count=8):
+    """Choice rows whose targets are softer than an overconfident 0.95/0.05 model."""
+    return [
+        DecisionExample(
+            id=str(i),
+            state=f"ticket {i}",
+            question="Next?",
+            options=["approve", "reject"],
+            target=[0.7, 0.3] if i % 2 else [0.6, 0.4],
+        )
+        for i in range(count)
+    ]
 
 
 class Overconfident:
@@ -79,6 +101,7 @@ class ProtocolTests(unittest.TestCase):
                 fake_vllm_engine(temp),
                 DecisionClient(transport=httpx.MockTransport(lambda request: httpx.Response(500))),
             ]
+            backends.append(Calibrated(backends[0], 2.0))
             for backend in backends:
                 with self.subTest(backend=type(backend).__name__):
                     self.assertIsInstance(backend, DecisionBackend)
@@ -180,6 +203,100 @@ class DecisionTypeTests(unittest.TestCase):
             self.assertRaisesRegex(InvalidOutputError, "choice decision to a noul request"),
         ):
             client.noul(state="s")
+
+
+class CalibrationTests(unittest.TestCase):
+    def test_calibrated_matches_logit_temperature_exactly(self):
+        model = tiny_model()
+        noul = DecisionInput(kind="noul", state="s", question="q", options=["false", "true"])
+        calibrated = Calibrated(model, 2.5).batch_decide([CHOICE, noul])
+        model.temperature = 2.5
+        scaled = model.batch_decide([CHOICE, noul])
+        for expected, actual in zip(scaled, calibrated, strict=True):
+            self.assertEqual(expected.decision, actual.decision)
+            for option, value in expected.probabilities.items():
+                self.assertAlmostEqual(actual.probabilities[option], value, places=6)
+
+    def test_calibrated_recomputes_abstention_from_calibrated_confidence(self):
+        native = NativeDecisionModel.from_runtime("convaiinnovations/laya", "laya", Overconfident())
+        self.assertFalse(native.decide(CHOICE, confidence_threshold=0.9).abstained)
+        softened = Calibrated(native, 4.0).decide(CHOICE, confidence_threshold=0.9)
+        self.assertTrue(softened.abstained)
+        self.assertIsNone(softened.decision)
+        self.assertLess(softened.confidence, 0.9)
+        self.assertAlmostEqual(sum(softened.probabilities.values()), 1.0)
+
+    def test_fit_on_probabilities_equals_fit_on_logits(self):
+        model = tiny_model()
+        data = rows()
+        batch = model.forward_decisions(data)
+        logits = [batch.logits[i, slots].detach() for i, slots in enumerate(batch.slots)]
+        targets = [torch.tensor(row.target_distribution()) for row in data]
+        expected = fit_temperature_from_logits(logits, targets)
+        self.assertAlmostEqual(fit_temperature(model, data), expected, places=4)
+
+    def test_load_fit_and_evaluate_a_local_model(self):
+        with tempfile.TemporaryDirectory() as temp:
+            tiny_model().save_pretrained(temp)
+            model = load_model(temp, device="cpu")
+            with self.assertRaisesRegex(ConfigError, "device or device_map"):
+                load_model(temp, device="cpu", device_map={"": "cpu"})
+            temperature = fit_temperature(model, rows())
+            self.assertGreater(temperature, 0)
+            plain = evaluate(model, rows())
+            calibrated = evaluate(Calibrated(model, temperature), rows())
+            self.assertLessEqual(calibrated["nll"], plain["nll"] + 1e-6)
+
+    def test_load_fit_and_evaluate_a_native_http_backend(self):
+        runtime = Overconfident()
+
+        def serve(request):
+            body = json.loads(request.content)
+            return httpx.Response(200, json=runtime.predict(body["state"], body["questions"]))
+
+        client = httpx.Client(base_url="http://laya.test", transport=httpx.MockTransport(serve))
+        with self.assertRaisesRegex(ConfigError, "head_type applies"):
+            load_model("laya", base_url="http://laya.test", client=client, head_type="pointer")
+        model = load_model("laya", base_url="http://laya.test", client=client)
+        temperature = fit_temperature(model, rows())
+        # 0.95 against targets near 0.65 is overconfident: the fit softens it.
+        self.assertGreater(temperature, 1.5)
+        plain = evaluate(model, rows())
+        calibrated = evaluate(Calibrated(model, temperature), rows())
+        self.assertLess(calibrated["nll"], plain["nll"])
+
+    def test_openjev_server_calibration_is_pinned(self):
+        flash = server_calibration("openjev", "openjev/OpenJev-Flash-9B")
+        base = server_calibration("openjev", "openjev/openjev")
+        self.assertEqual((flash.temperature, flash.noul_temperature), (1.07, 1.074766))
+        self.assertEqual((base.temperature, base.noul_temperature), (0.85, 1.829074))
+        # A local copy is matched by its directory name, as the server reports it.
+        self.assertEqual(server_calibration("openjev", "/models/OpenJev-Flash-9B/"), flash)
+
+        def transport(temperature):
+            def handle(request):
+                if request.url.path == "/v1/version":
+                    return httpx.Response(
+                        200,
+                        json={
+                            "model_dir": "openjev",
+                            "T": temperature,
+                            "noul_t": 1.829074,
+                            "noul_bias": 0,
+                            "flags": {"targeted": True, "instr_style": "pyrepr"},
+                        },
+                    )
+                return httpx.Response(
+                    200, json={"answers": {"decision": {"type": "noul", "noul": 0.83}}}
+                )
+
+            return httpx.Client(base_url="http://jev.test", transport=httpx.MockTransport(handle))
+
+        model = load_model("openjev", base_url="http://jev.test", client=transport(0.85))
+        # The server applies the published temperatures; the SDK must not apply them again.
+        self.assertEqual(model.noul(state="paid").probabilities, {"false": 1 - 0.83, "true": 0.83})
+        with self.assertRaisesRegex(BackendError, "does not serve"):
+            load_model("openjev", base_url="http://jev.test", client=transport(0.851))
 
 
 if __name__ == "__main__":

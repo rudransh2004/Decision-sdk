@@ -44,7 +44,11 @@ from futurix_decision.inference.schemas import (
     noul_input,
     score_input,
 )
-from futurix_decision.models.families import identify_family, reject_native_checkpoint
+from futurix_decision.models.families import (
+    identify_family,
+    reject_native_checkpoint,
+    server_calibration,
+)
 from futurix_decision.models.protocol import DecisionBackend
 from futurix_decision.models.sources import (
     checkpoint_source,
@@ -192,12 +196,14 @@ def _verify_openjev(client: httpx.Client, checkpoint: str, max_retries: int) -> 
         raise InvalidOutputError("OpenJev /v1/version did not return a JSON object")
     expected = checkpoint.rsplit("/", 1)[-1].lower()
     served = str(info.get("model_dir", "")).lower()
-    temperature, noul_temperature = (1.07, 1.074766) if "Flash" in checkpoint else (0.85, 1.829074)
+    calibration = server_calibration("openjev", checkpoint)
     flags = info.get("flags", {})
     if not isinstance(flags, Mapping) or (
         served != expected
-        or not math.isclose(float(info.get("T", -1)), temperature, abs_tol=1e-6)
-        or not math.isclose(float(info.get("noul_t", -1)), noul_temperature, abs_tol=1e-6)
+        or not math.isclose(float(info.get("T", -1)), calibration.temperature, abs_tol=1e-6)
+        or not math.isclose(
+            float(info.get("noul_t", -1)), calibration.noul_temperature, abs_tol=1e-6
+        )
         or not math.isclose(float(info.get("noul_bias", -1)), 0, abs_tol=1e-6)
         or flags.get("targeted") is not True
         or flags.get("instr_style") != "pyrepr"

@@ -13,8 +13,8 @@ from futurix_decision.inference.schemas import DecisionResult
 class DecisionBackend(Protocol):
     """Anything that answers decisions: local models, vLLM, or an HTTP client.
 
-    ``DecisionModel``, ``NativeDecisionModel``, ``VLLMEngine``, and
-    ``DecisionClient`` implement it. ``isinstance`` checks
+    ``DecisionModel``, ``NativeDecisionModel``, ``VLLMEngine``,
+    ``DecisionClient``, and ``Calibrated`` implement it. ``isinstance`` checks
     only that the methods exist, not their signatures.
     """
 
@@ -60,6 +60,7 @@ class DecisionBackend(Protocol):
 
 if TYPE_CHECKING:
     from futurix_decision.client import DecisionClient
+    from futurix_decision.models.calibrated import Calibrated
     from futurix_decision.models.decision_model import DecisionModel
     from futurix_decision.models.native import NativeDecisionModel
     from futurix_decision.vllm.engine import VLLMEngine
@@ -71,5 +72,6 @@ if TYPE_CHECKING:
         native: NativeDecisionModel,
         engine: VLLMEngine,
         client: DecisionClient,
+        calibrated: Calibrated,
     ) -> tuple[DecisionBackend, ...]:
-        return (model, native, engine, client)
+        return (model, native, engine, client, calibrated)

@@ -11,7 +11,9 @@ from torch.nn.utils.rnn import pad_sequence
 
 from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.evaluator import EvaluationSource, example_batches
-from futurix_decision.models import DecisionModel
+from futurix_decision.models.protocol import DecisionBackend
+
+_FLOOR = 1e-45
 
 
 def fit_temperature_from_logits(
@@ -60,18 +62,22 @@ def fit_temperature_from_logits(
 
 
 def fit_temperature(
-    model: DecisionModel, calibration_dataset: EvaluationSource, *, batch_size: int = 16
+    model: DecisionBackend, calibration_dataset: EvaluationSource, *, batch_size: int = 16
 ) -> float:
-    """Fit and store T from a separate, held-out calibration dataset."""
+    """Fit a temperature to held-out data from the probabilities ``model`` returns.
+
+    Works for every backend: ``softmax(log p / T)`` equals ``softmax(logits / T)``,
+    so fitting on returned probabilities matches fitting on logits. The result
+    is relative to the model's current output. Apply it with
+    ``Calibrated(model, T)``, or persist it in a ``DecisionModel`` checkpoint
+    with ``model.temperature *= T`` before ``save_pretrained``.
+    """
     logits, targets = [], []
-    model.backbone.eval()
-    if model.decision_head is not None:
-        model.decision_head.eval()
-    with torch.inference_mode():
-        for examples in example_batches(calibration_dataset, batch_size):
-            batch = model.forward_decisions(examples)
-            for i, (row, slots) in enumerate(zip(examples, batch.slots)):
-                logits.append(batch.logits[i, slots].float().cpu())
-                targets.append(torch.tensor(row.target_distribution(), dtype=torch.float32))
-    model.temperature = fit_temperature_from_logits(logits, targets)
-    return model.temperature
+    for examples in example_batches(calibration_dataset, batch_size):
+        results = model.batch_decide(examples)
+        for row, result in zip(examples, results, strict=True):
+            probabilities = [result.probabilities[option] for option in row.options]
+            # A probability that underflowed to 0 gets the float32 floor, not -inf.
+            logits.append(torch.tensor([math.log(max(p, _FLOOR)) for p in probabilities]))
+            targets.append(torch.tensor(row.target_distribution(), dtype=torch.float32))
+    return fit_temperature_from_logits(logits, targets)

@@ -17,7 +17,7 @@ from futurix_decision.datasets import DecisionExample, load_decisions, normalize
 from futurix_decision.datasets.systemone import expand_systemone_row
 from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.metrics import DEFAULT_THRESHOLDS, compute_metrics
-from futurix_decision.models import DecisionBatch, DecisionModel
+from futurix_decision.models import Calibrated, DecisionBackend, DecisionBatch, DecisionModel
 from futurix_decision.models.bosun import format_bosun_prompt
 from futurix_decision.models.tokenizer import format_decision_prompt
 
@@ -47,31 +47,40 @@ def example_batches(dataset: EvaluationSource, batch_size: int) -> Iterator[list
 
 
 def token_budget_batches(
-    model: Any, dataset: EvaluationSource, batch_size: int, max_batch_tokens: int
+    model: DecisionBackend, dataset: EvaluationSource, batch_size: int, max_batch_tokens: int
 ) -> Iterator[list[DecisionExample]]:
-    """Keep input order while avoiding padding seven short rows to one long row."""
+    """Keep input order while avoiding padding seven short rows to one long row.
+
+    Needs a tokenizer, so ``model`` must be a ``DecisionModel`` or ``VLLMEngine``,
+    optionally wrapped in ``Calibrated``.
+    """
+    from futurix_decision.vllm.engine import VLLMEngine
+
     if batch_size < 1 or max_batch_tokens < 1:
         raise ConfigError("batch_size and max_batch_tokens must be positive")
+    local = model.backend if isinstance(model, Calibrated) else model
+    if not isinstance(local, (DecisionModel, VLLMEngine)):
+        raise ConfigError("max_batch_tokens needs a local DecisionModel or VLLMEngine")
     pending: list[DecisionExample] = []
     longest = 0
     for row in iter_examples(dataset):
-        if isinstance(model, DecisionModel):
-            prompt, _ = model._prompt_and_slots(row, None)
-        elif model.prompt_format == "bosun-v3":
+        if isinstance(local, DecisionModel):
+            prompt, _ = local._prompt_and_slots(row, None)
+        elif local.prompt_format == "bosun-v3":
             prompt, _ = format_bosun_prompt(
                 row,
-                model.tokenizer,
-                decision_tokens=model.decision_tokens,
-                seed=model.seed,
-                prompt_schema=model.prompt_schema,
+                local.tokenizer,
+                decision_tokens=local.decision_tokens,
+                seed=local.seed,
+                prompt_schema=local.prompt_schema,
             )
         else:
             prompt, _ = format_decision_prompt(
                 row,
-                decision_tokens=model.decision_tokens,
-                seed=model.seed,
+                decision_tokens=local.decision_tokens,
+                seed=local.seed,
             )
-        length = len(model.tokenizer.encode(prompt, add_special_tokens=True))
+        length = len(local.tokenizer.encode(prompt, add_special_tokens=True))
         if pending and (
             len(pending) >= batch_size
             or max(longest, length) * (len(pending) + 1) > max_batch_tokens
@@ -99,8 +108,21 @@ def _inference_batches(
         yield from _inference_batches(model, examples[middle:])
 
 
+def _journal_identity(model: DecisionBackend) -> dict[str, Any]:
+    """What a resumed evaluation must share with the run that wrote the journal."""
+    if isinstance(model, Calibrated):
+        return {**_journal_identity(model.backend), "calibration_temperature": model.temperature}
+    identity = {
+        "prompt_format": getattr(model, "prompt_format", type(model).__name__),
+        "temperature": getattr(model, "temperature", 1.0),
+    }
+    if isinstance(model, DecisionModel) and model.decision_head is not None:
+        identity.update(head_type=model.head_type, head_config=model.head_config)
+    return identity
+
+
 def evaluate(
-    model: Any,
+    model: DecisionBackend,
     dataset: EvaluationSource,
     *,
     batch_size: int = 16,
@@ -112,7 +134,12 @@ def evaluate(
     run_id: str | None = None,
     max_batch_tokens: int | None = None,
 ) -> dict:
-    """Evaluate stable inference slots; no token generation or per-item LM pass."""
+    """Score ``model`` on ``dataset``; no token generation or per-item LM pass.
+
+    Any ``DecisionBackend`` works through ``batch_decide``. A ``DecisionModel``
+    reads its logits directly and halves a batch that runs out of GPU memory.
+    ``max_batch_tokens`` needs a ``DecisionModel`` or ``VLLMEngine``.
+    """
     if progress_every < 0:
         raise ConfigError("progress_every must be non-negative")
     if resume and predictions_output is None:
@@ -142,16 +169,7 @@ def evaluate(
     output = Path(predictions_output) if predictions_output is not None else None
     if output is not None:
         manifest = output.with_suffix(output.suffix + ".meta.json")
-        identity = {
-            "run_id": run_id,
-            "prompt_format": model.prompt_format,
-            "temperature": model.temperature,
-            **(
-                {"head_type": model.head_type, "head_config": model.head_config}
-                if isinstance(model, DecisionModel) and model.decision_head is not None
-                else {}
-            ),
-        }
+        identity = {"run_id": run_id, **_journal_identity(model)}
         if resume:
             if not output.is_file() or not manifest.is_file():
                 raise FileNotFoundError("cannot resume without the prediction journal and manifest")

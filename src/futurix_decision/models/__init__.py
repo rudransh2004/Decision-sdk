@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 from futurix_decision._lazy import lazy_exports
+from futurix_decision.models.calibrated import Calibrated
 from futurix_decision.models.protocol import DecisionBackend
 
 if TYPE_CHECKING:
@@ -22,6 +23,7 @@ __getattr__ = lazy_exports(
 )
 
 __all__ = [
+    "Calibrated",
     "DecisionBackend",
     "DecisionBatch",
     "DecisionModel",

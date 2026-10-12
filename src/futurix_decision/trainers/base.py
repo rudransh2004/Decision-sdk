@@ -155,7 +155,9 @@ class DecisionTrainer:
                 heldout = self._heldout()
                 self.model.temperature = 1.0
                 if heldout is not None:
-                    fit_temperature(self.model, heldout, batch_size=config.batch_size)
+                    self.model.temperature = fit_temperature(
+                        self.model, heldout, batch_size=config.batch_size
+                    )
             self.history[stage] = result
             self._active = current
             validation = self._validation()
