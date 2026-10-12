@@ -234,7 +234,7 @@ def evaluate(
                         ).cpu(),
                     )
                     for subset, batch in _inference_batches(model, examples)
-                    for i, (row, slots) in enumerate(zip(subset, batch.slots))
+                    for i, (row, slots) in enumerate(zip(subset, batch.slots, strict=True))
                 )
             else:
                 decisions = model.batch_decide(examples)
@@ -246,7 +246,7 @@ def evaluate(
                             dtype=torch.float32,
                         ),
                     )
-                    for row, result in zip(examples, decisions)
+                    for row, result in zip(examples, decisions, strict=True)
                 )
             for row, p in predictions:
                 y = torch.tensor(row.target_distribution(), dtype=torch.float32)

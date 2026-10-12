@@ -25,7 +25,7 @@ def compute_metrics(
     if not probabilities or len(probabilities) != len(targets) or bins < 1:
         raise ConfigError("provide equally many nonempty probabilities and targets")
     confidence, correct, nll, brier = [], [], [], []
-    for raw_p, raw_y in zip(probabilities, targets):
+    for raw_p, raw_y in zip(probabilities, targets, strict=True):
         p, y = [float(v) for v in raw_p], [float(v) for v in raw_y]
         if len(p) != len(y) or len(p) < 2:
             raise ConfigError("probabilities and target dimensions must match")
@@ -41,8 +41,8 @@ def compute_metrics(
         confidence.append(p[winner])
         correct.append(y[winner])
         # Match the stabilized log-score reward for underflowed probabilities.
-        nll.append(-sum(t * math.log(max(q, 1e-12)) for q, t in zip(p, y) if t > 0))
-        brier.append(sum((q - t) ** 2 for q, t in zip(p, y)))
+        nll.append(-sum(t * math.log(max(q, 1e-12)) for q, t in zip(p, y, strict=True) if t > 0))
+        brier.append(sum((q - t) ** 2 for q, t in zip(p, y, strict=True)))
     count = len(confidence)
     gaps = []
     ece = 0.0
@@ -64,7 +64,7 @@ def compute_metrics(
     for threshold in thresholds:
         if not 0 <= threshold <= 1:
             raise ConfigError("thresholds must be in [0, 1]")
-        kept = [y for c, y in zip(confidence, correct) if c >= threshold]
+        kept = [y for c, y in zip(confidence, correct, strict=True) if c >= threshold]
         coverage[float(threshold)] = len(kept) / count
         selective_accuracy[float(threshold)] = _mean(kept) if kept else None
     return {

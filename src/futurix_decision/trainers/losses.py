@@ -67,7 +67,7 @@ def decision_sft_loss(
     ):
         raise ConfigError("batch size does not match examples")
     losses = []
-    for row, (example, slots) in enumerate(zip(examples, batch.slots)):
+    for row, (example, slots) in enumerate(zip(examples, batch.slots, strict=True)):
         if len(slots) != len(example.options):
             raise ConfigError("slots must align with the example's options")
         logits = batch.logits[row, slots].float().unsqueeze(0)

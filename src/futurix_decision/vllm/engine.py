@@ -191,11 +191,11 @@ class VLLMEngine:
             raise InvalidOutputError("vLLM returned a different number of outputs")
         results = []
         cursor = 0
-        for row, count in zip(examples, group_sizes):
+        for row, count in zip(examples, group_sizes, strict=True):
             row_probabilities = []
             score_log_fits = []
             for selected_ids, generated in zip(
-                slots_list[cursor : cursor + count], output[cursor : cursor + count]
+                slots_list[cursor : cursor + count], output[cursor : cursor + count], strict=True
             ):
                 token_logprobs = generated.outputs[0].logprobs
                 if not token_logprobs:

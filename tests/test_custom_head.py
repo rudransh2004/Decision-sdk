@@ -132,7 +132,7 @@ class CustomHeadTests(unittest.TestCase):
             self.assertEqual(config["head_config"], {"width": 16})
             self.assertTrue((Path(temp) / HEAD_WEIGHTS).is_file())
             restored = DecisionModel.from_pretrained(temp)
-            for original, other in zip(results, restored.batch_decide(inputs)):
+            for original, other in zip(results, restored.batch_decide(inputs), strict=True):
                 for option in original.probabilities:
                     self.assertAlmostEqual(
                         original.probabilities[option], other.probabilities[option], places=6

@@ -104,7 +104,7 @@ class LetterCodeConversionTests(unittest.TestCase):
                 self.assertEqual(saved["head_prompt_version"], "letter-code-v1")
                 restored = load_model(output)
                 expected = model.batch_decide(rows)
-                for before, after in zip(expected, restored.batch_decide(rows)):
+                for before, after in zip(expected, restored.batch_decide(rows), strict=True):
                     for option in before.probabilities:
                         self.assertAlmostEqual(
                             before.probabilities[option],

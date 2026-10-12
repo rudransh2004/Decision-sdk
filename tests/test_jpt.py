@@ -119,7 +119,9 @@ class JPTTests(unittest.TestCase):
                                         {
                                             token: SimpleNamespace(logprob=math.log(prob))
                                             for token, prob in zip(
-                                                params[0].allowed_token_ids, [0.8, 0.2]
+                                                params[0].allowed_token_ids,
+                                                [0.8, 0.2],
+                                                strict=True,
                                             )
                                         }
                                     ]

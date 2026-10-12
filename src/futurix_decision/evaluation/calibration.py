@@ -25,7 +25,7 @@ def fit_temperature_from_logits(
     """Minimize held-out soft-label NLL in log-temperature space on CPU."""
     if not logits or len(logits) != len(targets) or max_iter < 1:
         raise ConfigError("provide matching nonempty logits and targets")
-    for z, y in zip(logits, targets):
+    for z, y in zip(logits, targets, strict=True):
         if z.ndim != 1 or z.shape != y.shape or z.numel() < 2:
             raise ConfigError(
                 "each logit vector and target must have matching candidate dimensions"

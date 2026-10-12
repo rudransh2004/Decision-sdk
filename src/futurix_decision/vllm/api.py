@@ -155,11 +155,11 @@ def create_app(engine: DecisionBackend) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         with lock:
             results = engine.batch_decide(inputs, confidence_threshold=body.confidence_threshold)
-            for row, result in zip(inputs, results):
+            for row, result in zip(inputs, results, strict=True):
                 counters[row.kind] += 1
                 latency[row.kind] += result.latency_ms
         answers = {}
-        for question_id, row, result in zip(body.questions, inputs, results):
+        for question_id, row, result in zip(body.questions, inputs, results, strict=True):
             if row.kind == "noul":
                 answer = {"type": "noul", "noul": result.probabilities["true"]}
             elif row.kind == "score":

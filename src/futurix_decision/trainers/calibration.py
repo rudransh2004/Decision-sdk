@@ -42,7 +42,7 @@ class CalibrationTrainer(SFTTrainer):
         self, batch: DecisionBatch, examples: Sequence[DecisionExample]
     ) -> torch.Tensor:
         losses = []
-        for row, (example, slots) in enumerate(zip(examples, batch.slots)):
+        for row, (example, slots) in enumerate(zip(examples, batch.slots, strict=True)):
             logits = batch.logits[row, slots].float()
             target = torch.tensor(example.target_distribution(), device=logits.device)
             if self.config.label_smoothing:

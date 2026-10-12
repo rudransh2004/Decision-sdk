@@ -103,7 +103,7 @@ class EikosTests(unittest.TestCase):
             model.save_pretrained(output)
             restored = DecisionModel.from_pretrained(output)
             self.assertIsInstance(restored, EikosDecisionModel)
-            for before, after in zip(expected, restored.batch_decide(inputs)):
+            for before, after in zip(expected, restored.batch_decide(inputs), strict=True):
                 for option in before.probabilities:
                     self.assertAlmostEqual(
                         before.probabilities[option], after.probabilities[option]
@@ -141,7 +141,9 @@ class EikosTests(unittest.TestCase):
                                         {
                                             token: SimpleNamespace(logprob=math.log(p))
                                             for token, p in zip(
-                                                params[0].allowed_token_ids, [0.8, 0.2]
+                                                params[0].allowed_token_ids,
+                                                [0.8, 0.2],
+                                                strict=True,
                                             )
                                         }
                                     ]

@@ -191,7 +191,7 @@ class VLLMUnitTests(unittest.TestCase):
                                     {
                                         token: SimpleNamespace(logprob=math.log(probability))
                                         for token, probability in zip(
-                                            params.allowed_token_ids, [0.8, 0.2]
+                                            params.allowed_token_ids, [0.8, 0.2], strict=True
                                         )
                                     }
                                 ]

@@ -177,7 +177,7 @@ class RLCDTrainer(SFTTrainer):
         means = torch.zeros(len(examples), width, device=batch.logits.device)
         targets = torch.zeros_like(means)
         available = torch.zeros_like(means, dtype=torch.bool)
-        for i, (row, slots) in enumerate(zip(examples, batch.slots)):
+        for i, (row, slots) in enumerate(zip(examples, batch.slots, strict=True)):
             means[i, : lengths[i]] = batch.logits[i, slots].float()
             targets[i, : lengths[i]] = torch.tensor(
                 row.target_distribution(), device=batch.logits.device

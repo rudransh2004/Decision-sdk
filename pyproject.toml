@@ -86,8 +86,6 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP"]
-# B905 (zip without strict=) is fixed in Phase 7 of docs/plans/sdk-0.2.md.
-ignore = ["B905"]
 
 [tool.ruff.lint.per-file-ignores]
 # __version__ is set before the imports so submodules can read it mid-import.

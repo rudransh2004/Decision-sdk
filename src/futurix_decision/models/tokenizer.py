@@ -41,7 +41,7 @@ def format_decision_prompt(
     )
     candidates = "\n".join(
         f"{decision_token(slot)}: {json.dumps(option, ensure_ascii=False)}"
-        for option, slot in zip(example.options, slots)
+        for option, slot in zip(example.options, slots, strict=True)
     )
     prompt = f"State: {state}\nQuestion: {question}\nCandidates:\n{candidates}\nDecision:"
     return prompt, slots

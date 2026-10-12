@@ -99,7 +99,7 @@ class BosunContractTests(unittest.TestCase):
         self.assertEqual(prompt, expected["prompt"])
         actual = model.forward_decisions([row]).logits[0, slots]
         probabilities = torch.softmax(actual.float(), dim=-1).tolist()
-        for ours, theirs in zip(probabilities, expected["probabilities"]):
+        for ours, theirs in zip(probabilities, expected["probabilities"], strict=True):
             self.assertAlmostEqual(ours, theirs, places=6)
 
     def test_stable_slots_chat_prompt_and_candidate_metadata(self):
@@ -124,7 +124,7 @@ class BosunContractTests(unittest.TestCase):
         fields = content["question"]["criteria_fields"]
         self.assertEqual(fields, ["t", "o", "n", "d"])
         for row in content["question"]["criteria"]:
-            mapped = dict(zip(fields, row))
+            mapped = dict(zip(fields, row, strict=True))
             self.assertEqual(mapped["t"], f"<|decision_{slots[mapped['o']]:03d}|>")
             self.assertEqual(mapped["n"], example.candidate_labels[mapped["o"]])
             self.assertEqual(mapped["d"], example.candidate_descriptions[mapped["o"]])

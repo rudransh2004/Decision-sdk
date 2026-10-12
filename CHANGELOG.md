@@ -224,3 +224,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   over the options only.
 - `PointerDecisionHead.forward` applies its `available` mask: unavailable option
   positions get `-inf`.
+- Every `zip` in the SDK is strict (ruff B905 is on). A length mismatch between rows
+  and results, or between probabilities and targets, raises `ValueError` instead of
+  silently dropping the extra items.

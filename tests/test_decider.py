@@ -166,7 +166,7 @@ class DeciderIntegrationTests(unittest.TestCase):
             self.assertEqual(metadata["type_temperatures"]["noul"], 1.56)
             restored = DecisionModel.from_pretrained(output)
             self.assertIsInstance(restored, DeciderDecisionModel)
-            for before, after in zip(probabilities, restored.batch_decide(inputs)):
+            for before, after in zip(probabilities, restored.batch_decide(inputs), strict=True):
                 for option in before.probabilities:
                     self.assertAlmostEqual(
                         before.probabilities[option], after.probabilities[option], places=6
@@ -269,7 +269,7 @@ class DeciderIntegrationTests(unittest.TestCase):
                                         {
                                             token: SimpleNamespace(logprob=math.log(prob))
                                             for token, prob in zip(
-                                                params.allowed_token_ids, (0.7, 0.3)
+                                                params.allowed_token_ids, (0.7, 0.3), strict=True
                                             )
                                         }
                                     ]
