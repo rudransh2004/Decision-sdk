@@ -16,7 +16,7 @@ from futurix_decision.models.families.publisher import (
     PublisherAdapter,
     PublisherRuntime,
 )
-from futurix_decision.models.sources import CheckpointFiles
+from futurix_decision.models.sources import CheckpointFiles, optional_json
 
 if TYPE_CHECKING:
     from futurix_decision.models.native import NativeDecisionModel
@@ -91,6 +91,9 @@ class PplxRuntime(PublisherRuntime):
 
 class PplxAdapter(PublisherAdapter):
     name = "pplx-decider"
+    checkpoints = ("perplexity-ai/pplx-decider-v1.1-27b",)
+    aliases = {"pplx-decider": "perplexity-ai/pplx-decider-v1.1-27b"}
+    markers = ("readout.safetensors",)
     extra = "pplx-decider"
     readout = "noncausal-readout"
     runtime_type = PplxRuntime
@@ -99,6 +102,12 @@ class PplxAdapter(PublisherAdapter):
     max_options = 255
     remote_code = True
     transformers = (5, 17)
+
+    def detect(self, directory: Path) -> bool:
+        metadata = optional_json(directory, "decision_config.json")
+        return super().detect(directory) or (
+            metadata.get("format_version") == 1 and "attention_mode" in metadata
+        )
 
     def open(
         self, name: str, *, local: bool, device: str, revision: str | None, **kwargs: Any

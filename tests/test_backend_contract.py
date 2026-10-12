@@ -26,7 +26,7 @@ from futurix_decision.datasets import DecisionExample
 from futurix_decision.datasets.benchmarks import normalize_decisionbench
 from futurix_decision.errors import BackendError, ConfigError, InvalidOutputError
 from futurix_decision.evaluation import fit_temperature_from_logits
-from futurix_decision.models.families import server_calibration
+from futurix_decision.models.families.openjev import server_calibration
 from futurix_decision.vllm import VLLMEngine
 from test_sft import tiny_model
 
@@ -266,12 +266,12 @@ class CalibrationTests(unittest.TestCase):
         self.assertLess(calibrated["nll"], plain["nll"])
 
     def test_openjev_server_calibration_is_pinned(self):
-        flash = server_calibration("openjev", "openjev/OpenJev-Flash-9B")
-        base = server_calibration("openjev", "openjev/openjev")
+        flash = server_calibration("openjev/OpenJev-Flash-9B")
+        base = server_calibration("openjev/openjev")
         self.assertEqual((flash.temperature, flash.noul_temperature), (1.07, 1.074766))
         self.assertEqual((base.temperature, base.noul_temperature), (0.85, 1.829074))
         # A local copy is matched by its directory name, as the server reports it.
-        self.assertEqual(server_calibration("openjev", "/models/OpenJev-Flash-9B/"), flash)
+        self.assertEqual(server_calibration("/models/OpenJev-Flash-9B/"), flash)
 
         def transport(temperature):
             def handle(request):

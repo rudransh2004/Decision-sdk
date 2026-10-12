@@ -25,25 +25,6 @@ if TYPE_CHECKING:
     from futurix_decision.datasets.schema import DecisionExample, DecisionInput
     from futurix_decision.models.native import NativeDecisionModel
 
-# Hub ID -> publisher runtime. Laya and GLiNER share the "encoder" row of the
-# family table but run different code.
-PUBLISHER_CHECKPOINTS = {
-    "jaredpalmer/kev-9b": "kev",
-    "convaiinnovations/laya": "laya",
-    "convaiinnovations/laya-multilingual": "laya",
-    "fastino/GLiNER2.5-Decide": "gliner",
-    "Cloudflare/clef": "clef",
-    "Cloudflare/clef-flash": "clef",
-    "perplexity-ai/pplx-decider-v1.1-27b": "pplx-decider",
-    "openjev/openjev": "openjev",
-    "openjev/OpenJev-Flash-9B": "openjev",
-    "vllm-sr/Decision-1.0-Nox-4B": "nox",
-    "vllm-sr/Decision-2.0-Nox-4B": "nox",
-    "vllm-sr/Decision-1.0-Lux-9B": "lux",
-    "vllm-sr/Decision-2.0-Lux-9B": "lux",
-    "LiquidAI/d1-3B": "liquid-d1",
-}
-
 BatchAnswers = list[tuple[Mapping[str, Any], float]]
 """``(answer, per-row latency ms)`` for each row of a batch, in input order."""
 
@@ -95,6 +76,8 @@ class NativeExport(NamedTuple):
 class PublisherAdapter(FamilyAdapter):
     """One publisher runtime. Subclasses set ``name``, ``extra``, and ``readout``.
 
+    A ``trainable`` subclass implements ``train``.
+
     The class attributes describe what the publisher's runtime supports;
     ``NativeDecisionModel`` enforces them for local and HTTP backends alike.
     """
@@ -102,8 +85,6 @@ class PublisherAdapter(FamilyAdapter):
     readout: str
     """How the release reads out a decision; ``NativeCapabilities.native_readout``."""
     runtime_type: type[PublisherRuntime] = PublisherRuntime
-    trainable = False
-    """Whether ``train`` is implemented."""
     images = False
     """Whether the publisher's decision path accepts images."""
     max_options: int | None = None
@@ -113,13 +94,6 @@ class PublisherAdapter(FamilyAdapter):
     """The oldest Transformers release the publisher's code runs on."""
     http_error: str | None = None
     """Set when the publisher has no System One server, as the reason ``base_url`` fails."""
-    vllm_server = False
-    """Whether the publisher's System One server runs on vLLM."""
-
-    def __init__(self) -> None:
-        self.checkpoints = tuple(
-            hub_id for hub_id, family in PUBLISHER_CHECKPOINTS.items() if family == self.name
-        )
 
     def load(
         self, checkpoint: str, *, device: str | None = None, **kwargs: Any

@@ -7,17 +7,17 @@ from typing import TYPE_CHECKING, Any, Literal, get_args, overload
 
 from futurix_decision._lazy import require_transformers, torch_required
 from futurix_decision.errors import CheckpointError, ConfigError
-from futurix_decision.models.families import identify_family, reject_native_checkpoint
 from futurix_decision.models.families.futurix import QWEN35
 from futurix_decision.models.families.publisher import pinned_remote
 from futurix_decision.models.protocol import DecisionBackend
-from futurix_decision.models.registry import family_for_checkpoint, get_family
-from futurix_decision.models.sources import (
-    ALIASES,
-    checkpoint_source,
+from futurix_decision.models.registry import (
+    family_for_checkpoint,
+    get_family,
     infer_local_family,
-    tokenizer_kwargs,
+    reject_native_checkpoint,
+    resolve_alias,
 )
+from futurix_decision.models.sources import checkpoint_source, tokenizer_kwargs
 
 if TYPE_CHECKING:
     from futurix_decision.models.decision_model import DecisionModel
@@ -117,22 +117,20 @@ def _load_model(
     **kwargs: Any,
 ) -> DecisionBackend:
     original, _ = checkpoint_source(checkpoint)
-    name, local = checkpoint_source(ALIASES.get(original, original))
+    name, local = checkpoint_source(resolve_alias(original))
     path = Path(name)
-    registered = None if local else identify_family(name)
     if local:
         identified = infer_local_family(path)
     else:
         known = family_for_checkpoint(name)
-        identified = known.name if known else (registered.name if registered else None)
+        identified = known.name if known else None
     if family is not None and identified is not None and family != identified:
         raise CheckpointError(f"{name} belongs to {identified}, not {family}")
     family = family or identified
     if convert:
-        known_as = family or (registered.name if registered else None)
-        if known_as is not None:
+        if family is not None:
             raise ConfigError(
-                f"{name} belongs to the known decision-model family {known_as!r} and already "
+                f"{name} belongs to the known decision-model family {family!r} and already "
                 "contains a trained decision head; convert=True would discard its native "
                 "readout. Load it without convert"
             )

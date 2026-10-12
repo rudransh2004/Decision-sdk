@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from futurix_decision._lazy import require_transformers
 from futurix_decision.errors import CheckpointError
 from futurix_decision.models.families.base import FamilyAdapter
-from futurix_decision.models.sources import CheckpointFiles, read_checkpoint_json
+from futurix_decision.models.sources import CheckpointFiles, optional_json, read_checkpoint_json
 
 if TYPE_CHECKING:
     from futurix_decision.models.decision_model import DecisionModel
@@ -21,7 +21,14 @@ class FuturixAdapter(FamilyAdapter):
     """The SDK's own format. ``load`` also starts a new model from a plain causal LM."""
 
     name = "futurix"
+    aliases = {"qwen3.5-9b": "Qwen/Qwen3.5-9B"}
     extra = "torch"
+    trainable = True
+    vllm = "direct"
+
+    def detect(self, directory: Path) -> bool:
+        metadata = optional_json(directory, "decision_config.json")
+        return metadata.get("architecture") == "futurix-decision"
 
     def load(self, checkpoint: str, *, device: str | None = None, **kwargs: Any) -> DecisionModel:
         from futurix_decision.models.decision_model import DecisionModel

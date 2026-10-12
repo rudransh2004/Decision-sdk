@@ -16,15 +16,15 @@ import torch
 from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
 
-from futurix_decision import DecisionInput, DecisionModel, DecisionTrainer, SFTConfig
+from futurix_decision import DecisionInput, DecisionModel, DecisionTrainer, SFTConfig, load_model
 from futurix_decision.datasets.schema import DecisionExample
-from futurix_decision.errors import CheckpointError
+from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.decider import (
     DeciderDecisionModel,
     letter_table,
     prepare_decider_rows,
 )
-from futurix_decision.models.families import FAMILIES
+from futurix_decision.models.registry import get_family, registered_families
 from futurix_decision.vllm.engine import VLLMEngine
 
 
@@ -81,14 +81,26 @@ def make_native(path: Path) -> None:
 
 class DeciderIntegrationTests(unittest.TestCase):
     def test_known_family_registry_and_fail_closed_loaders(self):
-        self.assertEqual(len(FAMILIES), 12)
         self.assertEqual(
-            {family.name for family in FAMILIES if family.training},
-            {"bosun", "decider", "jpt", "eikos", "kev", "clef", "pplx-decider", "encoder"},
+            {family.name for family in registered_families() if family.trainable},
+            {
+                "futurix",
+                "bosun",
+                "decider",
+                "jpt",
+                "eikos",
+                "kev",
+                "clef",
+                "pplx-decider",
+                "laya",
+                "gliner",
+            },
         )
-        jpt = next(family for family in FAMILIES if family.name == "jpt")
-        self.assertTrue(jpt.supports("kirp/jpt-4b", "training"))
-        self.assertFalse(jpt.supports("kirp/jpt-35b-a3b", "training"))
+        jpt = get_family("jpt")
+        self.assertIn("kirp/jpt-4b", jpt.checkpoints)
+        self.assertIn("kirp/jpt-35b-a3b", jpt.unsupported_checkpoints)
+        with self.assertRaisesRegex(ConfigError, "unknown selected decision checkpoint"):
+            load_model("kirp/jpt-35b-a3b")
         with patch("futurix_decision.models.decision_model.load_decision_config", return_value={}):
             with self.assertRaisesRegex(CheckpointError, "publisher's native"):
                 DecisionModel.from_pretrained("Cloudflare/clef")

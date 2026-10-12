@@ -38,6 +38,10 @@ class ClefRuntime(PublisherRuntime):
 
 class ClefAdapter(PublisherAdapter):
     name = "clef"
+    checkpoints = ("Cloudflare/clef", "Cloudflare/clef-flash")
+    unsupported_checkpoints = ("Cloudflare/clef-omni",)
+    aliases = {"clef": "Cloudflare/clef", "clef-flash": "Cloudflare/clef-flash"}
+    markers = ("joint_head.safetensors", "joint_schema_model.py", "joint_head_config.json")
     extra = "clef"
     readout = "joint-schema"
     runtime_type = ClefRuntime

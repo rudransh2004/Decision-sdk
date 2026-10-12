@@ -6,20 +6,27 @@ from pathlib import Path
 
 from futurix_decision.errors import CheckpointError
 from futurix_decision.models.families.publisher import PublisherAdapter
-from futurix_decision.models.sources import CheckpointFiles, read_checkpoint_json
+from futurix_decision.models.sources import CheckpointFiles, optional_json, read_checkpoint_json
 
 
 class NoxLuxAdapter(PublisherAdapter):
-    """``name`` is ``"nox"`` or ``"lux"``; both read the ``vllm-sr-decision`` package format."""
+    """Reads the ``vllm-sr-decision`` package format that Nox and Lux releases share."""
 
     extra = "nox-lux"
     readout = "candidate-head"
     remote_code = True
     transformers = (5, 17)
+    model_marker: str
+    """The size label in the release's ``model_name``, for example ``"-Nox-"``."""
 
-    def __init__(self, name: str) -> None:
-        self.name = name
-        super().__init__()
+    def detect(self, directory: Path) -> bool:
+        config = optional_json(directory, "config.json")
+        name = config.get("model_name")
+        return (
+            config.get("decision_format") == "vllm-sr-decision"
+            and isinstance(name, str)
+            and self.model_marker in name
+        )
 
     def files(self, files: CheckpointFiles) -> None:
         files.require("config.json")
@@ -93,3 +100,17 @@ class NoxLuxAdapter(PublisherAdapter):
             if not isinstance(filename, str):
                 raise CheckpointError(f"Decision calibration filename is invalid: {directory}")
             files.require(filename)
+
+
+class NoxAdapter(NoxLuxAdapter):
+    name = "nox"
+    checkpoints = ("vllm-sr/Decision-1.0-Nox-4B", "vllm-sr/Decision-2.0-Nox-4B")
+    aliases = {"nox": "vllm-sr/Decision-2.0-Nox-4B"}
+    model_marker = "-Nox-"
+
+
+class LuxAdapter(NoxLuxAdapter):
+    name = "lux"
+    checkpoints = ("vllm-sr/Decision-1.0-Lux-9B", "vllm-sr/Decision-2.0-Lux-9B")
+    aliases = {"lux": "vllm-sr/Decision-2.0-Lux-9B"}
+    model_marker = "-Lux-"

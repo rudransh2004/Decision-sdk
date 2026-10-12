@@ -4,24 +4,53 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from futurix_decision.client._transport import send
-from futurix_decision.errors import BackendError, ConfigError, InvalidOutputError
-from futurix_decision.models.families import server_calibration
+from futurix_decision.errors import BackendError, CheckpointError, ConfigError, InvalidOutputError
 from futurix_decision.models.families.http import response_json
 from futurix_decision.models.families.publisher import PublisherAdapter
+
+
+@dataclass(frozen=True)
+class ServerCalibration:
+    """Temperatures a publisher's server applies before it returns probabilities.
+
+    The SDK checks that the server reports them and never applies them again.
+    """
+
+    temperature: float  # choice and score
+    noul_temperature: float
+
+
+# Each release's published calibration, which its helper must report.
+CALIBRATIONS = {
+    "openjev/openjev": ServerCalibration(temperature=0.85, noul_temperature=1.829074),
+    "openjev/OpenJev-Flash-9B": ServerCalibration(temperature=1.07, noul_temperature=1.074766),
+}
+
+
+def server_calibration(checkpoint: str) -> ServerCalibration:
+    """Look up a served checkpoint's published calibration by Hub ID or directory name."""
+    name = checkpoint.rstrip("/").rsplit("/", 1)[-1].lower()
+    for hub_id, calibration in CALIBRATIONS.items():
+        if hub_id.rsplit("/", 1)[-1].lower() == name:
+            return calibration
+    raise CheckpointError(f"no published openjev calibration matches {checkpoint}")
 
 
 class OpenJevAdapter(PublisherAdapter):
     """Needs no local files: the SDK only reaches OpenJev over HTTP."""
 
     name = "openjev"
+    checkpoints = tuple(CALIBRATIONS)
+    aliases = {"openjev": "openjev/openjev", "openjev-flash": "openjev/OpenJev-Flash-9B"}
     extra = None
     readout = "letter-logprobs"
-    vllm_server = True
+    vllm = "server"
 
     def open(
         self, name: str, *, local: bool, device: str, revision: str | None, **kwargs: Any
@@ -36,7 +65,7 @@ class OpenJevAdapter(PublisherAdapter):
             raise InvalidOutputError("OpenJev /v1/version did not return a JSON object")
         expected = checkpoint.rsplit("/", 1)[-1].lower()
         served = str(info.get("model_dir", "")).lower()
-        calibration = server_calibration("openjev", checkpoint)
+        calibration = server_calibration(checkpoint)
         flags = info.get("flags", {})
         if not isinstance(flags, Mapping) or (
             served != expected

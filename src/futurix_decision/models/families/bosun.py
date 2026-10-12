@@ -7,14 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from futurix_decision.errors import CheckpointError, ConfigError
-from futurix_decision.models.families.base import (
-    FamilyAdapter,
-    reject_futurix_options,
-    supported_checkpoints,
-)
+from futurix_decision.models.families.base import FamilyAdapter, reject_futurix_options
 from futurix_decision.models.sources import (
     CheckpointFiles,
     checkpoint_source,
+    optional_json,
     read_checkpoint_json,
 )
 
@@ -30,8 +27,21 @@ BOSUN_RELEASES = {
 
 class BosunAdapter(FamilyAdapter):
     name = "bosun"
-    checkpoints = supported_checkpoints("bosun")
+    checkpoints = tuple(BOSUN_RELEASES)
+    aliases = {
+        "bosun-0.6b": "Hanno-Labs/bosun-v3.1-0.6b",
+        "bosun-1.7b": "Hanno-Labs/bosun-v3.1-1.7b",
+    }
+    markers = ("decision_embeddings.safetensors",)
     extra = "bosun"
+    trainable = True
+    vllm = "export"
+
+    def detect(self, directory: Path) -> bool:
+        return (
+            super().detect(directory)
+            or optional_json(directory, "config.json").get("model_type") == "bosun"
+        )
 
     def load(
         self,

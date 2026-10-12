@@ -26,14 +26,15 @@ from futurix_decision.inference.schemas import (
     check_confidence_threshold,
 )
 from futurix_decision.models.families.http import HttpRuntime
-from futurix_decision.models.families.publisher import (
-    PUBLISHER_CHECKPOINTS,
-    PublisherAdapter,
-    pinned_remote,
-)
+from futurix_decision.models.families.publisher import PublisherAdapter, pinned_remote
 from futurix_decision.models.protocol import DecisionShortcuts
-from futurix_decision.models.registry import get_family
-from futurix_decision.models.sources import ALIASES, checkpoint_source, infer_local_family
+from futurix_decision.models.registry import (
+    family_for_checkpoint,
+    get_family,
+    infer_local_family,
+    resolve_alias,
+)
+from futurix_decision.models.sources import checkpoint_source
 
 
 @dataclass(frozen=True)
@@ -55,21 +56,19 @@ def _publisher(family: str) -> PublisherAdapter:
 
 
 def _source(checkpoint: str | Path) -> tuple[str, str]:
-    name = str(checkpoint)
-    if name in ALIASES:
-        name = ALIASES[name]
-    name, local = checkpoint_source(name)
+    name, local = checkpoint_source(resolve_alias(str(checkpoint)))
     if local:
         family = infer_local_family(Path(name))
-        if family not in set(PUBLISHER_CHECKPOINTS.values()):
+        if family is None or not isinstance(get_family(family), PublisherAdapter):
             raise CheckpointError(
                 f"cannot identify native decision checkpoint at {name!r}; "
                 "pass family='clef', 'pplx-decider', 'kev', 'laya', etc."
             )
         return name, family
-    if name not in PUBLISHER_CHECKPOINTS:
+    adapter = family_for_checkpoint(name)
+    if not isinstance(adapter, PublisherAdapter) or name not in adapter.checkpoints:
         raise ConfigError(f"unknown selected decision checkpoint: {name}")
-    return name, PUBLISHER_CHECKPOINTS[name]
+    return name, adapter.name
 
 
 def _answers(output: Any) -> Mapping[str, Any]:
@@ -162,7 +161,7 @@ class NativeDecisionModel(DecisionShortcuts):
         self.capabilities = NativeCapabilities(
             inference=True,
             training=adapter.trainable and backend != "http",
-            vllm_inference=adapter.vllm_server and backend == "http",
+            vllm_inference=adapter.vllm == "server" and backend == "http",
             native_readout=adapter.readout,
         )
         # Required by the existing evaluation/journal interface.

@@ -21,7 +21,6 @@ from futurix_decision.inference.schemas import (
 )
 from futurix_decision.inference.system_one import system_one_answers, system_one_inputs
 from futurix_decision.models.decision_config import LOADABLE, DecisionModelConfig
-from futurix_decision.models.families import reject_native_checkpoint
 from futurix_decision.models.families.futurix import QWEN35
 from futurix_decision.models.protocol import DecisionShortcuts
 from futurix_decision.models.readouts import (
@@ -32,6 +31,7 @@ from futurix_decision.models.readouts import (
     TokenReadout,
     input_device,
 )
+from futurix_decision.models.registry import registered_families, reject_native_checkpoint
 from futurix_decision.models.sources import tokenizer_kwargs
 from futurix_decision.utils.config import load_decision_config
 
@@ -189,14 +189,14 @@ class DecisionModel(DecisionShortcuts):
         """``cls``, or the registered subclass of it that reads ``prompt_format``."""
         if cls._reads(prompt_format):
             return cls
-        from futurix_decision.models.families.letter import LetterAdapter
-        from futurix_decision.models.registry import registered_families
-
         for adapter in registered_families():
-            if isinstance(adapter, LetterAdapter):
-                model_class = adapter.model_class()
-                if issubclass(model_class, cls) and model_class._reads(prompt_format):
-                    return model_class
+            model_class = adapter.model_class()
+            if (
+                model_class is not None
+                and issubclass(model_class, cls)
+                and model_class._reads(prompt_format)
+            ):
+                return model_class
         raise ConfigError(f"{cls.__name__} cannot read prompt_format={prompt_format!r}")
 
     @classmethod

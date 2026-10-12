@@ -75,6 +75,21 @@ def _adapter(model_format: str) -> FamilyAdapter:
     return get_family("futurix" if model_format == "standard" else model_format)
 
 
+def _require_vllm_checkpoint(model_format: str) -> None:
+    """Refuse a ``--backend vllm`` run that ``VLLMEngine`` cannot load as given."""
+    if model_format == "native":
+        raise ConfigError(
+            "native decision heads need the publisher runtime; OpenJev uses --native-base-url"
+        )
+    adapter = _adapter(model_format)
+    if adapter.vllm == "export":
+        raise ConfigError(
+            f"export the {adapter.name} checkpoint with `futurix-decision export` before vLLM"
+        )
+    if adapter.vllm != "direct":
+        raise ConfigError(f"{adapter.name} has no vLLM decision path; use --backend transformers")
+
+
 def _require_decision_model(model: Any, model_format: str, purpose: str) -> None:
     if not isinstance(model, DecisionModel):
         raise ConfigError(
@@ -286,16 +301,11 @@ def _evaluate(args: argparse.Namespace) -> None:
             raise ConfigError("--max-rows must be positive")
         dataset = islice(dataset, args.max_rows)
     if args.backend == "vllm":
-        if args.model_format == "native":
-            raise ConfigError(
-                "native decision heads need the publisher runtime; OpenJev uses --native-base-url"
-            )
+        _require_vllm_checkpoint(args.model_format)
         if args.revision:
             raise ConfigError(
                 "--revision is for PyTorch upstream loading; export a pinned model for vLLM"
             )
-        if args.model_format == "bosun":
-            raise ConfigError("export the pinned Bosun checkpoint before vLLM evaluation")
         from futurix_decision.vllm import VLLMEngine
 
         model = VLLMEngine(
@@ -385,10 +395,7 @@ def _serve(args: argparse.Namespace) -> None:
     from futurix_decision.vllm.api import create_app
 
     if args.backend == "vllm":
-        if args.model_format == "native":
-            raise ConfigError(
-                "native decision heads need the publisher runtime, not the generic vLLM engine"
-            )
+        _require_vllm_checkpoint(args.model_format)
         from futurix_decision.vllm import VLLMEngine
 
         engine = VLLMEngine(args.model)

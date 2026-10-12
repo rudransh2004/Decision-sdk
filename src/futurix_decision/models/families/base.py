@@ -5,31 +5,58 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Literal
 
 from futurix_decision.errors import ConfigError
-from futurix_decision.models.families import FAMILIES
 from futurix_decision.models.protocol import DecisionBackend
+
+if TYPE_CHECKING:
+    from futurix_decision.models.decision_model import DecisionModel
 
 
 class FamilyAdapter(ABC):
     """Loads, checks, and optionally fine-tunes one family of decision checkpoints.
 
     ``load_model`` and the CLI find adapters by ``name`` in the registry; see
-    ``futurix_decision.models.registry.register_family``. Subclasses set the
-    three attributes and implement ``load``. ``requires``, ``finetune``, and
-    ``training_kwargs`` have working defaults.
+    ``futurix_decision.models.registry.register_family``. Subclasses set
+    ``name`` and implement ``load``; every other attribute and method has a
+    working default.
+
+    The class attributes are the family's only record of its releases and
+    capabilities: the registry derives Hub ID lookup, aliases, and local
+    detection from them, and a test checks the README support matrix against them.
     """
 
     name: str
     """Registry key: the ``family=`` argument and the CLI ``--model-format`` value."""
 
     checkpoints: tuple[str, ...] = ()
-    """Hub IDs ``load_model`` recognizes by name. Empty means any Hub ID, when the
-    caller passes ``family=name``."""
+    """Hub IDs ``load_model`` recognizes by name and loads. Empty means any Hub ID,
+    when the caller passes ``family=name``."""
+
+    unsupported_checkpoints: tuple[str, ...] = ()
+    """Published Hub IDs of this family that the SDK cannot load yet. Loaders
+    recognize them only to refuse them, so no loader mistakes one for a plain LM."""
+
+    aliases: Mapping[str, str] = MappingProxyType({})
+    """Short names for Hub IDs, for example ``{"kev": "jaredpalmer/kev-9b"}``."""
+
+    markers: tuple[str, ...] = ()
+    """Files, relative to a checkpoint directory, that only this family's releases
+    contain. ``detect`` returns ``True`` when any of them exists."""
 
     extra: str | None = None
     """The pip extra that installs this family's dependencies, for example ``"bosun"``."""
+
+    trainable: bool = False
+    """Whether the SDK trains this family on labeled decision data, through
+    ``DecisionTrainer`` or the family's own ``finetune``."""
+
+    vllm: Literal["direct", "export", "server"] | None = None
+    """How the family reaches vLLM: ``"direct"`` checkpoints load in ``VLLMEngine``;
+    ``"export"`` ones do after ``futurix-decision export``; ``"server"`` means the
+    publisher's own vLLM-backed System One server. ``None`` means no vLLM path."""
 
     @abstractmethod
     def load(self, checkpoint: str, *, device: str | None = None, **kwargs: Any) -> DecisionBackend:
@@ -38,6 +65,24 @@ class FamilyAdapter(ABC):
         ``device`` places the model, for example ``"cuda:0"``. ``kwargs`` are
         the family's own options, passed through from ``load_model`` or the CLI.
         """
+
+    def detect(self, directory: Path) -> bool:
+        """Whether the local ``directory`` holds one of this family's checkpoints.
+
+        ``load_model`` asks each registered family in turn when the caller
+        passes no ``family``. The default looks for ``markers``; override it to
+        read a config file instead. Return ``False`` when unsure.
+        """
+        return any((directory / marker).is_file() for marker in self.markers)
+
+    def model_class(self) -> type[DecisionModel] | None:
+        """The ``DecisionModel`` subclass that reads this family's saved checkpoints.
+
+        ``DecisionModel.from_pretrained`` asks each family for it to find the
+        class whose prompt format a saved checkpoint names. ``None`` means the
+        family loads no ``DecisionModel`` subclass of its own.
+        """
+        return None
 
     def requires(self, path: Path) -> None:
         """Raise ``CheckpointError`` if a local checkpoint can't be loaded.
@@ -91,8 +136,3 @@ def reject_futurix_options(kwargs: Mapping[str, Any], family: str) -> None:
             raise ConfigError(
                 f"{key} applies to Futurix checkpoints and convert=True, not {family} releases"
             )
-
-
-def supported_checkpoints(family: str) -> tuple[str, ...]:
-    """The Hub IDs the family table marks as implemented for ``family``."""
-    return next(entry.supported_checkpoints for entry in FAMILIES if entry.name == family)

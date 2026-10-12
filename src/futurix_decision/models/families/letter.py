@@ -8,12 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from futurix_decision.errors import ConfigError
-from futurix_decision.models.families.base import (
-    FamilyAdapter,
-    reject_futurix_options,
-    supported_checkpoints,
-)
-from futurix_decision.models.sources import CheckpointFiles
+from futurix_decision.models.families.base import FamilyAdapter, reject_futurix_options
+from futurix_decision.models.sources import CheckpointFiles, optional_json
 
 if TYPE_CHECKING:
     from futurix_decision.models.decision_model import DecisionModel
@@ -23,21 +19,19 @@ if TYPE_CHECKING:
 class LetterAdapter(FamilyAdapter):
     """Adapter for a family whose model subclasses ``LabelReadoutModel``.
 
-    ``model`` names that class as ``"module:Class"``, so the registry imports
-    without torch. The release's prompt format, option width, and extra loader
-    options come from the class. ``markers`` are the release files besides the
-    config, tokenizer, and weights that every local copy needs.
+    Subclasses set ``model`` to that class as ``"module:Class"``, so the
+    registry imports without torch. The release's prompt format, option width,
+    and extra loader options come from the class. ``required_files`` are the release
+    files besides the config, tokenizer, and weights that every local copy needs.
     """
 
-    def __init__(self, name: str, model: str, *, markers: tuple[str, ...]) -> None:
-        self.name = name
-        self.checkpoints = supported_checkpoints(name)
-        self.extra = name
-        self._model = model
-        self._markers = markers
+    model: str
+    required_files: tuple[str, ...] = ()
+    trainable = True
+    vllm = "export"
 
     def model_class(self) -> type[LabelReadoutModel]:
-        module, _, attribute = self._model.partition(":")
+        module, _, attribute = self.model.partition(":")
         model: type[LabelReadoutModel] = getattr(importlib.import_module(module), attribute)
         return model
 
@@ -47,7 +41,7 @@ class LetterAdapter(FamilyAdapter):
 
     def requires(self, path: Path) -> None:
         files = CheckpointFiles(path)
-        files.require(*self._markers, "config.json")
+        files.require(*self.required_files, "config.json")
         files.tokenizer()
         files.weights()
         files.check(self.name)
@@ -72,3 +66,39 @@ class LetterAdapter(FamilyAdapter):
             for key in ("max_sequence_length", "seed", *model.native_options)
             if key in section
         }
+
+
+class DeciderAdapter(LetterAdapter):
+    name = "decider"
+    extra = "decider"
+    model = "futurix_decision.models.decider:DeciderDecisionModel"
+    checkpoints = ("Mapika/decider-4b",)
+    markers = ("decider_config.json",)
+    required_files = ("decider_config.json",)
+
+
+class JPTAdapter(LetterAdapter):
+    name = "jpt"
+    extra = "jpt"
+    model = "futurix_decision.models.jpt:JPTDecisionModel"
+    checkpoints = ("kirp/jpt-4b", "kirp/jpt-9b")
+    unsupported_checkpoints = ("kirp/jpt-35b-a3b",)
+    required_files = ("README.md",)
+
+    def detect(self, directory: Path) -> bool:
+        card = directory / "README.md"
+        return (
+            card.is_file() and "# JPT-" in card.read_text(encoding="utf-8", errors="replace")[:4096]
+        )
+
+
+class EikosAdapter(LetterAdapter):
+    name = "eikos"
+    extra = "eikos"
+    model = "futurix_decision.models.eikos:EikosDecisionModel"
+    checkpoints = ("caiovicentino1/Eikos-4B", "caiovicentino1/Eikos-27B")
+    required_files = ("decision_config.json", "calib.json")
+
+    def detect(self, directory: Path) -> bool:
+        metadata = optional_json(directory, "decision_config.json")
+        return metadata.get("prompt_version") == "letter-v1-semif"

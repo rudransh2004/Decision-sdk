@@ -57,6 +57,12 @@ class LayaRuntime(PublisherRuntime):
 
 class LayaAdapter(PublisherAdapter):
     name = "laya"
+    checkpoints = ("convaiinnovations/laya", "convaiinnovations/laya-multilingual")
+    aliases = {
+        "laya": "convaiinnovations/laya",
+        "laya-multilingual": "convaiinnovations/laya-multilingual",
+    }
+    markers = ("rl_agent_config.json",)
     extra = "laya"
     readout = "encoder"
     runtime_type = LayaRuntime

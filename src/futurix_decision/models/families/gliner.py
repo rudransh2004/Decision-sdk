@@ -138,6 +138,9 @@ class GlinerRuntime(PublisherRuntime):
 
 class GlinerAdapter(PublisherAdapter):
     name = "gliner"
+    checkpoints = ("fastino/GLiNER2.5-Decide",)
+    aliases = {"gliner": "fastino/GLiNER2.5-Decide"}
+    markers = ("encoder_config/config.json",)
     extra = "gliner"
     readout = "schema-encoder"
     runtime_type = GlinerRuntime

@@ -20,6 +20,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and implements `load`; `requires`, `finetune`, and `training_kwargs` are optional.
   `load_model(checkpoint, family=...)` dispatches through the registry, so a registered
   third-party family loads like a built-in one.
+- Each `FamilyAdapter` declares its own releases and capabilities: `checkpoints`,
+  `unsupported_checkpoints`, `aliases`, `markers` (with an overridable `detect(directory)`),
+  `trainable`, and `vllm` (`"direct"`, `"export"`, `"server"`, or `None`). Hub ID lookup,
+  short names, and local-copy detection all read these, so a registered third-party
+  family is found by alias and recognized in a local directory without `family=`.
+  `register_family` refuses a Hub ID or alias another family already claims.
 - `DecisionBackend`, a runtime-checkable protocol exported from the top-level package
   (no torch needed): `decide`, `batch_decide`, `choice`, `noul`, `score`, and `close`.
   `DecisionModel`, `NativeDecisionModel`, `VLLMEngine`, `DecisionClient`, and
@@ -131,9 +137,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `evaluate` and `fit_temperature` take any `DecisionBackend`. `max_batch_tokens` in
   `evaluate` needs a `DecisionModel` or `VLLMEngine` (optionally inside `Calibrated`) and
   raises `ConfigError` for other backends.
-- OpenJev's published server temperatures live in the family table
-  (`ModelFamily.server_calibration`). The SDK still only verifies that the helper reports
-  them; it never applies them a second time.
+- OpenJev's published server temperatures live in
+  `futurix_decision.models.families.openjev.CALIBRATIONS`. The SDK still only verifies
+  that the helper reports them; it never applies them a second time.
+- Loading a decision release through the generic LM loader (`DecisionModel.from_pretrained`,
+  `convert=True`) now says to use `load_model(..., family=...)` instead of naming a
+  `DecisionModel.from_*` constructor.
+- `--backend vllm` in `evaluate` and `serve` refuses every format whose checkpoints
+  `VLLMEngine` cannot load as given: Bosun, Decider, JPT, and Eikos ask for
+  `futurix-decision export` first, and formats with no vLLM path say so. Only `evaluate`
+  checked, and only for Bosun; the others failed inside `VLLMEngine`.
 - The native HTTP runtime (`load_model(..., base_url=...)`) uses the client's transport:
   new `timeout` (default 60 s, as before) and `max_retries` (default 3) arguments, the
   same retry policy, and `BackendError` instead of `httpx.HTTPStatusError` for failed
@@ -179,6 +192,19 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **Breaking:** the separate family tables. `futurix_decision.models.families.FAMILIES`,
+  `ModelFamily`, `identify_family`, `server_calibration` (moved to
+  `models.families.openjev`, now taking only the checkpoint), and
+  `models.families.base.supported_checkpoints`; `models.families.publisher.PUBLISHER_CHECKPOINTS`
+  and `PublisherAdapter.vllm_server`; `models.sources.ALIASES` and
+  `models.sources.infer_local_family`. Migration: read the adapters through
+  `futurix_decision.models.registry` (`registered_families`, `get_family`,
+  `family_for_checkpoint`, `resolve_alias`, `infer_local_family`,
+  `reject_native_checkpoint`). The Laya and GLiNER `encoder` row is gone; they are the
+  `laya` and `gliner` families.
+- **Breaking:** `LetterAdapter(name, model, markers=...)` and `NoxLuxAdapter(name)` no
+  longer take constructor arguments. Use `DeciderAdapter`, `JPTAdapter`, `EikosAdapter`,
+  `NoxAdapter`, and `LuxAdapter`.
 - **Breaking:** `futurix_decision.models.registry.register_backend` and `create_backend`.
   Nothing in the SDK called them. Migration: implement a `FamilyAdapter` and call
   `register_family`.

@@ -13,11 +13,8 @@ from huggingface_hub.errors import EntryNotFoundError
 from futurix_decision import DecisionModel, load_model
 from futurix_decision.errors import CheckpointError
 from futurix_decision.models.decider import DeciderDecisionModel
-from futurix_decision.models.registry import get_family
-from futurix_decision.models.sources import (
-    checkpoint_source,
-    infer_local_family,
-)
+from futurix_decision.models.registry import get_family, infer_local_family
+from futurix_decision.models.sources import checkpoint_source
 from test_bosun import bosun_tiny_model
 from test_decision_model import tiny_checkpoint
 

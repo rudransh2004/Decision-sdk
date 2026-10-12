@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,17 +12,21 @@ from unittest.mock import patch
 from futurix_decision import (
     CheckpointError,
     ConfigError,
+    DecisionModel,
     DecisionResult,
     FamilyAdapter,
     load_model,
     register_family,
 )
 from futurix_decision.cli import main
-from futurix_decision.models.families import FAMILIES
-from futurix_decision.models.families.publisher import PUBLISHER_CHECKPOINTS
-from futurix_decision.models.registry import family_for_checkpoint, get_family
+from futurix_decision.models.registry import (
+    family_for_checkpoint,
+    get_family,
+    registered_families,
+)
 
 REGISTRY = "futurix_decision.models.registry._FAMILIES"
+README = Path(__file__).resolve().parents[1] / "README.md"
 
 
 class UniformBackend:
@@ -56,8 +61,12 @@ class UniformBackend:
 
 
 class AcmeAdapter(FamilyAdapter):
+    """A complete third-party family: this class plus one ``register_family`` call."""
+
     name = "acme"
     checkpoints = ("acme/decider-1",)
+    aliases = {"acme-small": "acme/decider-1"}
+    markers = ("acme.json",)
 
     def __init__(self):
         self.checked, self.loaded = [], []
@@ -94,6 +103,36 @@ class RegistryTests(unittest.TestCase):
                 self.assertEqual(adapter.checked, [root, root])
         self.assertIsNone(family_for_checkpoint("acme/decider-1"))
 
+    def test_a_registered_family_is_found_by_alias_and_by_its_local_marker(self):
+        adapter = AcmeAdapter()
+        with patch.dict(REGISTRY), tempfile.TemporaryDirectory() as temp:
+            register_family(adapter)
+            self.assertEqual(load_model("acme-small").checkpoint, "acme/decider-1")
+            root = Path(temp) / "renamed-copy"
+            root.mkdir()
+            with self.assertRaisesRegex(CheckpointError, "cannot identify"):
+                load_model(root)
+            (root / "acme.json").write_text("{}")
+            self.assertEqual(load_model(root).checkpoint, str(root))
+            self.assertEqual(adapter.checked, [root])
+            with self.assertRaisesRegex(ConfigError, "family 'acme'"):
+                load_model(root, convert=True)
+            with self.assertRaisesRegex(CheckpointError, "acme release"):
+                DecisionModel.from_pretrained(root)
+
+    def test_register_family_rejects_claimed_checkpoints_and_aliases(self):
+        with patch.dict(REGISTRY):
+            for attribute, value, message in (
+                ("checkpoints", ("jaredpalmer/kev-9b",), "already belongs to family 'kev'"),
+                ("unsupported_checkpoints", ("kirp/jpt-35b-a3b",), "belongs to family 'jpt'"),
+                ("aliases", {"kev": "acme/decider-1"}, "alias 'kev' is already registered"),
+                ("aliases", {"acme-2": "acme/decider-2"}, "which acme does not load"),
+            ):
+                adapter = AcmeAdapter()
+                setattr(adapter, attribute, value)
+                with self.assertRaisesRegex(ConfigError, message):
+                    register_family(adapter)
+
     def test_register_family_rejects_duplicates_and_reserved_names(self):
         with patch.dict(REGISTRY):
             register_family(AcmeAdapter())
@@ -109,13 +148,60 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "unknown decision-model family 'acme'"):
             get_family("acme")
 
-    def test_builtin_adapters_cover_every_implemented_checkpoint(self):
-        for family in FAMILIES:
-            for checkpoint in family.supported_checkpoints:
-                adapter = family_for_checkpoint(checkpoint)
-                self.assertIsNotNone(adapter, checkpoint)
-                expected = PUBLISHER_CHECKPOINTS.get(checkpoint, family.name)
-                self.assertEqual(adapter.name, expected)
+    def test_readme_support_matrix_matches_the_adapters(self):
+        """Each README row's Hub IDs, training columns, and vLLM path come from one adapter."""
+        lines = README.read_text(encoding="utf-8").splitlines()
+        table = []
+        for line in lines[lines.index("## Supported decision models") + 1 :]:
+            if line.startswith("|"):
+                table.append([cell.strip() for cell in line.strip().strip("|").split("|")])
+            elif table:
+                break
+        header, _, *rows = table
+        self.assertEqual(
+            header,
+            [
+                "Released decision model",
+                "SDK inference",
+                "Train on your dataset",
+                "Fine-tune release",
+                "vLLM decisions",
+            ],
+        )
+        vllm_paths = {"export": "export", "helper": "server"}
+        readme = {}
+        for model, inference, train, finetune, vllm in rows:
+            checkpoints = re.findall(r"huggingface\.co/([\w.-]+/[\w.-]+)\)", model)
+            families = {getattr(family_for_checkpoint(c), "name", c) for c in checkpoints}
+            self.assertEqual(len(families), 1, f"README row {model!r} spans {families}")
+            readme[families.pop()] = {
+                "checkpoints": sorted(checkpoints),
+                "inference": inference.startswith("✅"),
+                "trainable": train.startswith("✅"),
+                "fine-tune release": finetune.startswith("✅"),
+                "vllm": next((path for word, path in vllm_paths.items() if word in vllm), None),
+            }
+        adapters = {
+            adapter.name: {
+                "checkpoints": sorted(adapter.checkpoints),
+                "inference": True,
+                "trainable": adapter.trainable,
+                "fine-tune release": adapter.trainable,
+                "vllm": adapter.vllm,
+            }
+            for adapter in registered_families()
+            if adapter.checkpoints
+        }
+        differences = [
+            f"{name}: README {readme.get(name)} != adapter {adapters.get(name)}"
+            for name in sorted(set(readme) | set(adapters))
+            if readme.get(name) != adapters.get(name)
+        ]
+        self.assertFalse(
+            differences,
+            "README.md 'Supported decision models' disagrees with the FamilyAdapter "
+            "attributes; fix the row or the adapter:\n" + "\n".join(differences),
+        )
 
     def test_default_finetune_and_training_options_refuse(self):
         adapter = AcmeAdapter()

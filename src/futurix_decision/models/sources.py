@@ -8,26 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from futurix_decision.errors import CheckpointError
-from futurix_decision.models.families import FAMILIES
-
-# Short names that ``load_model`` and ``NativeDecisionModel`` accept for Hub IDs.
-ALIASES = {
-    "bosun-0.6b": "Hanno-Labs/bosun-v3.1-0.6b",
-    "bosun-1.7b": "Hanno-Labs/bosun-v3.1-1.7b",
-    "kev": "jaredpalmer/kev-9b",
-    "laya": "convaiinnovations/laya",
-    "laya-multilingual": "convaiinnovations/laya-multilingual",
-    "gliner": "fastino/GLiNER2.5-Decide",
-    "clef": "Cloudflare/clef",
-    "clef-flash": "Cloudflare/clef-flash",
-    "pplx-decider": "perplexity-ai/pplx-decider-v1.1-27b",
-    "openjev": "openjev/openjev",
-    "openjev-flash": "openjev/OpenJev-Flash-9B",
-    "nox": "vllm-sr/Decision-2.0-Nox-4B",
-    "lux": "vllm-sr/Decision-2.0-Lux-9B",
-    "liquid-d1": "LiquidAI/d1-3B",
-    "qwen3.5-9b": "Qwen/Qwen3.5-9B",
-}
 
 
 def checkpoint_source(checkpoint: str | Path) -> tuple[str, bool]:
@@ -65,76 +45,10 @@ def read_checkpoint_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def infer_local_family(directory: Path) -> str | None:
-    """Recognize publisher copies and SDK exports without depending on their folder name."""
-    manifest = directory / "futurix_native.json"
-    if manifest.is_file():
-        family = read_checkpoint_json(manifest).get("family")
-        if family not in {
-            "kev",
-            "laya",
-            "gliner",
-            "clef",
-            "pplx-decider",
-            "openjev",
-            "nox",
-            "lux",
-            "liquid-d1",
-        }:
-            raise CheckpointError(f"unknown native family in {manifest}: {family!r}")
-        return family
-    decision_config = directory / "decision_config.json"
-    if decision_config.is_file():
-        metadata = read_checkpoint_json(decision_config)
-        if metadata.get("architecture") == "futurix-decision":
-            return "futurix"
-        if metadata.get("prompt_version") == "letter-v1-semif":
-            return "eikos"
-        if metadata.get("format_version") == 1 and "attention_mode" in metadata:
-            return "pplx-decider"
-    config = directory / "config.json"
-    if config.is_file():
-        release = read_checkpoint_json(config)
-        if release.get("model_type") == "bosun":
-            return "bosun"
-        if release.get("decision_format") == "vllm-sr-decision":
-            name = release.get("model_name", "")
-            if isinstance(name, str):
-                if "-Nox-" in name:
-                    return "nox"
-                if "-Lux-" in name:
-                    return "lux"
-        auto_map = release.get("auto_map")
-        if isinstance(auto_map, dict) and auto_map.get("AutoModel") == "modeling_d1.D1Model":
-            return "liquid-d1"
-    for marker, family in (
-        ("joint_head.safetensors", "clef"),
-        ("joint_schema_model.py", "clef"),
-        ("joint_head_config.json", "clef"),
-        ("readout.safetensors", "pplx-decider"),
-        ("decider_config.json", "decider"),
-        ("decision_embeddings.safetensors", "bosun"),
-        ("head.pt", "kev"),
-        ("rl_agent_config.json", "laya"),
-        ("encoder_config/config.json", "gliner"),
-        ("decision_head.safetensors", "futurix"),
-    ):
-        if (directory / marker).is_file():
-            return family
-    card = directory / "README.md"
-    if card.is_file() and "# JPT-" in card.read_text(encoding="utf-8", errors="replace")[:4096]:
-        return "jpt"
-    for family in FAMILIES:
-        if any(
-            directory.name == checkpoint.rsplit("/", 1)[-1]
-            for checkpoint in family.supported_checkpoints
-        ):
-            return (
-                family.name
-                if family.name != "encoder"
-                else ("gliner" if directory.name == "GLiNER2.5-Decide" else "laya")
-            )
-    return None
+def optional_json(directory: Path, filename: str) -> dict[str, Any]:
+    """``filename`` in ``directory`` as an object, or ``{}`` when the file is absent."""
+    path = directory / filename
+    return read_checkpoint_json(path) if path.is_file() else {}
 
 
 class CheckpointFiles:

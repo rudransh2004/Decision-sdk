@@ -62,6 +62,10 @@ class KevRuntime(PublisherRuntime):
 
 class KevAdapter(PublisherAdapter):
     name = "kev"
+    checkpoints = ("jaredpalmer/kev-9b",)
+    unsupported_checkpoints = ("jaredpalmer/kev-27b", "jaredpalmer/kev-4b", "jaredpalmer/kev-0.8b")
+    aliases = {"kev": "jaredpalmer/kev-9b"}
+    markers = ("head.pt",)
     extra = "kev-native"
     readout = "pointer"
     runtime_type = KevRuntime
