@@ -67,7 +67,8 @@ backends reject media.
 
 `--api-key` (or the `FUTURIX_API_KEY` environment variable) requires
 `Authorization: Bearer <key>` on every endpoint except `/health`. A missing or
-wrong key gets HTTP 401. `DecisionClient(api_key=...)` sends it.
+wrong key gets HTTP 401. With a key, the interactive docs (`/docs`, `/redoc`)
+and `/openapi.json` are off. `DecisionClient(api_key=...)` sends it.
 
 ## Batching
 
@@ -97,6 +98,10 @@ The server maps SDK errors to HTTP statuses. The body is
 | `CheckpointError` | 500 | `checkpoint` |
 | `BackendError` | 502 | `backend` |
 | `InvalidOutputError` | 502 | `invalid_output` |
+
+A `config` error's `detail` is the exception message. The others get a fixed
+`detail`, because their messages can name upstream URLs or local paths; the
+server logs the full error to the `futurix_decision` logger.
 
 ## Clients
 

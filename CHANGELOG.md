@@ -88,7 +88,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   waiting requests with `BackendError`; an app can run through several lifespans.
 - Bearer auth for `futurix-decision serve`: `--api-key` or the `FUTURIX_API_KEY`
   environment variable requires `Authorization: Bearer <key>` on every endpoint except
-  `/health` (HTTP 401 otherwise). `create_app(engine, *, api_key=None,
+  `/health` (HTTP 401 otherwise), and turns off `/docs`, `/redoc`, and `/openapi.json`.
+  `create_app(engine, *, api_key=None,
   batch_window_ms=5.0, max_batch=32)` takes the same settings.
 - The package ships a `py.typed` marker, so type checkers read its inline annotations.
 - The `dev` extra installs `fastapi`, `httpx`, `ruff`, `mypy`, and `types-PyYAML`.
@@ -189,8 +190,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The server maps SDK errors a backend raises to HTTP statuses: `ConfigError` 422,
   `CheckpointError` 500, `BackendError` 502, and `InvalidOutputError` 502. The body is
   `{"detail": ..., "error": ...}`, and the `X-Futurix-Error` header repeats `error`
-  (`config`, `checkpoint`, `backend`, or `invalid_output`). Invalid output used to be a
-  500. `DecisionClient` and `AsyncDecisionClient` raise `InvalidOutputError` for an
+  (`config`, `checkpoint`, `backend`, or `invalid_output`). Only a `config` error's
+  `detail` is the exception message; the others get a fixed message, because theirs can
+  name upstream URLs or local paths, and the server logs the full error. Invalid output
+  used to be a 500. `DecisionClient` and `AsyncDecisionClient` raise `InvalidOutputError` for an
   `invalid_output` response without retrying it, and still retry other 502s.
 - The server's endpoints are async and the global lock is gone: one worker thread makes
   every backend call, so the event loop keeps accepting requests while a batch runs.

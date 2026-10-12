@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -31,6 +32,8 @@ from futurix_decision.inference.schemas import (
 )
 from futurix_decision.models.protocol import DecisionBackend
 from futurix_decision.vllm.batcher import MicroBatcher
+
+logger = logging.getLogger(__name__)
 
 PROFILE_INSTRUCTIONS = {
     "baseline": "",
@@ -90,20 +93,28 @@ def _compat_input(
     return DecisionInput(kind=kind, state=canonical_state, question=prompt, options=options)
 
 
-# HTTP status and ERROR_HEADER value per SDK error a backend raises during a request.
-# Starlette picks the handler of the nearest class in the exception's MRO.
-ERROR_STATUS: dict[type[FuturixError], tuple[int, str]] = {
-    ConfigError: (422, "config"),
-    CheckpointError: (500, "checkpoint"),
-    BackendError: (502, "backend"),
-    InvalidOutputError: (502, INVALID_OUTPUT),
+# HTTP status, ERROR_HEADER value, and public detail per SDK error a backend raises
+# during a request. Starlette picks the handler of the nearest class in the
+# exception's MRO. Only a ConfigError, which describes the request, returns its own
+# message: the others can name upstream URLs or local paths, so they are logged.
+ERROR_STATUS: dict[type[FuturixError], tuple[int, str, str | None]] = {
+    ConfigError: (422, "config", None),
+    CheckpointError: (500, "checkpoint", "the server's checkpoint failed to load"),
+    BackendError: (502, "backend", "the decision backend failed"),
+    InvalidOutputError: (502, INVALID_OUTPUT, "the decision backend returned invalid output"),
 }
 
 
 def _error_response(request: Request, exc: Exception) -> JSONResponse:
-    status, code = next(ERROR_STATUS[cls] for cls in type(exc).__mro__ if cls in ERROR_STATUS)
+    status, code, detail = next(
+        ERROR_STATUS[cls] for cls in type(exc).__mro__ if cls in ERROR_STATUS
+    )
+    if detail is None:
+        detail = str(exc)
+    else:
+        logger.error("%s %s failed: %s", request.method, request.url.path, exc, exc_info=exc)
     return JSONResponse(
-        {"detail": str(exc), "error": code}, status_code=status, headers={ERROR_HEADER: code}
+        {"detail": detail, "error": code}, status_code=status, headers={ERROR_HEADER: code}
     )
 
 
@@ -136,7 +147,8 @@ def create_app(
     ``engine.batch_decide`` call (see ``MicroBatcher``). This works for any
     backend, including ``VLLMEngine``, which then makes one ``generate`` call
     per batch. With ``api_key``, every endpoint except ``/health`` requires
-    ``Authorization: Bearer <api_key>``.
+    ``Authorization: Bearer <api_key>``, and ``/docs``, ``/redoc``, and
+    ``/openapi.json`` are off.
     """
     batcher = MicroBatcher(engine, window_ms=batch_window_ms, max_batch=max_batch)
 
@@ -148,7 +160,9 @@ def create_app(
         finally:
             batcher.close()
 
-    app = FastAPI(title="Futurix Decision API", version=__version__, lifespan=lifespan)
+    # The interactive docs and schema would be open endpoints, so a key turns them off.
+    docs = {"docs_url": None, "redoc_url": None, "openapi_url": None} if api_key else {}
+    app = FastAPI(title="Futurix Decision API", version=__version__, lifespan=lifespan, **docs)
     app.state.batcher = batcher
     for error in ERROR_STATUS:
         app.add_exception_handler(error, _error_response)

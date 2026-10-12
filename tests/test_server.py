@@ -54,18 +54,26 @@ class ErrorStatusTests(unittest.TestCase):
         return http.post("/v1/decision/choice", json=CHOICE), http, backend
 
     def test_each_sdk_error_has_its_status_and_body(self):
+        response, _, _ = self.post(ConfigError("prompt too long"))
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json(), {"detail": "prompt too long", "error": "config"})
+        self.assertEqual(response.headers[ERROR_HEADER], "config")
         cases = [
-            (ConfigError("prompt too long"), 422, "config"),
-            (CheckpointError("missing head"), 500, "checkpoint"),
-            (BackendError("upstream down"), 502, "backend"),
-            (InvalidOutputError("probabilities sum to 2"), 502, "invalid_output"),
+            (CheckpointError("missing /srv/models/head.safetensors"), 500, "checkpoint"),
+            (BackendError("POST http://10.0.0.5:9000/v1 returned HTTP 500"), 502, "backend"),
+            (InvalidOutputError("http://10.0.0.5:9000 sent sum 2"), 502, "invalid_output"),
         ]
         for error, status, code in cases:
             with self.subTest(error=type(error).__name__):
-                response, _, _ = self.post(error)
+                with self.assertLogs("futurix_decision", "ERROR") as logs:
+                    response, _, _ = self.post(error)
                 self.assertEqual(response.status_code, status)
-                self.assertEqual(response.json(), {"detail": str(error), "error": code})
+                self.assertEqual(response.json()["error"], code)
                 self.assertEqual(response.headers[ERROR_HEADER], code)
+                # Upstream addresses and local paths stay in the server log.
+                self.assertNotIn("10.0.0.5", response.text)
+                self.assertNotIn("/srv/models", response.text)
+                self.assertIn(str(error), "\n".join(logs.output))
 
     @patch("time.sleep")
     def test_client_does_not_retry_invalid_output(self, sleep):
@@ -413,6 +421,17 @@ class AuthTests(unittest.TestCase):
 
     def test_health_stays_open(self):
         self.assertEqual(self.http.get("/health").status_code, 200)
+
+    def test_api_docs_are_off_with_a_key(self):
+        from fastapi.testclient import TestClient
+
+        from test_sft import tiny_model
+
+        open_http = TestClient(app_for(tiny_model()))
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            with self.subTest(path=path):
+                self.assertEqual(self.http.get(path).status_code, 404)
+                self.assertEqual(open_http.get(path).status_code, 200)
 
     def test_client_sends_its_api_key(self):
         app = self.http.app
