@@ -326,7 +326,12 @@ class DecisionModel(DecisionShortcuts):
             self.decision_head.eval()
         with torch.inference_mode():
             batch = self.forward_decisions(examples)
-            probabilities = torch.softmax(batch.logits.float() / self.config.temperature, dim=-1)
+            logits = batch.logits.float()
+            if batch.null_slot is not None:
+                # A result reports probabilities over the options, so leave abstention out.
+                null = torch.tensor([batch.null_slot], device=logits.device)
+                logits = logits.index_fill(1, null, float("-inf"))
+            probabilities = torch.softmax(logits / self.config.temperature, dim=-1)
             probabilities = probabilities.cpu()
         if device.type == "cuda":
             torch.cuda.synchronize(device)

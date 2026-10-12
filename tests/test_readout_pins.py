@@ -15,7 +15,7 @@ from pathlib import Path
 import torch
 
 from futurix_decision import DecisionInput, DecisionModel, load_model
-from futurix_decision.models.custom_head import HEAD_WEIGHTS
+from futurix_decision.models.custom_head import HEAD_WEIGHTS, PointerDecisionHead
 from test_bosun import bosun_tiny_model
 from test_custom_head import make_model
 from test_decision_model import tiny_checkpoint
@@ -127,7 +127,7 @@ class PinnedReadoutTests(unittest.TestCase):
             with self.subTest(readout=name), tempfile.TemporaryDirectory() as temp:
                 assert_readouts(readouts(BUILDERS[name](Path(temp))), expected, name)
 
-    def test_pointer_abstain_head_is_rejected_at_forward(self):
+    def test_pointer_abstain_head_appends_its_logit_last(self):
         base = make_model()
         model = DecisionModel(
             base.backbone,
@@ -137,8 +137,31 @@ class PinnedReadoutTests(unittest.TestCase):
             decision_tokens=16,
             max_sequence_length=256,
         )
-        with self.assertRaisesRegex(ValueError, "one logit per supplied option"):
-            model.forward_decisions(INPUTS[:1])
+        with torch.no_grad():
+            batch = model.forward_decisions(INPUTS)
+        width = max(len(row.options) for row in INPUTS)
+        self.assertEqual(batch.null_slot, width)
+        self.assertEqual(tuple(batch.logits.shape), (len(INPUTS), width + 1))
+        for row, example in enumerate(INPUTS):
+            assigned = batch.assigned_logits(row)
+            self.assertEqual(len(assigned), len(example.options) + 1)
+            self.assertTrue(torch.isfinite(assigned).all())
+        # Rows with fewer options keep their padding columns masked, not the abstain column.
+        self.assertEqual(batch.logits[1, 2].item(), INF)
+        # Inference reports a distribution over the options only.
+        for example, result in zip(INPUTS, model.batch_decide(INPUTS), strict=True):
+            self.assertEqual(list(result.probabilities), example.options)
+            self.assertAlmostEqual(sum(result.probabilities.values()), 1.0, places=5)
+
+
+class PointerHeadTests(unittest.TestCase):
+    def test_head_masks_unavailable_options(self):
+        head = PointerDecisionHead(4, abstain=True)
+        available = torch.tensor([[True, True, False]])
+        logits = head(torch.randn(1, 4), torch.randn(1, 3, 4), available)
+        self.assertEqual(tuple(logits.shape), (1, 4))
+        self.assertEqual(logits[0, 2].item(), INF)
+        self.assertTrue(torch.isfinite(logits[0, [0, 1, 3]]).all())
 
 
 class LegacyCheckpointTests(unittest.TestCase):

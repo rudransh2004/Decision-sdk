@@ -70,6 +70,7 @@ class PointerDecisionHead(nn.Module):
         q = self.query(state.to(dtype))
         k = self.option(options.to(dtype))
         candidates = (q.unsqueeze(1) * k).sum(dim=-1) / self.scale
+        candidates = candidates.masked_fill(~available, float("-inf"))
         return (
             torch.cat((candidates, self.null(state.to(dtype))), dim=-1)
             if self.null is not None

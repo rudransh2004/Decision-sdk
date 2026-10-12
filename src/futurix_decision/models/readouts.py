@@ -415,11 +415,21 @@ class PointerReadout(HeadReadout):
         last = encoded["attention_mask"].sum(dim=1).to(hidden.device) - 1
         state = hidden[torch.arange(len(examples), device=hidden.device), last]
         logits = head(state, candidates, available)
-        if logits.shape != available.shape:
-            raise ValueError("decision head must return one logit per supplied option")
-        if not torch.isfinite(logits[available]).all():
+        # A head trained to abstain appends its abstain logit after the widest row's options.
+        null_slot = max(sizes) if self.model.config.learn_abstain else None
+        outputs = (
+            available
+            if null_slot is None
+            else torch.cat((available, available.new_ones((len(examples), 1))), dim=1)
+        )
+        if logits.shape != outputs.shape:
+            raise ValueError(
+                "decision head must return one logit per supplied option"
+                + (" followed by one abstain logit" if null_slot is not None else "")
+            )
+        if not torch.isfinite(logits[outputs]).all():
             raise ValueError("decision head produced non-finite logits")
-        return DecisionBatch(logits.masked_fill(~available, float("-inf")), slots)
+        return DecisionBatch(logits.masked_fill(~outputs, float("-inf")), slots, null_slot)
 
 
 class LetterCodeReadout(HeadReadout):

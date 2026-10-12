@@ -214,3 +214,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   whose `decision_config.json` still names `pplx` raises `CheckpointError`; set
   `head_type` to `letter_code` and `head_prompt_version` to `letter-code-v1` in that file.
 - The `native-http` extra. `httpx` is now a base dependency.
+
+### Fixed
+
+- A pointer head with `learn_abstain=True` no longer fails every forward with "decision
+  head must return one logit per supplied option". `forward_decisions` returns the
+  abstain logit after the widest row's options, sets `DecisionBatch.null_slot`, and
+  `assigned_logits(row)` ends with it. Inference results still report probabilities
+  over the options only.
+- `PointerDecisionHead.forward` applies its `available` mask: unavailable option
+  positions get `-inf`.
