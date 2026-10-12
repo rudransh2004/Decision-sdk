@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 from itertools import islice
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -105,9 +106,9 @@ def _train(args: argparse.Namespace) -> None:
         "full",
     )
     load_kwargs = {
-            key: model_section[key]
-            for key in ("decision_tokens", "max_sequence_length", "seed", "head_type", "head_config")
-            if key in model_section
+        key: model_section[key]
+        for key in ("decision_tokens", "max_sequence_length", "seed", "head_type", "head_config")
+        if key in model_section
     }
     if args.decision_tokens is not None:
         load_kwargs["decision_tokens"] = args.decision_tokens
@@ -213,16 +214,13 @@ def _train(args: argparse.Namespace) -> None:
     calibration = _config_for(CalibrationConfig, config, "calibration", overrides)
     rlcd = _config_for(RLCDConfig, config, "rlcd", overrides)
     if args.log_jsonl:
-        from dataclasses import replace
-
         sft = replace(sft, log_jsonl=args.log_jsonl)
         calibration = replace(calibration, log_jsonl=args.log_jsonl)
         rlcd = replace(rlcd, log_jsonl=args.log_jsonl)
-    heldout = args.calibration_dataset
     trainer = DecisionTrainer(
         model=model,
         dataset=dataset,
-        calibration_dataset=heldout,
+        calibration_dataset=args.calibration_dataset,
         sft_config=sft,
         calibration_config=calibration,
         rlcd_config=rlcd,
@@ -384,11 +382,10 @@ def _serve(args: argparse.Namespace) -> None:
         if args.device != "cpu" and args.model_format != "native":
             import torch
 
-            if not torch.cuda.is_available():
-                if args.device == "cuda":
-                    raise ValueError("CUDA requested but not available")
-            else:
+            if torch.cuda.is_available():
                 engine.backbone.to("cuda")
+            elif args.device == "cuda":
+                raise ValueError("CUDA requested but not available")
     uvicorn.run(create_app(engine), host=args.host, port=args.port)
 
 

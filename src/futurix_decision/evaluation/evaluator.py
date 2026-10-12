@@ -202,8 +202,6 @@ def evaluate(
                 )
             else:
                 decisions = model.batch_decide(examples)
-                if len(decisions) != len(examples):
-                    raise ValueError("decision engine returned a different number of rows")
                 predictions = (
                     (row, torch.tensor(
                         [result.probabilities[option] for option in row.options],

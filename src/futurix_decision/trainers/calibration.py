@@ -17,7 +17,7 @@ from futurix_decision.trainers.sft import DatasetSource, SFTConfig, SFTTrainer
 
 @dataclass(frozen=True)
 class CalibrationConfig(SFTConfig):
-    ce_weight: float = 1.0  # Cross-entropy is negative expected log score.
+    ce_weight: float = 1.0
     brier_weight: float = 0.2
 
     def __post_init__(self) -> None:

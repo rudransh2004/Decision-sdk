@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from futurix_decision.datasets.schema import DecisionInput, State
 from futurix_decision.inference.schemas import DecisionResult
@@ -145,18 +145,18 @@ def _images_for_native(images: Sequence[Any], family: str) -> list[Any]:
 def _verify_openjev(client: Any, checkpoint: str) -> None:
     response = client.get("/v1/version")
     response.raise_for_status()
-    version = response.json()
+    info = response.json()
     expected = checkpoint.rsplit("/", 1)[-1].lower()
-    served = str(version.get("model_dir", "")).lower()
+    served = str(info.get("model_dir", "")).lower()
     temperature, noul_temperature = (
         (1.07, 1.074766) if "Flash" in checkpoint else (0.85, 1.829074)
     )
-    flags = version.get("flags", {})
+    flags = info.get("flags", {})
     if not isinstance(flags, Mapping) or (
         served != expected
-        or not math.isclose(float(version.get("T", -1)), temperature, abs_tol=1e-6)
-        or not math.isclose(float(version.get("noul_t", -1)), noul_temperature, abs_tol=1e-6)
-        or not math.isclose(float(version.get("noul_bias", -1)), 0, abs_tol=1e-6)
+        or not math.isclose(float(info.get("T", -1)), temperature, abs_tol=1e-6)
+        or not math.isclose(float(info.get("noul_t", -1)), noul_temperature, abs_tol=1e-6)
+        or not math.isclose(float(info.get("noul_bias", -1)), 0, abs_tol=1e-6)
         or flags.get("targeted") is not True
         or flags.get("instr_style") != "pyrepr"
     ):
@@ -658,7 +658,7 @@ class NativeDecisionModel:
                     raise ValueError("Laya's encoder does not accept images")
                 schema = json.dumps(_question(row), ensure_ascii=False, sort_keys=True)
                 grouped.setdefault(schema, []).append((index, row))
-            results: list[DecisionResult | None] = [None] * len(examples)
+            results: dict[int, DecisionResult] = {}
             for schema, group in grouped.items():
                 started = time.perf_counter()
                 predictions = self.runtime.predict_batch(
@@ -673,9 +673,7 @@ class NativeDecisionModel:
                     if not isinstance(answer, Mapping):
                         raise ValueError("Laya did not answer the requested question")
                     results[index] = _result(row, answer, latency, confidence_threshold)
-            if any(result is None for result in results):
-                raise RuntimeError("Laya batch result alignment is incomplete")
-            return cast(list[DecisionResult], results)
+            return [results[index] for index in range(len(examples))]
         # Other native readouts can have heterogeneous schemas and runtimes.
         return [self.decide(row, confidence_threshold=confidence_threshold) for row in examples]
 

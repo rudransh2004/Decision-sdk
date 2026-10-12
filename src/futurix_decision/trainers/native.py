@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,14 @@ def _write_manifest(path: Path, model: NativeDecisionModel) -> None:
     )
 
 
+def _option_keys(row: DecisionExample) -> list[str]:
+    if row.kind == "noul":
+        return ["false", "true"]
+    if row.kind == "score":
+        return [str(i) for i in range(len(row.options))]
+    return row.options
+
+
 def _grouped_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]]:
     """Restore multi-question records when the examples share a grouped state."""
     current: dict[str, Any] | None = None
@@ -63,13 +72,8 @@ def _grouped_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]
         if question_id in current["questions"]:
             raise ValueError(f"group {group!r} repeats question ID {question_id!r}")
         current["questions"][question_id] = _question(row)
-        keys = (
-            ["false", "true"] if row.kind == "noul"
-            else [str(i) for i in range(len(row.options))] if row.kind == "score"
-            else row.options
-        )
         current["gold"][question_id] = {
-            "probabilities": dict(zip(keys, row.target_distribution(), strict=True))
+            "probabilities": dict(zip(_option_keys(row), row.target_distribution(), strict=True))
         }
     if current is not None:
         yield current
@@ -86,13 +90,13 @@ def _gliner_record(row: DecisionExample, *, target_policy: str) -> dict[str, Any
     if row.images:
         raise ValueError("GLiNER's encoder cannot train on image decisions")
     target = row.target_distribution()
+    if target_policy not in ("error", "argmax"):
+        raise ValueError("target_policy must be 'error' or 'argmax'")
     if max(target) < 1 - 1e-7 and target_policy != "argmax":
         raise ValueError(
             "GLiNER's native classifier only accepts hard labels; use "
             "target_policy='argmax' to explicitly discard soft probabilities"
         )
-    if target_policy not in ("error", "argmax"):
-        raise ValueError("target_policy must be 'error' or 'argmax'")
     winner = row.options[max(range(len(target)), key=target.__getitem__)]
     labels = dict(zip(row.options, row.candidate_descriptions, strict=True)) if row.candidate_descriptions else None
     text = row.state if isinstance(row.state, str) else json.dumps(row.state, ensure_ascii=False)
@@ -189,8 +193,6 @@ def _train_clef(
     model: NativeDecisionModel, rows: list[DecisionExample], path: Path,
     config: NativeSFTConfig,
 ) -> dict[str, Any]:
-    import shutil
-
     import torch
     import torch.nn.functional as functional
     from safetensors.torch import save_file
@@ -227,21 +229,16 @@ def _train_clef(
             if len(logits) != len(examples) or any(len(question) != 1 for question in logits):
                 raise ValueError("Clef returned unexpected joint-schema logits")
             terms = []
-            for question, row in zip(logits, examples, strict=True):
+            for i, (question, row) in enumerate(zip(logits, examples, strict=True)):
                 prediction = question[0].float()
                 if len(prediction) != len(row.options):
                     raise ValueError("Clef returned a different option count")
                 # The native encoder may sort choice IDs. Align targets to the
                 # option IDs actually encoded instead of assuming user order.
-                option_ids = records[len(terms)].questions[0].option_ids
-                indices = [
-                    (["false", "true"] if row.kind == "noul" else
-                     [str(i) for i in range(len(row.options))] if row.kind == "score"
-                     else row.options).index(option)
-                    for option in option_ids
-                ]
+                keys = _option_keys(row)
+                distribution = row.target_distribution()
                 target = torch.tensor(
-                    [row.target_distribution()[i] for i in indices],
+                    [distribution[keys.index(option)] for option in records[i].questions[0].option_ids],
                     device=prediction.device, dtype=torch.float32,
                 )
                 terms.append(-(target * functional.log_softmax(prediction, dim=-1)).sum())

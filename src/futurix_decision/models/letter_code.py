@@ -31,17 +31,11 @@ def answer_codes(tokenizer: Any, count: int) -> tuple[list[str], list[int]]:
     prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
     codes: list[str] = []
     token_ids: list[int] = []
-    for code in string.ascii_uppercase:
-        ids = tokenizer.encode(code, add_special_tokens=False)
-        if (
-            len(ids) == 1 and ids[0] != tokenizer.unk_token_id
-            and ids[0] not in token_ids
-            and tokenizer.encode(prefix + code, add_special_tokens=False) == prefix_ids + ids
-        ):
-            codes.append(code)
-            token_ids.append(ids[0])
-    for pair in itertools.product(string.ascii_uppercase, repeat=2):
-        code = "".join(pair)
+    candidates = itertools.chain(
+        string.ascii_uppercase,
+        ("".join(pair) for pair in itertools.product(string.ascii_uppercase, repeat=2)),
+    )
+    for code in candidates:
         ids = tokenizer.encode(code, add_special_tokens=False)
         if (
             len(ids) == 1 and ids[0] != tokenizer.unk_token_id

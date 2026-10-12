@@ -17,7 +17,7 @@ from futurix_decision.evaluation.metrics import compute_metrics
 from futurix_decision.models import DecisionBatch, DecisionModel
 from futurix_decision.rewards import LogScore, ProperScoringRule, RankedProbabilityScore, SphericalScore
 from futurix_decision.trainers.losses import decision_sft_loss
-from futurix_decision.trainers.sft import SFTConfig, SFTTrainer
+from futurix_decision.trainers.sft import DatasetSource, SFTConfig, SFTTrainer
 
 BaselineMethod = Literal["loo", "group"]
 
@@ -136,10 +136,8 @@ class RLCDTrainer(SFTTrainer):
         self.config: RLCDConfig
         self.rewards = rewards
         self.reference_model = reference_model
-        self._assignment_seed = 0
-        self._step_metrics: dict[str, float] = {}
 
-    def train(self, dataset):
+    def train(self, dataset: DatasetSource) -> list[dict[str, float | int]]:
         if self.reference_model is self.model or (
             self.reference_model is not None
             and self.reference_model.backbone is self.model.backbone

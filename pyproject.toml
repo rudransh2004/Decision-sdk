@@ -50,7 +50,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["futurix_decision"]
+packages = ["src/futurix_decision"]
 
 [project.scripts]
 futurix-decision = "futurix_decision.cli:main"

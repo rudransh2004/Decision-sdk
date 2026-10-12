@@ -16,8 +16,9 @@ from torch.utils.data import DataLoader, IterableDataset
 
 from futurix_decision.datasets import DecisionExample, load_decisions, normalize_decision
 from futurix_decision.datasets.systemone import expand_systemone_row
-from futurix_decision.models import DecisionModel
+from futurix_decision.models import DecisionBatch, DecisionModel
 from futurix_decision.trainers.losses import LossMode, decision_sft_loss
+from futurix_decision.utils.logging import TrainingLogger
 
 FineTuneMethod = Literal["full", "lora", "qlora"]
 DatasetSource = (
@@ -140,6 +141,8 @@ class SFTTrainer:
         self.history: list[dict[str, float | int]] = []
         self._trained = False
         self._accelerator: Any | None = None
+        self._assignment_seed = 0
+        self._step_metrics: dict[str, float] = {}
 
     def _configure_backbone(self) -> None:
         backbone = self.model.backbone
@@ -263,7 +266,7 @@ class SFTTrainer:
             collate_fn=_collate,
         )
 
-    def compute_loss(self, batch: Any, examples: Sequence[DecisionExample]) -> torch.Tensor:
+    def compute_loss(self, batch: DecisionBatch, examples: Sequence[DecisionExample]) -> torch.Tensor:
         return decision_sft_loss(
             batch,
             examples,
@@ -318,7 +321,6 @@ class SFTTrainer:
         self.model.backbone.train()
         step = 0
         microstep = 0
-        from futurix_decision.utils.logging import TrainingLogger
 
         logger = TrainingLogger(
             stdout=self.config.log_stdout if accelerator.is_main_process else False,
@@ -362,7 +364,7 @@ class SFTTrainer:
                             "epoch": epoch + 1,
                             "step": step,
                             "loss": mean.item(),
-                            **getattr(self, "_step_metrics", {}),
+                            **self._step_metrics,
                         }
                         self.history.append(entry)
                         logger.log(entry)

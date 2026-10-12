@@ -48,7 +48,7 @@ def eikos_label_table(tokenizer: Any, width: int) -> tuple[list[str], list[int]]
     ]
     selected = labels[:width]
     ids = [tokenizer.encode(label, add_special_tokens=False) for label in selected]
-    if len(ids) != width or any(len(row) != 1 for row in ids):
+    if any(len(row) != 1 for row in ids):
         raise ValueError("Eikos tokenizer cannot encode its published labels as one token")
     singles = [row[0] for row in ids]
     if len(set(singles)) != width:

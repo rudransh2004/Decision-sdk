@@ -730,8 +730,8 @@ class DecisionModel:
                 ],
             ))
         answers = {}
-        for (question_id, _question), example, result in zip(
-            questions.items(), examples, self.batch_decide(examples), strict=True
+        for question_id, example, result in zip(
+            questions, examples, self.batch_decide(examples), strict=True
         ):
             answer: dict[str, Any] = {
                 "type": example.kind, "probabilities": result.probabilities,

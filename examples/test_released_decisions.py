@@ -85,7 +85,6 @@ def main() -> None:
     if args.max_examples < 1:
         parser.error("--max-examples must be positive")
 
-    # Both flat JSONL and grouped System One records use this one SDK loader.
     rows = load_decisions(args.dataset)
     print(f"SDK loaded {len(rows)} validated decisions from {args.dataset}", flush=True)
     checkpoint = MODELS[args.model]

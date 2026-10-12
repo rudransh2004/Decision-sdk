@@ -38,16 +38,11 @@ def normalize_decisionbench(row: Mapping[str, Any], *, compact: bool = False) ->
         probabilities = [float(candidate_id == row["gold_candidate_id"]) for candidate_id in ids]
     if len(probabilities) != len(candidates):
         raise ValueError("DecisionBench gold probabilities must align with the candidates")
-    if kind == "noul":
-        if len(candidates) != 2:
-            raise ValueError("DecisionBench binary classification requires exactly two candidates")
-        # Preserve the benchmark's presented order, even when true comes first.
-        # Reordering would alter Bosun's row-ID-seeded prompt and its readout.
-        options = ids
-    else:
-        # DecisionBench numeric choices need not be integral or sorted. Their
-        # IDs and labels, not cast integer values, define the native contract.
-        options = ids
+    if kind == "noul" and len(candidates) != 2:
+        raise ValueError("DecisionBench binary classification requires exactly two candidates")
+    # Keep the benchmark's presented order (even when true comes first): reordering
+    # would alter Bosun's row-ID-seeded prompt. Numeric IDs need not be integral or sorted.
+    options = ids
     return DecisionExample(
         id=str(row["row_id"]),
         kind=kind,
