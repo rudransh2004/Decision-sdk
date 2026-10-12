@@ -65,12 +65,14 @@ class Calibrated(DecisionShortcuts):
     def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
     ) -> DecisionResult:
+        """Decide with the wrapped backend, then rescale the probabilities."""
         check_confidence_threshold(confidence_threshold)
         return self._calibrate(example, self.backend.decide(example), confidence_threshold)
 
     def batch_decide(
         self, examples: Sequence[DecisionInput], *, confidence_threshold: float | None = None
     ) -> list[DecisionResult]:
+        """Decide each example with the wrapped backend, then rescale each result."""
         check_confidence_threshold(confidence_threshold)
         results = self.backend.batch_decide(examples)
         return [

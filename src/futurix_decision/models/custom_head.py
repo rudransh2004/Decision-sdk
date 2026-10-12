@@ -63,6 +63,7 @@ class PointerDecisionHead(nn.Module):
     def forward(
         self, state: torch.Tensor, options: torch.Tensor, available: torch.Tensor
     ) -> torch.Tensor:
+        """Return ``[batch, candidates]`` logits for each candidate against the state."""
         if state.ndim != 2 or options.ndim != 3 or available.shape != options.shape[:2]:
             raise ValueError("expected state [B,H], options [B,N,H], available [B,N]")
         # A bf16 backbone can be paired with a fp32 head; autocast is optional.

@@ -154,6 +154,7 @@ class DecisionClient:
     def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
     ) -> DecisionResult:
+        """Decide one example and return its result."""
         return self._post("/v1/decision", _body(example, confidence_threshold))
 
     def batch_decide(
@@ -175,6 +176,7 @@ class DecisionClient:
         question: str = "Which option should be selected?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
+        """Pick one of ``choices`` for ``state``."""
         body = _body(choice_input(state, choices, question), confidence_threshold)
         return self._post(_KIND_PATHS["choice"], body)
 
@@ -185,6 +187,7 @@ class DecisionClient:
         question: str = "Is this true?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
+        """Answer a yes/no question about ``state``; ``decision`` is a bool."""
         body = _body(noul_input(state, question), confidence_threshold)
         return self._post(_KIND_PATHS["noul"], body)
 
@@ -197,13 +200,16 @@ class DecisionClient:
         max_score: int = 5,
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
+        """Rate ``state`` from ``min_score`` to ``max_score``; ``decision`` is an int."""
         example = score_input(state, question, min_score, max_score)
         return self._post(_KIND_PATHS["score"], _body(example, confidence_threshold))
 
     def health(self) -> dict[str, str]:
+        """Return the server's ``/health`` body, such as ``{"status": "ok"}``."""
         return _health(send(self._http, "GET", "/health", max_retries=self.max_retries))
 
     def close(self) -> None:
+        """Close the connection pool if this client created it."""
         if self._owns_client:
             self._http.close()
 
@@ -257,6 +263,7 @@ class AsyncDecisionClient:
     async def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
     ) -> DecisionResult:
+        """Decide one example and return its result."""
         return await self._post("/v1/decision", _body(example, confidence_threshold))
 
     async def batch_decide(
@@ -294,6 +301,7 @@ class AsyncDecisionClient:
         question: str = "Which option should be selected?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
+        """Pick one of ``choices`` for ``state``."""
         body = _body(choice_input(state, choices, question), confidence_threshold)
         return await self._post(_KIND_PATHS["choice"], body)
 
@@ -304,6 +312,7 @@ class AsyncDecisionClient:
         question: str = "Is this true?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
+        """Answer a yes/no question about ``state``; ``decision`` is a bool."""
         body = _body(noul_input(state, question), confidence_threshold)
         return await self._post(_KIND_PATHS["noul"], body)
 
@@ -316,14 +325,17 @@ class AsyncDecisionClient:
         max_score: int = 5,
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
+        """Rate ``state`` from ``min_score`` to ``max_score``; ``decision`` is an int."""
         example = score_input(state, question, min_score, max_score)
         return await self._post(_KIND_PATHS["score"], _body(example, confidence_threshold))
 
     async def health(self) -> dict[str, str]:
+        """Return the server's ``/health`` body, such as ``{"status": "ok"}``."""
         response = await send_async(self._http, "GET", "/health", max_retries=self.max_retries)
         return _health(response)
 
     async def close(self) -> None:
+        """Close the connection pool if this client created it."""
         if self._owns_client:
             await self._http.aclose()
 

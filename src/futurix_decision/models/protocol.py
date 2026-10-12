@@ -26,11 +26,13 @@ class DecisionBackend(Protocol):
 
     def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
-    ) -> DecisionResult: ...
+    ) -> DecisionResult:
+        """Decide one example."""
 
     def batch_decide(
         self, examples: Sequence[DecisionInput], *, confidence_threshold: float | None = None
-    ) -> list[DecisionResult]: ...
+    ) -> list[DecisionResult]:
+        """Decide each example, returning results in input order."""
 
     def choice(
         self,
@@ -39,7 +41,8 @@ class DecisionBackend(Protocol):
         choices: Sequence[str],
         question: str = "Which option should be selected?",
         confidence_threshold: float | None = None,
-    ) -> DecisionResult: ...
+    ) -> DecisionResult:
+        """Pick one of ``choices`` for ``state``."""
 
     def noul(
         self,
@@ -47,7 +50,8 @@ class DecisionBackend(Protocol):
         state: State,
         question: str = "Is this true?",
         confidence_threshold: float | None = None,
-    ) -> DecisionResult: ...
+    ) -> DecisionResult:
+        """Answer a yes/no question about ``state``."""
 
     def score(
         self,
@@ -57,7 +61,8 @@ class DecisionBackend(Protocol):
         min_score: int = 0,
         max_score: int = 5,
         confidence_threshold: float | None = None,
-    ) -> DecisionResult: ...
+    ) -> DecisionResult:
+        """Rate ``state`` from ``min_score`` to ``max_score``."""
 
     def close(self) -> None:
         """Release connections the backend opened; a no-op for in-process models."""

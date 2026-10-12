@@ -104,6 +104,13 @@ def rlcd_policy_loss(
 
 @dataclass(frozen=True)
 class RLCDConfig(SFTConfig):
+    """``SFTConfig`` plus RLCD settings.
+
+    ``group_size`` reports are sampled per row with noise ``noise_sigma``.
+    ``sft_weight`` and ``kl_beta`` anchor the policy to the labels and to the
+    starting model. ``baseline`` is ``"loo"`` (leave-one-out) or ``"group"``.
+    """
+
     group_size: int = 8
     noise_sigma: float = 0.25
     sft_weight: float = 0.2
@@ -121,6 +128,8 @@ class RLCDConfig(SFTConfig):
 
 
 class RLCDTrainer(SFTTrainer):
+    """Train decision logits with a policy gradient over proper-scoring rewards (RLCD)."""
+
     def __init__(
         self,
         model: DecisionModel,
@@ -142,6 +151,7 @@ class RLCDTrainer(SFTTrainer):
         self.reference_model = reference_model
 
     def train(self, dataset: DatasetSource) -> list[dict[str, float | int]]:
+        """Run RLCD on ``dataset`` and return the per-step history."""
         if self.reference_model is self.model or (
             self.reference_model is not None
             and self.reference_model.backbone is self.model.backbone

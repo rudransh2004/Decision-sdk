@@ -249,6 +249,7 @@ class DecisionModel(DecisionShortcuts):
         return EikosDecisionModel.from_native(checkpoint, **hf_kwargs)
 
     def save_pretrained(self, path: str | Path, *, safe_serialization: bool = True) -> None:
+        """Save the backbone, tokenizer, decision head, and ``decision_config.json`` to ``path``."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         adapter_base = None
@@ -285,6 +286,7 @@ class DecisionModel(DecisionShortcuts):
     def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
     ) -> DecisionResult:
+        """Decide one example and return its result."""
         return self._infer([example], [confidence_threshold])[0]
 
     def batch_decide(

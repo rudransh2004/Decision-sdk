@@ -18,6 +18,8 @@ from futurix_decision.trainers.sft import DatasetSource, SFTConfig, SFTTrainer
 
 @dataclass(frozen=True)
 class CalibrationConfig(SFTConfig):
+    """``SFTConfig`` plus the weights of the calibration loss (cross-entropy and Brier)."""
+
     ce_weight: float = 1.0
     brier_weight: float = 0.2
 
@@ -34,6 +36,8 @@ class CalibrationConfig(SFTConfig):
 
 
 class CalibrationTrainer(SFTTrainer):
+    """Fine-tune on cross-entropy plus Brier loss, then fit the model's temperature."""
+
     def __init__(self, model: DecisionModel, *, config: CalibrationConfig | None = None) -> None:
         super().__init__(model, config=config or CalibrationConfig())
         self.config: CalibrationConfig
@@ -58,6 +62,7 @@ class CalibrationTrainer(SFTTrainer):
     def train(
         self, dataset: DatasetSource, *, calibration_dataset: DatasetSource
     ) -> list[dict[str, float | int]]:
+        """Train, then fold the temperature fitted on ``calibration_dataset`` into the model."""
         history = super().train(dataset)
         # The fit is relative to the current temperature; fold it into the model.
         self.model.config.temperature *= fit_temperature(

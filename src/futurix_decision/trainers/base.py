@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 
 
 class DecisionTrainer:
+    """Run decision SFT, calibration, and RLCD on a ``DecisionModel``, then export it.
+
+    ``dataset`` is a path, a Hub dataset ID, or rows. Calibration needs a separate
+    ``calibration_dataset``. ``train(stages=[...])`` runs the stages you name, and
+    ``export(path)`` writes a checkpoint that ``load_model`` reads.
+    """
+
     def __init__(
         self,
         *,
@@ -83,6 +90,11 @@ class DecisionTrainer:
     def train(
         self, *, stages: Sequence[str] = ("decision_sft",)
     ) -> list[dict[str, float | int]] | dict[str, list[dict[str, float | int]]]:
+        """Run the named stages in order and return the history.
+
+        ``stages`` are unique entries from ``decision_sft``, ``calibration``, and ``rlcd``.
+        One stage returns its history; several return a dict keyed by stage.
+        """
         stages = list(stages)
         if (
             not stages
@@ -220,6 +232,7 @@ class DecisionTrainer:
         accelerator.wait_for_everyone()
 
     def save_pretrained(self, path: str | Path, *, safe_serialization: bool = True) -> None:
+        """Save the trained model to ``path``; call after ``train``."""
         if self._active is None:
             raise RuntimeError("train before saving")
         self._active.save_pretrained(path, safe_serialization=safe_serialization)

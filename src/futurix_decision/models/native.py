@@ -39,6 +39,12 @@ from futurix_decision.models.sources import checkpoint_source
 
 @dataclass(frozen=True)
 class NativeCapabilities:
+    """What the SDK supports for a native family.
+
+    ``inference``, ``training``, and ``vllm_inference`` are flags;
+    ``native_readout`` names the publisher's readout.
+    """
+
     inference: bool
     training: bool
     vllm_inference: bool
@@ -299,6 +305,7 @@ class NativeDecisionModel(DecisionShortcuts):
     def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
     ) -> DecisionResult:
+        """Decide one example with the publisher runtime."""
         check_confidence_threshold(confidence_threshold)
         started = time.perf_counter()
         answer = self._predict(example)
@@ -309,6 +316,7 @@ class NativeDecisionModel(DecisionShortcuts):
     def batch_decide(
         self, examples: Sequence[DecisionInput], *, confidence_threshold: float | None = None
     ) -> list[DecisionResult]:
+        """Decide each example, batching when the runtime supports it."""
         check_confidence_threshold(confidence_threshold)
         if not examples:
             return []

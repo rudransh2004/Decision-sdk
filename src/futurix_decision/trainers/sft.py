@@ -27,6 +27,14 @@ DatasetSource = str | Path | Mapping[str, Any] | Iterable[DecisionExample | Mapp
 
 @dataclass(frozen=True)
 class SFTConfig:
+    """Settings for decision SFT.
+
+    ``method`` is ``"full"`` (train every unfrozen parameter), ``"lora"``, or
+    ``"qlora"`` (a pre-quantized 4-bit base). ``loss_mode`` picks hard or soft
+    cross-entropy; ``"auto"`` follows the targets. ``label_smoothing`` mixes
+    targets with a uniform distribution over the available options.
+    """
+
     epochs: int = 1
     batch_size: int = 4
     gradient_accumulation_steps: int = 1
@@ -272,6 +280,7 @@ class SFTTrainer:
         )
 
     def train(self, dataset: DatasetSource) -> list[dict[str, float | int]]:
+        """Train on ``dataset`` and return the per-step history."""
         try:
             from accelerate import Accelerator, DataLoaderConfiguration
             from accelerate.utils import set_seed
@@ -384,6 +393,7 @@ class SFTTrainer:
         return self.history
 
     def save_pretrained(self, path: str | Path, *, safe_serialization: bool = True) -> None:
+        """Save the trained model to ``path``; call after ``train``."""
         if not self._trained:
             raise RuntimeError("train before saving a checkpoint")
         assert self._accelerator is not None
