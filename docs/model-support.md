@@ -76,7 +76,7 @@ Hugging Face cache and accepts local directories as well. When a model
 requires `trust_remote_code=True`, review the upstream implementation,
 pin an immutable revision, and use an isolated environment.
 
-The included tests exercise tiny local fixtures; published-checkpoint
+The source project's tests exercise tiny local fixtures; published-checkpoint
 smoke tests and reported comparisons are described in the
 [README](../README.md#verification-and-limitations). A successful load or
 toy fine-tuning run is not a claim of benchmark parity.

@@ -60,9 +60,10 @@ Next: [getting started](docs/getting-started.md) ·
   model-specific vLLM adapters where implemented.
 
 The package is `futurix-decision` and the Python import is `futurix_decision`.
-This repository ships SDK code and tiny test fixtures, **not** the published
-models or datasets. The technical sections below describe verified paths and
-their limitations; published model weights retain their own licenses.
+The forthcoming source release includes SDK code and tiny test fixtures,
+**not** the published models or datasets. The technical sections below
+describe verified paths and their limitations; published model weights retain
+their own licenses.
 
 ## Installation
 
