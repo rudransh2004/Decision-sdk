@@ -128,20 +128,29 @@ letter_code = load_model(
 
 Each path needs labeled decision SFT; calibration and RLCD can follow.
 Conversion is **not** native-model fine-tuning or instant Jev/Bosun quality.
-Architectural candidates include [SmolLM2 base/chat](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct),
-[Qwen2.5](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct),
-[Qwen3 base/instruct/thinking](https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507),
-[DeepSeek-R1-Distill-Qwen](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B),
-[Mistral](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3),
-[Phi-4 mini](https://huggingface.co/microsoft/Phi-4-mini-instruct),
-[OLMo 2](https://huggingface.co/allenai/OLMo-2-1124-7B-Instruct),
-and [gpt-oss](https://huggingface.co/openai/gpt-oss-20b).
-Qwen3.5-9B has explicit SDK conversion routes; Qwen3.8-27B currently has
-**only** a text-decision letter-code route. These are architecture/routing
-candidates, **not verified released-weight training results**; chat and
-thinking behavior, letter-code tokenization, and hardware must be checked
-per checkpoint. Encoder-only, seq2seq, and arbitrary multimodal LMs are
-not generic conversion targets.
+
+| Raw LLM checkpoint | Variant | Pointer | Bosun | Letter-code |
+|:--|:--|:--:|:--:|:--:|
+| [SmolLM2-135M](https://huggingface.co/HuggingFaceTB/SmolLM2-135M) | Base | C | C | C |
+| [SmolLM2-1.7B-Instruct](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct) | Chat | C | C | C |
+| [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) / [1.7B](https://huggingface.co/Qwen/Qwen3-1.7B) | Base | C | C | C |
+| [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) | Non-thinking chat | C | C | C |
+| [Qwen3-4B-Thinking-2507](https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507) | Thinking | C | C | C |
+| [Qwen2.5-7B-Instruct](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct) | Chat | C | C | C |
+| [DeepSeek-R1-Distill-Qwen-7B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B) | Thinking | C | C | C |
+| [Mistral-7B-Instruct-v0.3](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3) | Chat | C | C | C |
+| [Phi-4-mini-instruct](https://huggingface.co/microsoft/Phi-4-mini-instruct) | Chat | C | C | C |
+| [OLMo-2-1124-7B-Instruct](https://huggingface.co/allenai/OLMo-2-1124-7B-Instruct) | Chat | C | C | C |
+| [gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) | Thinking | C | C | C |
+| [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) / [9B-Base](https://huggingface.co/Qwen/Qwen3.5-9B-Base) | Hybrid; text decisions | S | S | S |
+| [Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B) | Hybrid; text decisions | — | — | S |
+
+**C** = architecture-level candidate, **not** released-weight conversion or
+training verification; letter-code also needs suitable single-token codes.
+**S** = explicit SDK route tested only with small synthetic or mocked models;
+**—** = rejected by the current route. Chat/thinking prompts, tokenizer,
+memory and export must be checked per checkpoint. Encoder-only, seq2seq,
+and arbitrary multimodal LMs are not generic conversion targets.
 [Strategy details and checkpoint-by-checkpoint compatibility](docs/conversion.md).
 
 [Quickstart](docs/getting-started.md) ·
