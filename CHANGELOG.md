@@ -78,9 +78,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`futurix_decision.vllm.batcher.MicroBatcher`): the first waiting row holds a batch
   open for `--batch-window-ms` (default 5) or until `--max-batch` rows (default 32), and
   the batch runs as one `batch_decide` call. Each row keeps its own
-  `confidence_threshold`. If a batch call raises, its rows are retried one at a time, so
-  an error reaches only the requests whose rows cause it. `/metrics` adds
-  `decision_batches_total`.
+  `confidence_threshold`. If a batch call raises `ConfigError` or `InvalidOutputError`,
+  its rows are retried one at a time, so the error reaches only the requests whose rows
+  cause it; any other error, such as a `BackendError` from an unreachable upstream, fails
+  the whole batch with one backend call. A result that is not a `DecisionResult` or lacks
+  one of the row's options fails that request with `InvalidOutputError`, and the worker
+  keeps serving. `/metrics` adds `decision_batches_total`, which does not count the
+  one-row retries. The app's lifespan starts the batcher and shutting it down fails
+  waiting requests with `BackendError`; an app can run through several lifespans.
 - Bearer auth for `futurix-decision serve`: `--api-key` or the `FUTURIX_API_KEY`
   environment variable requires `Authorization: Bearer <key>` on every endpoint except
   `/health` (HTTP 401 otherwise). `create_app(engine, *, api_key=None,

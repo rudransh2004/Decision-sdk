@@ -142,8 +142,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        yield
-        batcher.close()
+        batcher.start()
+        try:
+            yield
+        finally:
+            batcher.close()
 
     app = FastAPI(title="Futurix Decision API", version=__version__, lifespan=lifespan)
     app.state.batcher = batcher

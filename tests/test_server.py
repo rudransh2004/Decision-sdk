@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import os
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -208,11 +209,11 @@ class MicroBatchingTests(unittest.TestCase):
                         kind="choice",
                         decision="a",
                         confidence=1.0,
-                        probabilities={"a": 1.0},
+                        probabilities={"a": 1.0} if row.state == "bad" else {"a": 1.0, "b": 0.0},
                         abstained=False,
                         latency_ms=1.0,
                     )
-                    for _ in examples
+                    for row in examples
                 ]
 
         app = app_for(Partial(None))
@@ -220,7 +221,7 @@ class MicroBatchingTests(unittest.TestCase):
         async def run():
             async with async_client(app, max_retries=0) as client:
                 with self.assertRaises(InvalidOutputError):
-                    await client.choice(state="s", choices=["a", "b"], confidence_threshold=0.5)
+                    await client.choice(state="bad", choices=["a", "b"])
                 return await client.choice(state="s", choices=["a", "b"])
 
         self.assertEqual(asyncio.run(run()).decision, "a")
@@ -246,6 +247,147 @@ class MicroBatchingTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(calls, [2])
+
+
+class Recording(DecisionShortcuts):
+    """A backend that records each batch and fails rows whose state names an error."""
+
+    def __init__(self, errors=None, delay=0.0, result=None):
+        self.errors = errors or {}
+        self.delay = delay
+        self.result = result
+        self.batches = []
+
+    def decide(self, example, *, confidence_threshold=None):
+        return self.batch_decide([example])[0]
+
+    def batch_decide(self, examples, *, confidence_threshold=None):
+        from futurix_decision import DecisionResult
+
+        self.batches.append([row.state for row in examples])
+        time.sleep(self.delay)
+        for row in examples:
+            if row.state in self.errors:
+                raise self.errors[row.state]
+        if self.result is not None:
+            return [self.result(row) for row in examples]
+        return [
+            DecisionResult.from_probabilities(row, [0.25, 0.75], latency_ms=1.0) for row in examples
+        ]
+
+    def close(self):
+        pass
+
+
+def rows(*states):
+    return [DecisionInput(state=state, question="Next?", options=["a", "b"]) for state in states]
+
+
+class BatcherTests(unittest.TestCase):
+    def decide_all(self, backend, examples, **kwargs):
+        from futurix_decision.vllm.batcher import MicroBatcher
+
+        batcher = MicroBatcher(backend, window_ms=50)
+
+        async def run():
+            return await asyncio.wait_for(
+                asyncio.gather(
+                    *(batcher.decide(row, **kwargs) for row in examples), return_exceptions=True
+                ),
+                10,
+            )
+
+        try:
+            return asyncio.run(run()), batcher
+        finally:
+            batcher.close()
+
+    def test_a_backend_outage_fails_the_batch_with_one_call(self):
+        error = BackendError("upstream down")
+        backend = Recording({f"row {i}": error for i in range(32)})
+        results, batcher = self.decide_all(backend, rows(*(f"row {i}" for i in range(32))))
+        self.assertEqual(len(backend.batches), 1)
+        self.assertTrue(all(result is error for result in results))
+        self.assertEqual(batcher.batches, 1)
+
+    def test_retrying_rows_alone_does_not_count_as_batches(self):
+        backend = Recording({"too long": ConfigError("prompt too long")})
+        results, batcher = self.decide_all(backend, rows("ok", "too long", "ok too"))
+        self.assertEqual([len(batch) for batch in backend.batches], [3, 1, 1, 1])
+        self.assertIsInstance(results[1], ConfigError)
+        self.assertEqual(batcher.batches, 1)
+
+    def test_a_malformed_result_fails_only_its_request(self):
+        def result(row):
+            if row.state == "bad":
+                return {"probabilities": {"a": 0.5, "b": 0.5}}
+            return DecisionResult.from_probabilities(row, [0.25, 0.75], latency_ms=1.0)
+
+        from futurix_decision import DecisionResult
+
+        for threshold in (None, 0.5):
+            with self.subTest(confidence_threshold=threshold):
+                backend = Recording(result=result)
+                (good, bad), _ = self.decide_all(
+                    backend, rows("good", "bad"), confidence_threshold=threshold
+                )
+                self.assertEqual(good.decision, "b")
+                self.assertIsInstance(bad, InvalidOutputError)
+
+    def test_the_worker_keeps_serving_after_a_malformed_result(self):
+        from futurix_decision.vllm.batcher import MicroBatcher
+
+        state = {"broken": True}
+
+        def result(row):
+            if state.pop("broken", False):
+                return object()
+            return DecisionResult.from_probabilities(row, [0.25, 0.75], latency_ms=1.0)
+
+        from futurix_decision import DecisionResult
+
+        batcher = MicroBatcher(Recording(result=result), window_ms=1)
+
+        async def run():
+            first = await asyncio.gather(
+                batcher.decide(rows("s")[0], confidence_threshold=0.5), return_exceptions=True
+            )
+            second = await asyncio.wait_for(batcher.decide(rows("s")[0]), 5)
+            return first[0], second
+
+        try:
+            first, second = asyncio.run(run())
+        finally:
+            batcher.close()
+        self.assertIsInstance(first, InvalidOutputError)
+        self.assertEqual(second.decision, "b")
+
+    def test_close_fails_waiting_requests(self):
+        from futurix_decision.vllm.batcher import MicroBatcher
+
+        batcher = MicroBatcher(Recording(delay=0.3), window_ms=1, max_batch=1)
+
+        async def run():
+            pending = [asyncio.ensure_future(batcher.decide(row)) for row in rows("a", "b", "c")]
+            await asyncio.sleep(0.05)
+            batcher.close()
+            return await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), 5)
+
+        results = asyncio.run(run())
+        self.assertTrue(all(isinstance(result, BackendError) for result in results), results)
+        self.assertTrue(all("shutting down" in str(result) for result in results))
+
+
+@unittest.skipUnless(importlib.util.find_spec("fastapi"), "serve extra not installed")
+class LifespanTests(unittest.TestCase):
+    def test_the_app_serves_across_repeated_lifespans(self):
+        from fastapi.testclient import TestClient
+
+        app = app_for(Recording())
+        for _ in range(2):
+            with TestClient(app, raise_server_exceptions=False) as http:
+                response = http.post("/v1/decision/choice", json=CHOICE)
+                self.assertEqual(response.status_code, 200, response.text)
 
 
 @unittest.skipUnless(importlib.util.find_spec("fastapi"), "serve extra not installed")

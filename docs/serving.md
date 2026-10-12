@@ -75,8 +75,11 @@ The server micro-batches concurrent requests for every backend. The first
 waiting row holds a batch open for `--batch-window-ms` (default 5) or until
 `--max-batch` rows (default 32), and the batch runs as one `batch_decide` call
 (one `generate` call with `--backend vllm`). Each row keeps its own
-`confidence_threshold`. If a batch call raises, its rows are retried one at a
-time, so an error reaches only the requests whose rows cause it.
+`confidence_threshold`. If a batch call raises `ConfigError` or
+`InvalidOutputError`, which one row can cause, its rows are retried one at a
+time, so the error reaches only the requests whose rows cause it. Any other
+error, such as a `BackendError` from an unreachable upstream, fails the whole
+batch at once. `decision_batches_total` does not count the one-row retries.
 
 One worker thread makes every backend call, so the event loop keeps accepting
 requests while a batch runs. A row's result does not depend on the rows

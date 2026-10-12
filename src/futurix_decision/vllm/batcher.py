@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,11 +11,16 @@ from functools import partial
 from typing import Any, TypeVar
 
 from futurix_decision.datasets.schema import DecisionInput
-from futurix_decision.errors import ConfigError, InvalidOutputError
+from futurix_decision.errors import BackendError, ConfigError, InvalidOutputError
 from futurix_decision.inference.schemas import DecisionResult, check_confidence_threshold
 from futurix_decision.models.protocol import DecisionBackend
 
 T = TypeVar("T")
+logger = logging.getLogger(__name__)
+
+
+def _shutting_down() -> BackendError:
+    return BackendError("the decision server is shutting down")
 
 
 @dataclass(frozen=True)
@@ -23,9 +29,14 @@ class _Pending:
     confidence_threshold: float | None
     future: asyncio.Future[DecisionResult]
 
-    def resolve(self, result: DecisionResult) -> None:
+    def resolve(self, result: object) -> None:
         if self.future.done():  # The client went away.
             return
+        if not isinstance(result, DecisionResult):
+            raise InvalidOutputError(f"backend returned {type(result).__name__}, not a result")
+        missing = [option for option in self.example.options if option not in result.probabilities]
+        if missing:
+            raise InvalidOutputError(f"backend result is missing options {missing}")
         if self.confidence_threshold is not None:
             result = DecisionResult.from_probabilities(
                 self.example,
@@ -49,8 +60,15 @@ class MicroBatcher:
     the backend never runs two calls at once and the event loop stays free.
 
     The batch runs without a confidence threshold; each row's own threshold
-    is applied to its result. If the batch call raises, every row is retried
-    alone, so an error reaches only the requests whose rows cause it.
+    is applied to its result. If the batch raises ``ConfigError`` or
+    ``InvalidOutputError``, which one row can cause, every row is retried
+    alone so the error reaches only the requests whose rows cause it. Any
+    other error, such as a ``BackendError`` from an unreachable server, fails
+    the whole batch at once. ``batches`` counts batches, not those retries.
+
+    ``start`` runs in the serving event loop (the app's lifespan calls it, and
+    the first request does if no lifespan ran). ``close`` fails every request
+    still waiting; a later ``start`` serves again.
     """
 
     def __init__(
@@ -62,78 +80,117 @@ class MicroBatcher:
         self.window = window_ms / 1000
         self.max_batch = max_batch
         self.batches = 0
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="futurix-decision")
+        self._executor: ThreadPoolExecutor | None = None
         self._queue: asyncio.Queue[_Pending] | None = None
         self._worker: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        """Start the backend thread and the batching task in the running loop.
+
+        Does nothing if they are running; restarts a worker that stopped.
+        """
+        loop = asyncio.get_running_loop()
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="futurix-decision"
+            )
+        if self._queue is None or self._worker is None or self._worker.get_loop() is not loop:
+            self._queue = asyncio.Queue()
+            self._worker = None
+        if self._worker is None or self._worker.done():
+            self._worker = loop.create_task(self._work(self._queue))
 
     async def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
     ) -> DecisionResult:
         check_confidence_threshold(confidence_threshold)
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[DecisionResult] = loop.create_future()
-        self._queue_for(loop).put_nowait(_Pending(example, confidence_threshold, future))
+        self.start()
+        assert self._queue is not None
+        future: asyncio.Future[DecisionResult] = asyncio.get_running_loop().create_future()
+        self._queue.put_nowait(_Pending(example, confidence_threshold, future))
         return await future
 
     async def call(self, function: Callable[..., T], *args: Any) -> T:
         """Run ``function(*args)`` on the backend's worker thread."""
+        self.start()
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, partial(function, *args))
 
     def close(self) -> None:
+        """Stop the worker and fail every request still waiting for a result."""
         if self._worker is not None:
             self._worker.cancel()
-        self._executor.shutdown(wait=False)
-
-    def _queue_for(self, loop: asyncio.AbstractEventLoop) -> asyncio.Queue[_Pending]:
-        # Start the worker on first use, in the loop that serves requests.
-        if self._queue is None or self._worker is None or self._worker.get_loop() is not loop:
-            self._queue = asyncio.Queue()
-            self._worker = loop.create_task(self._work(self._queue))
-        return self._queue
+        if self._queue is not None:
+            while not self._queue.empty():
+                self._queue.get_nowait().fail(_shutting_down())
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)
+        self._executor = self._queue = self._worker = None
 
     async def _work(self, queue: asyncio.Queue[_Pending]) -> None:
-        loop = asyncio.get_running_loop()
-        while True:
-            batch = [await queue.get()]
-            deadline = loop.time() + self.window
-            while len(batch) < self.max_batch:
-                if not queue.empty():
-                    batch.append(queue.get_nowait())
-                    continue
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    break
-                # asyncio.wait leaves an unfinished get cancellable without losing a row.
-                getter = asyncio.ensure_future(queue.get())
-                await asyncio.wait({getter}, timeout=remaining)
-                if not getter.done():
-                    getter.cancel()
-                    break
-                batch.append(getter.result())
-            await self._run(batch)
+        batch: list[_Pending] = []
+        try:
+            while True:
+                batch = []
+                await self._collect(queue, batch)
+                try:
+                    await self._run(batch)
+                except Exception as error:
+                    logger.exception("decision batch failed")
+                    for item in batch:
+                        item.fail(error)
+        except asyncio.CancelledError:
+            for item in batch:
+                item.fail(_shutting_down())
+            raise
 
-    async def _run(self, batch: Sequence[_Pending]) -> None:
+    async def _collect(self, queue: asyncio.Queue[_Pending], batch: list[_Pending]) -> None:
+        loop = asyncio.get_running_loop()
+        batch.append(await queue.get())
+        deadline = loop.time() + self.window
+        while len(batch) < self.max_batch:
+            if not queue.empty():
+                batch.append(queue.get_nowait())
+                continue
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return
+            # asyncio.wait leaves an unfinished get cancellable without losing a row.
+            getter = asyncio.ensure_future(queue.get())
+            await asyncio.wait({getter}, timeout=remaining)
+            if not getter.done():
+                getter.cancel()
+                return
+            batch.append(getter.result())
+
+    async def _run(self, batch: Sequence[_Pending], *, retry: bool = False) -> None:
         rows = [item for item in batch if not item.future.done()]
         if not rows:
             return
+        if not retry:
+            self.batches += 1
         try:
             results = await self.call(self._batch_decide, [item.example for item in rows])
-        except Exception as error:
+        except (ConfigError, InvalidOutputError) as error:
             if len(rows) == 1:
                 rows[0].fail(error)
                 return
             for item in rows:
-                await self._run([item])
+                await self._run([item], retry=True)
+            return
+        except Exception as error:
+            for item in rows:
+                item.fail(error)
             return
         for item, result in zip(rows, results, strict=True):
             try:
                 item.resolve(result)
-            except KeyError as error:
-                item.fail(InvalidOutputError(f"backend result is missing option {error}"))
+            except InvalidOutputError as error:
+                item.fail(error)
+            except Exception as error:
+                item.fail(InvalidOutputError(f"backend returned a malformed result: {error}"))
 
     def _batch_decide(self, examples: list[DecisionInput]) -> list[DecisionResult]:
-        self.batches += 1
         results = self.backend.batch_decide(examples)
         if len(results) != len(examples):
             raise InvalidOutputError(
