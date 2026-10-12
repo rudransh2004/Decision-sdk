@@ -4,7 +4,7 @@ The data schemas and loaders import without torch. Local models, trainers, and
 evaluation load on first access and need ``futurix-decision[torch]``.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 import logging
 from typing import TYPE_CHECKING

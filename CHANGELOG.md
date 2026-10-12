@@ -6,16 +6,178 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
+## [0.2.0] — 2026-10-12
 
-- The package logs through `logging.getLogger("futurix_decision")` and its child loggers,
-  with a `NullHandler` on the package logger, so importing it never configures logging.
-  `TrainingLogger` and the evaluator send progress output to the logger instead of
-  `print`; the JSONL metrics files are unchanged. Per-step metrics log at INFO when
-  `log_stdout` is set and at DEBUG otherwise.
-- The CLI has a global `--log-level` flag (default `INFO`) that sends progress and status
-  messages to stderr. Command results (JSON for `train`, `evaluate`, `export`) still go to
-  stdout. The "serving without an API key" notice is now a `logger.warning`.
+0.2 splits the SDK into a torch-free core and optional runtimes, gives results one typed
+shape, and adds a client, server batching and auth, and a family-adapter registry. It has
+breaking changes, marked **Breaking** below. Work through the checklist, then see the
+per-change notes.
+
+### Migrating from 0.1
+
+1. **Install.** The base install no longer pulls in torch or transformers, and the
+   `native-http` extra is gone (`httpx` is a base dependency).
+
+   ```python
+   # before: pip install futurix-decision            (torch included)
+   #         pip install "futurix-decision[native-http]"
+   # after:  pip install "futurix-decision[torch]"     (or a model-family extra)
+   #         pip install futurix-decision              (client and schemas only)
+   ```
+
+   `DecisionModel`, trainers, `evaluate`, `fit_temperature`, and the rewards raise
+   `MissingDependencyError` (an `ImportError`) when torch is missing.
+
+2. **`DecisionResult.decision` has one type per kind**, and results carry `kind`.
+   `to_dict()` is now pydantic's `model_dump()`. `DecisionResponse` is gone: the server and
+   `DecisionClient` both use `DecisionResult`, so upgrade client and server together.
+
+   ```python
+   # before
+   if result.decision == "true":
+       ...
+   payload = result.to_dict()
+   # after
+   if result.decision is True:
+       ...  # noul: bool, score: int, choice: str, None if abstained
+   payload = result.model_dump()
+   print(result.kind)  # "noul", "score", or "choice"
+   ```
+
+   A `preserve_order` row whose candidate IDs are not `true`/`false` or integer levels
+   returns `decision=None` with `abstained=False`; read the winner from `probabilities`.
+
+3. **`latency_ms` is per row.** Batches used to stamp the whole batch time on every row.
+
+   ```python
+   # before: batch_total = results[0].latency_ms
+   # after:
+   batch_total = sum(r.latency_ms for r in results)
+   ```
+
+4. **`pplx` aliases are removed.** Use `letter_code` and `letter-code-v1`.
+
+   ```python
+   # before
+   model = load_model("Qwen/Qwen3.5-9B", convert=True, strategy="pplx")
+   # after
+   model = load_model("Qwen/Qwen3.5-9B", convert=True, strategy="letter_code")
+   ```
+
+   A checkpoint whose `decision_config.json` names `pplx` raises `CheckpointError`. Edit
+   that file: set `head_type` to `letter_code` and `head_prompt_version` to
+   `letter-code-v1`. The same applies to `train --convert-strategy`.
+
+5. **`load_model` has an explicit signature**: `family`, `convert`, `strategy`, `head_type`,
+   `train_backbone`, `revision`, `device`, and `**family_kwargs`. It is typed to return
+   `DecisionBackend`, so narrow it before calling family-specific methods. `head_type` and
+   `train_backbone` raise `ConfigError` for releases that reject them.
+
+   ```python
+   from futurix_decision import DecisionModel, load_model
+
+   model = load_model("./my-checkpoint", family="futurix", device="cuda")
+   if isinstance(model, DecisionModel):
+       model.to("cuda")
+   ```
+
+6. **Exception types.** The SDK raises its own errors (all subclass `FuturixError`).
+   `ConfigError` still subclasses `ValueError`, and `MissingDependencyError` still
+   subclasses `ImportError`. `CheckpointError` and `InvalidOutputError` do not, so
+   widen those handlers.
+
+   ```python
+   from futurix_decision import CheckpointError, InvalidOutputError
+
+   # before: except (ValueError, FileNotFoundError):
+   # after:
+   try:
+       model = load_model(path)
+   except (CheckpointError, FileNotFoundError):  # a missing local directory is still FileNotFoundError
+       ...
+   # malformed model output: except InvalidOutputError (a BackendError)
+   ```
+
+7. **`fit_temperature` returns the temperature and no longer mutates the model.** Wrap the
+   backend with `Calibrated` to apply it.
+
+   ```python
+   from futurix_decision import Calibrated, fit_temperature
+
+   # before
+   fit_temperature(model, heldout)  # set model.temperature
+   # after
+   calibrated = Calibrated(model, fit_temperature(model, heldout))
+   # to persist into a saved checkpoint instead:
+   model.config.temperature = 1.0
+   model.config.temperature = fit_temperature(model, heldout)
+   ```
+
+8. **Model settings moved to `model.config`**, a `DecisionModelConfig`.
+   `model.temperature`, `model.head_type`, `model.prompt_format`,
+   `model.max_sequence_length`, `model.source_checkpoint`, and the other settings are gone,
+   as are the private `_token_ids`, `_marker_id`, `_prompt_and_slots`, and `_input_device`.
+
+   ```python
+   # before: model.temperature = 1.3; model._token_ids
+   # after:
+   model.config.temperature = 1.3
+   model.readout.token_ids
+   ```
+
+   `DecisionBatch` now lives in `futurix_decision.models.readouts` (still exported from
+   `futurix_decision.models`).
+
+9. **Family plumbing.** `models.sources.require_checkpoint_files` is gone; each family
+   adapter checks its own files. `register_backend` and `create_backend` are gone; implement
+   a `FamilyAdapter` and call `register_family`. The separate family tables
+   (`FAMILIES`, `ModelFamily`, `identify_family`, `ALIASES`, `infer_local_family`
+   in `models.sources`, and others listed under Removed) now live on adapters, read through
+   `futurix_decision.models.registry`. `LetterAdapter(...)` and `NoxLuxAdapter(...)` no
+   longer take constructor arguments.
+
+   ```python
+   from futurix_decision import FamilyAdapter, register_family
+   from futurix_decision.models.registry import get_family
+
+   # before: require_checkpoint_files(path, "laya")
+   get_family("laya").requires(path)
+   register_family(MyAdapter())  # replaces register_backend(...)
+   ```
+
+10. **Server.** `create_vllm_app` is gone. `create_app` takes any `DecisionBackend` and
+    adds auth and batching settings. `serve --host` defaults to `127.0.0.1` without an API
+    key, and to `0.0.0.0` with one, so pass `--host 0.0.0.0` explicitly (and a key) to
+    keep serving on the network. Set `--api-key` or `FUTURIX_API_KEY`: clients then send
+    `Authorization: Bearer <key>`, and `/docs`, `/redoc`, and `/openapi.json` turn off.
+    Error statuses changed: `ConfigError` is 422, `CheckpointError` 500, and
+    `BackendError` and `InvalidOutputError` 502 (invalid output used to be 500).
+
+    ```python
+    from futurix_decision import DecisionClient
+    from futurix_decision.vllm.api import create_app
+    from futurix_decision.vllm.engine import VLLMEngine
+
+    # before: create_vllm_app(checkpoint, **kwargs)
+    app = create_app(VLLMEngine(checkpoint, **kwargs), api_key="secret")
+    client = DecisionClient("http://127.0.0.1:8000", api_key="secret")
+    ```
+
+11. **`--model-format`.** It loads through the family registry and accepts `standard`,
+    `native`, and every registered family except publisher runtimes (Laya, Kev, and the
+    rest stay behind `native`). `serve` accepts `bosun`, and an unknown YAML
+    `model.format` in `train` raises `ConfigError` instead of training as `standard`.
+    `--revision` now applies to every format in `export` and `serve`.
+
+12. **Logging.** The package logs through `logging.getLogger("futurix_decision")` and
+    never configures handlers; progress output that used `print` goes to the logger. Call
+    `logging.basicConfig(level=logging.INFO)` to see it. The CLI has `--log-level`
+    (default `INFO`) and writes progress to stderr; command results stay on stdout.
+
+13. **Smaller breaks.** `compute_metrics` takes sequences of floats (call `.tolist()` on
+    multi-dimensional tensors); `prepare_decider_rows` returns `LabelRow`s with
+    `label_ids` in place of `DeciderRow.letter_ids`; `transformers>=5.17,<6` and
+    `vllm>=0.30,<1` are the supported ranges.
 
 ### Added
 
@@ -108,6 +270,15 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The package logs through `logging.getLogger("futurix_decision")` and its child loggers,
+  with a `NullHandler` on the package logger, so importing it never configures logging.
+  `TrainingLogger` and the evaluator send progress output to the logger instead of
+  `print`; the JSONL metrics files are unchanged. Per-step metrics log at INFO when
+  `log_stdout` is set and at DEBUG otherwise.
+- The CLI has a global `--log-level` flag (default `INFO`) that sends progress and status
+  messages to stderr. Command results (JSON for `train`, `evaluate`, `export`) still go to
+  stdout. The "serving without an API key" notice is now a `logger.warning`.
+
 - **Breaking:** `DecisionResult.decision` has one type per kind: `bool` for noul, `int`
   for score, `str` for choice, and `None` when abstained. `preserve_order` rows no longer
   return the option ID string: a true-first noul row returns `True`/`False`. A
@@ -155,8 +326,6 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   family registry, so a registered `LabelReadoutModel` family loads through it like
   Decider, JPT, and Eikos. A setting that conflicts with the checkpoint raises
   `cannot override the saved checkpoint's <field>`, naming the field.
-- `evaluate(..., max_batch_tokens=...)` on Decider, JPT, and Eikos measures each row's
-  own tokenized prompt. It used to measure the generic Futurix prompt instead.
 - **Breaking:** each publisher runtime (Kev, Laya, GLiNER, Clef, PPLX Decider, OpenJev,
   Nox, Lux, Liquid d1) is its own `PublisherAdapter` subclass in
   `futurix_decision.models.families`, which loads, checks, runs, and fine-tunes it;
@@ -195,9 +364,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     --revision` raises `ConfigError`, as `evaluate` does.
   - `serve --device` also moves a custom decision head, and `--device cuda` without
     CUDA raises `ConfigError` for `native` too.
-- `evaluate(..., max_batch_tokens=...)` on a `VLLMEngine` measures each row with
-  `VLLMEngine.prompt_tokens`. Decider, JPT, and Eikos exports used to be measured with
-  the generic Futurix prompt.
+- `evaluate(..., max_batch_tokens=...)` measures each row's own prompt: the tokenized
+  prompt on Decider, JPT, and Eikos models, and `VLLMEngine.prompt_tokens` on a
+  `VLLMEngine`. Both used to be measured with the generic Futurix prompt.
 - `--model-format <family>` in `evaluate`, `export`, `serve`, and `train --resume` loads
   through `load_model(..., family=...)`: short names such as `qwen3.5-9b` resolve, a
   local copy's files are checked by the family's `requires`, and a checkpoint of another
