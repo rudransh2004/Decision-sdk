@@ -592,8 +592,7 @@ CUDA_VISIBLE_DEVICES='' python examples/test_released_decisions.py gliner \
 
 The driver also accepts `bosun-1.7b`, `laya-multilingual`, `kev`,
 `clef-flash`, `clef`, and `pplx-decider`. Install each publisher's extra
-first; Clef and PPLX need Transformers 5.x while Bosun's pinned runtime
-uses Transformers 4.57. Clef/PPLX remote code and all released model
+first; every family uses Transformers 5.17 or later, below 6. Clef/PPLX remote code and all released model
 revisions are pinned in the driver. A 27B release needs enough disk for
 both its download and its full native export (roughly 105–110 GB).
 To run these large releases sequentially without retaining duplicate weights:

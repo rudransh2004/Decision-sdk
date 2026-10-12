@@ -93,6 +93,11 @@ jobs:
             imports: fastapi, uvicorn, futurix_decision.vllm.api
           - extra: wandb
             imports: wandb, futurix_decision.utils.logging
+          # The transformer families share one transformers range and must co-install.
+          - extra: bosun,decider,jpt,eikos
+            imports: >-
+              futurix_decision.models.bosun, futurix_decision.models.decider,
+              futurix_decision.models.jpt, futurix_decision.models.eikos
     name: extras (${{ matrix.extra }})
     steps:
       - uses: actions/checkout@v4

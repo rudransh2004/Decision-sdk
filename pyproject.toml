@@ -11,7 +11,7 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
   "torch>=2.4",
-  "transformers>=4.57,<6",
+  "transformers>=5.17,<6",
   "pydantic>=2,<3",
   "huggingface-hub>=0.26",
   "pyyaml>=6,<7",
@@ -20,26 +20,26 @@ dependencies = [
 [project.optional-dependencies]
 datasets = ["datasets>=3,<5"]
 train = ["accelerate>=1,<2", "peft>=0.20,<1", "safetensors>=0.4"]
-bosun = ["transformers>=4.57,<5", "accelerate>=1,<2", "peft>=0.21,<1", "safetensors>=0.4"]
+bosun = ["transformers>=5.17,<6", "accelerate>=1,<2", "peft>=0.21,<1", "safetensors>=0.4"]
 decider = ["transformers>=5.17,<6", "accelerate>=1,<2", "peft>=0.21,<1", "safetensors>=0.4"]
-decider-vllm = ["transformers>=5.17,<6", "vllm>=0.29,<1"]
+decider-vllm = ["transformers>=5.17,<6", "vllm>=0.30,<1"]
 jpt = ["transformers>=5.17,<6", "accelerate>=1,<2", "peft>=0.21,<1", "safetensors>=0.4"]
-jpt-vllm = ["transformers>=5.17,<6", "vllm>=0.29,<1"]
-eikos = ["transformers>=5.12,<6", "accelerate>=1,<2", "peft>=0.21,<1", "safetensors>=0.4"]
-eikos-vllm = ["transformers>=5.12,<6", "vllm>=0.30,<1"]
+jpt-vllm = ["transformers>=5.17,<6", "vllm>=0.30,<1"]
+eikos = ["transformers>=5.17,<6", "accelerate>=1,<2", "peft>=0.21,<1", "safetensors>=0.4"]
+eikos-vllm = ["transformers>=5.17,<6", "vllm>=0.30,<1"]
 native-http = ["httpx>=0.28,<1"]
 laya = ["laya>=0.4.2,<1"]
-gliner = ["gliner2[local]"]
-gliner-train = ["gliner2[train]"]
+gliner = ["gliner2[local]>=2.1,<3"]
+gliner-train = ["gliner2[train]>=2.1,<3"]
 kev-native = ["transformers>=5.17,<6", "peft>=0.21,<1", "datasets>=3,<5"]
-clef = ["transformers>=5.10.2,<6", "accelerate>=1,<2", "safetensors>=0.4", "torchvision", "pillow"]
+clef = ["transformers>=5.17,<6", "accelerate>=1,<2", "safetensors>=0.4", "torchvision>=0.28,<1", "pillow"]
 pplx-decider = ["transformers>=5.17,<6", "safetensors>=0.4"]
 nox-lux = ["transformers>=5.17,<6", "safetensors>=0.4"]
-liquid-d1 = ["transformers>=5.14,<6", "torchvision", "pillow"]
+liquid-d1 = ["transformers>=5.17,<6", "torchvision>=0.28,<1", "pillow"]
 "qwen3.5" = ["transformers>=5.17,<6", "accelerate>=1,<2", "peft>=0.21,<1"]
 qlora = ["accelerate>=1,<2", "peft>=0.20,<1", "bitsandbytes>=0.45", "safetensors>=0.4"]
 serve = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
-vllm = ["vllm>=0.20,<1"]
+vllm = ["vllm>=0.30,<1"]
 wandb = ["wandb>=0.19,<1"]
 dev = [
   "pytest>=8,<10",

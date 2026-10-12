@@ -23,8 +23,7 @@ through `vllm serve` does not preserve that behavior.
   self-contained checkpoint whose text decision format has a vLLM adapter.
   The adapters have fixture tests (including an opt-in tiny-GPU Decider
   test); **published-weight vLLM numerical parity is not established**.
-  Decider and JPT need compatible vLLM 0.29+ / Transformers 5.17+;
-  Eikos needs vLLM 0.30+ / Transformers 5.12+. Their released image
+  Decider, JPT, and Eikos need vLLM 0.30+ / Transformers 5.17+. Their released image
   paths are outside these text-decision adapters.
 - **SDK-trained token-readout models:** a completed standalone export,
   including a trained Bosun-style conversion, can use the token-logprob
