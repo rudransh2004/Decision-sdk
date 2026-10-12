@@ -112,6 +112,36 @@ class NativeInferenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "base_url"):
             load_model("openjev")
 
+    @patch("time.sleep")
+    def test_http_runtime_retries_maps_errors_and_closes_only_its_client(self, sleep):
+        calls = []
+
+        def transport(request):
+            calls.append(request)
+            if len(calls) == 1:
+                return httpx.Response(503, headers={"Retry-After": "3"})
+            if request.headers.get("X-Fail"):
+                return httpx.Response(400, text="unknown question")
+            body = json.loads(request.content)
+            return httpx.Response(200, json=answer(body["state"], body["questions"]))
+
+        client = httpx.Client(base_url="http://laya.test", transport=httpx.MockTransport(transport))
+        with load_model("laya", base_url="http://laya.test", client=client) as model:
+            self.assertEqual(model.decide(CHOICE).decision, "billing")
+            sleep.assert_called_once_with(3.0)
+            client.headers["X-Fail"] = "1"
+            with self.assertRaises(BackendError) as caught:
+                model.decide(CHOICE)
+            self.assertEqual(caught.exception.status_code, 400)
+            self.assertEqual(caught.exception.body, "unknown question")
+        self.assertFalse(client.is_closed)
+        client.close()
+
+        with load_model("laya", base_url="http://laya.test", timeout=5.0, max_retries=0) as owned:
+            self.assertEqual(owned.runtime.timeout.read, 5.0)
+            self.assertEqual(owned.max_retries, 0)
+        self.assertTrue(owned.runtime.is_closed)
+
     def test_gliner_uses_exclusive_schema_probabilities(self):
         class Schema:
             def single(self, task, labels, instruction):

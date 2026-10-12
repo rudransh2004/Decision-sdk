@@ -17,9 +17,18 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
+import httpx
+
 from futurix_decision._lazy import torch_required
+from futurix_decision.client._transport import (
+    DEFAULT_MAX_RETRIES,
+    build_client,
+    check_settings,
+    send,
+)
 from futurix_decision.datasets.schema import DecisionInput, State
 from futurix_decision.errors import (
     BackendError,
@@ -156,10 +165,21 @@ def _images_for_native(images: Sequence[Any], family: str) -> list[Any]:
     return list(images)
 
 
-def _verify_openjev(client: Any, checkpoint: str) -> None:
-    response = client.get("/v1/version")
-    response.raise_for_status()
-    info = response.json()
+def _json(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise InvalidOutputError(
+            f"{response.request.url} did not return JSON",
+            status_code=response.status_code,
+            body=response.text,
+        ) from exc
+
+
+def _verify_openjev(client: httpx.Client, checkpoint: str, max_retries: int) -> None:
+    info = _json(send(client, "GET", "/v1/version", max_retries=max_retries))
+    if not isinstance(info, Mapping):
+        raise InvalidOutputError("OpenJev /v1/version did not return a JSON object")
     expected = checkpoint.rsplit("/", 1)[-1].lower()
     served = str(info.get("model_dir", "")).lower()
     temperature, noul_temperature = (1.07, 1.074766) if "Flash" in checkpoint else (0.85, 1.829074)
@@ -329,7 +349,11 @@ class NativeDecisionModel:
         backend: str,
         *,
         source_revision: str | None = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        owns_runtime: bool = False,
     ) -> None:
+        self.max_retries = max_retries
+        self._owns_runtime = owns_runtime
         self.checkpoint, self.family, self.runtime, self.backend = (
             checkpoint,
             family,
@@ -378,7 +402,9 @@ class NativeDecisionModel:
         checkpoint: str | Path,
         *,
         base_url: str | None = None,
-        client: Any | None = None,
+        client: httpx.Client | None = None,
+        timeout: float | None = 60.0,
+        max_retries: int = DEFAULT_MAX_RETRIES,
         device: str = "cpu",
         revision: str | None = None,
         trust_remote_code: bool = False,
@@ -387,6 +413,13 @@ class NativeDecisionModel:
         verify_server: bool = True,
         **native_kwargs: Any,
     ) -> NativeDecisionModel:
+        """Load a publisher runtime locally, or connect to its System One server.
+
+        With ``base_url``, requests use ``timeout`` (seconds) and retry connect
+        errors and HTTP 429/502/503/504 up to ``max_retries`` times. Pass
+        ``client`` to use your own ``httpx.Client``; ``close()`` closes only a
+        client this method created.
+        """
         resolved, local = checkpoint_source(checkpoint)
         if family is not None and local:
             if family not in set(_NATIVE.values()):
@@ -408,16 +441,23 @@ class NativeDecisionModel:
                 raise ConfigError("GLiNER does not publish a System One HTTP runtime")
             if client is not None and api_key is not None:
                 raise ConfigError("configure api_key headers on your supplied client")
-            import httpx
-
-            runtime = client or httpx.Client(
-                base_url=base_url,
-                timeout=60.0,
-                headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+            check_settings(timeout, max_retries)
+            runtime = client or build_client(base_url, api_key=api_key, timeout=timeout)
+            model = cls(
+                name,
+                family,
+                runtime,
+                "http",
+                max_retries=max_retries,
+                owns_runtime=client is None,
             )
             if family == "openjev" and verify_server:
-                _verify_openjev(runtime, name)
-            return cls(name, family, runtime, "http")
+                try:
+                    _verify_openjev(runtime, name, max_retries)
+                except BaseException:
+                    model.close()
+                    raise
+            return model
         if client is not None:
             raise ConfigError("client needs base_url for a native System One server")
         if api_key is not None:
@@ -549,9 +589,7 @@ class NativeDecisionModel:
                 else _images_for_native(example.images, self.family)
             )
         if self.backend == "http":
-            response = self.runtime.post("/v1/systemone", json=payload)
-            response.raise_for_status()
-            output = response.json()
+            output = self._post_systemone(payload)
         elif self.family == "laya":
             output = self.runtime.predict(example.state, payload["questions"])
         elif self.family == "gliner":
@@ -633,6 +671,28 @@ class NativeDecisionModel:
             raise InvalidOutputError("native model did not answer the requested question")
         return answer
 
+    def _post_systemone(self, payload: Mapping[str, Any]) -> Any:
+        response = send(
+            self.runtime, "POST", "/v1/systemone", json=payload, max_retries=self.max_retries
+        )
+        return _json(response)
+
+    def close(self) -> None:
+        """Close the HTTP client that ``from_pretrained`` created; leave others open."""
+        if self._owns_runtime:
+            self.runtime.close()
+
+    def __enter__(self) -> NativeDecisionModel:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
+
     def system_one(
         self,
         state: Any,
@@ -655,9 +715,7 @@ class NativeDecisionModel:
                 list(images) if self.backend == "http" else _images_for_native(images, self.family)
             )
         if self.backend == "http":
-            response = self.runtime.post("/v1/systemone", json=payload)
-            response.raise_for_status()
-            output = response.json()
+            output = self._post_systemone(payload)
         elif self.family == "laya":
             output = self.runtime.predict(state, payload["questions"])
         elif self.family == "kev":

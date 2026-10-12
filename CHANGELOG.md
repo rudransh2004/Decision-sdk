@@ -28,6 +28,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The native HTTP runtime (`load_model(..., base_url=...)`) uses the client's transport:
+  new `timeout` (default 60 s, as before) and `max_retries` (default 3) arguments, the
+  same retry policy, and `BackendError` instead of `httpx.HTTPStatusError` for failed
+  requests. `NativeDecisionModel` gains `close()` and context-manager support, which
+  close only an HTTP client it created.
 - **Breaking:** the SDK raises its own exception types. Bad arguments and configuration
   raise `ConfigError`, which still subclasses `ValueError`. These changed type:
   - Incomplete, unrecognizable, or wrong-family checkpoints and invalid checkpoint
