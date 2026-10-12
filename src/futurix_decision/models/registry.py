@@ -32,6 +32,9 @@ from futurix_decision.models.sources import read_checkpoint_json
 _RESERVED = frozenset({"standard", "native"})
 _FAMILIES: dict[str, FamilyAdapter] = {}
 
+# A Futurix decision head saved without its decision_config.json.
+FUTURIX_HEAD_FILE = "decision_head.safetensors"
+
 # Files of decision releases no registered family loads. A directory holding one
 # is never loaded as a plain LM.
 FOREIGN_DECISION_FILES = ("judge_config.json", "quyet_config.json")
@@ -95,8 +98,9 @@ def infer_local_family(directory: Path) -> str | None:
     """Recognize publisher copies and SDK exports without depending on their folder name.
 
     An SDK export's ``futurix_native.json`` names its family. Otherwise the first
-    registered family whose ``detect`` accepts ``directory`` wins, and failing
-    that, a family whose Hub ID ends in the directory's name.
+    registered family whose ``detect`` accepts ``directory`` wins, then a lone
+    ``decision_head.safetensors`` (Futurix), and failing that, a family whose
+    Hub ID ends in the directory's name.
     """
     manifest = directory / "futurix_native.json"
     if manifest.is_file():
@@ -121,7 +125,12 @@ def infer_local_family(directory: Path) -> str | None:
 
 
 def _detect(directory: Path) -> FamilyAdapter | None:
-    return next((adapter for adapter in _FAMILIES.values() if adapter.detect(directory)), None)
+    detected = next((adapter for adapter in _FAMILIES.values() if adapter.detect(directory)), None)
+    if detected is None and (directory / FUTURIX_HEAD_FILE).is_file():
+        # Nox and Lux releases ship this file too, so it marks a head-only Futurix
+        # copy only when no family's own detection matched.
+        return _FAMILIES["futurix"]
+    return detected
 
 
 def reject_native_checkpoint(checkpoint: str | Path, metadata: dict[str, Any]) -> None:
@@ -160,20 +169,23 @@ def reject_native_checkpoint(checkpoint: str | Path, metadata: dict[str, Any]) -
         )
 
 
+# Registration order is detection precedence for a directory holding several
+# families' files: a config that names the format (decision_config.json, then
+# config.json) outranks a marker file, and a marker file a README heading.
 for _adapter in (
     FuturixAdapter(),
-    BosunAdapter(),
-    DeciderAdapter(),
-    JPTAdapter(),
     EikosAdapter(),
-    KevAdapter(),
-    LayaAdapter(),
-    GlinerAdapter(),
-    ClefAdapter(),
     PplxAdapter(),
-    OpenJevAdapter(),
+    BosunAdapter(),
     NoxAdapter(),
     LuxAdapter(),
     LiquidAdapter(),
+    ClefAdapter(),
+    DeciderAdapter(),
+    KevAdapter(),
+    LayaAdapter(),
+    GlinerAdapter(),
+    JPTAdapter(),
+    OpenJevAdapter(),
 ):
     register_family(_adapter)

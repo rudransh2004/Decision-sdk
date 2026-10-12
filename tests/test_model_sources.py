@@ -593,6 +593,42 @@ class SourceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "already a trained Futurix"):
                 load_model("example/trained", convert=True)
 
+    def test_a_head_only_futurix_copy_is_detected_and_never_converted(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            put(root, "decision_head.safetensors", "")
+            self.assertEqual(infer_local_family(root), "futurix")
+            with self.assertRaisesRegex(ValueError, "discard its native readout"):
+                load_model(root, convert=True)
+
+    def test_detection_precedence_for_directories_with_several_families_files(self):
+        nox = {
+            "decision_format": "vllm-sr-decision",
+            "model_name": "Decision-2.0-Nox-4B",
+            "decision_weights": {"decision_head": "decision_head.safetensors"},
+        }
+        liquid = {"auto_map": {"AutoModel": "modeling_d1.D1Model"}}
+        eikos = {"prompt_version": "letter-v1-semif"}
+        pplx = {"format_version": 1, "attention_mode": "noncausal_full_attention"}
+        # A config that names the format outranks a marker file, a marker file a
+        # README heading, and decision_head.safetensors counts only when nothing
+        # else matches. This is the order the pre-registry detection used.
+        cases = [
+            ("nox", {"config.json": nox, "decision_head.safetensors": ""}),
+            ("nox", {"config.json": nox, "README.md": "# JPT-4B\n"}),
+            ("liquid-d1", {"config.json": liquid, "head.pt": ""}),
+            ("eikos", {"config.json": {"model_type": "bosun"}, "decision_config.json": eikos}),
+            ("eikos", {"decider_config.json": {}, "decision_config.json": eikos}),
+            ("pplx-decider", {"joint_head.safetensors": "", "decision_config.json": pplx}),
+            ("kev", {"README.md": "# JPT-9B\n", "head.pt": ""}),
+        ]
+        for family, files in cases:
+            with self.subTest(files=sorted(files)), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                for filename, value in files.items():
+                    put(root, filename, value if isinstance(value, str) else json.dumps(value))
+                self.assertEqual(infer_local_family(root), family)
+
 
 if __name__ == "__main__":
     unittest.main()

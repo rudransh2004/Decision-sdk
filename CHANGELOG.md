@@ -43,7 +43,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `trainable`, and `vllm` (`"direct"`, `"export"`, `"server"`, or `None`). Hub ID lookup,
   short names, and local-copy detection all read these, so a registered third-party
   family is found by alias and recognized in a local directory without `family=`.
-  `register_family` refuses a Hub ID or alias another family already claims.
+  `register_family` refuses a Hub ID or alias another family already claims. Local
+  detection asks the built-in families in 0.1's order, so a directory holding several
+  families' files resolves as before (a config naming the format beats a marker file,
+  which beats a JPT README heading), then registered third-party families. A lone
+  `decision_head.safetensors` still marks a Futurix copy, but only when no family
+  matched, because Nox and Lux releases ship that file too.
 - `DecisionBackend`, a runtime-checkable protocol exported from the top-level package
   (no torch needed): `decide`, `batch_decide`, `choice`, `noul`, `score`, and `close`.
   `DecisionModel`, `NativeDecisionModel`, `VLLMEngine`, `DecisionClient`, and
