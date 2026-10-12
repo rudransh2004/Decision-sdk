@@ -33,6 +33,17 @@ def typed_decision(kind: DecisionKind, option: str) -> Decision:
     return level if str(level) == option else None
 
 
+ERROR_HEADER = "X-Futurix-Error"
+"""Header on a ``futurix-decision serve`` error response naming its cause.
+
+Its value matches the JSON body's ``error`` field: ``config`` (HTTP 422),
+``checkpoint`` (500), ``backend`` (502), or ``invalid_output`` (502). The
+client retries ``backend`` but raises ``InvalidOutputError`` for
+``invalid_output`` at once, because the same request would fail again.
+"""
+INVALID_OUTPUT = "invalid_output"
+
+
 class DecisionResult(BaseModel):
     """One decision, as every backend returns it and the HTTP API serves it.
 

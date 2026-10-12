@@ -7,14 +7,25 @@ import threading
 from collections import defaultdict
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from futurix_decision import __version__
 from futurix_decision.datasets import DecisionInput
-from futurix_decision.errors import ConfigError
-from futurix_decision.inference.schemas import DecisionRequest, DecisionResult
+from futurix_decision.errors import (
+    BackendError,
+    CheckpointError,
+    ConfigError,
+    FuturixError,
+    InvalidOutputError,
+)
+from futurix_decision.inference.schemas import (
+    ERROR_HEADER,
+    INVALID_OUTPUT,
+    DecisionRequest,
+    DecisionResult,
+)
 from futurix_decision.models.protocol import DecisionBackend
 
 PROFILE_INSTRUCTIONS = {
@@ -75,8 +86,27 @@ def _compat_input(
     return DecisionInput(kind=kind, state=canonical_state, question=prompt, options=options)
 
 
+# HTTP status and ERROR_HEADER value per SDK error a backend raises during a request.
+# Starlette picks the handler of the nearest class in the exception's MRO.
+ERROR_STATUS: dict[type[FuturixError], tuple[int, str]] = {
+    ConfigError: (422, "config"),
+    CheckpointError: (500, "checkpoint"),
+    BackendError: (502, "backend"),
+    InvalidOutputError: (502, INVALID_OUTPUT),
+}
+
+
+def _error_response(request: Request, exc: Exception) -> JSONResponse:
+    status, code = next(ERROR_STATUS[cls] for cls in type(exc).__mro__ if cls in ERROR_STATUS)
+    return JSONResponse(
+        {"detail": str(exc), "error": code}, status_code=status, headers={ERROR_HEADER: code}
+    )
+
+
 def create_app(engine: DecisionBackend) -> FastAPI:
     app = FastAPI(title="Futurix Decision API", version=__version__)
+    for error in ERROR_STATUS:
+        app.add_exception_handler(error, _error_response)
     lock = threading.Lock()
     counters: dict[str, int] = defaultdict(int)
     latency: dict[str, float] = defaultdict(float)

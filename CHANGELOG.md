@@ -150,6 +150,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   local copy's files are checked by the family's `requires`, and a checkpoint of another
   family raises `CheckpointError`. `train --model-format standard` still starts a new
   readout on a plain causal LM.
+- The server maps SDK errors a backend raises to HTTP statuses: `ConfigError` 422,
+  `CheckpointError` 500, `BackendError` 502, and `InvalidOutputError` 502. The body is
+  `{"detail": ..., "error": ...}`, and the `X-Futurix-Error` header repeats `error`
+  (`config`, `checkpoint`, `backend`, or `invalid_output`). Invalid output used to be a
+  500. `DecisionClient` and `AsyncDecisionClient` raise `InvalidOutputError` for an
+  `invalid_output` response without retrying it, and still retry other 502s.
 - `evaluate` and `fit_temperature` take any `DecisionBackend`. `max_batch_tokens` in
   `evaluate` needs a `DecisionModel` or `VLLMEngine` (optionally inside `Calibrated`) and
   raises `ConfigError` for other backends.

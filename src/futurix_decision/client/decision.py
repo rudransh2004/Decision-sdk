@@ -117,7 +117,9 @@ class DecisionClient:
     and ``max_retries`` apply to every request. Connect errors and HTTP 429,
     502, 503, and 504 are retried with exponential backoff and jitter, honoring
     ``Retry-After``. Other failures, and the last failed retry, raise
-    ``BackendError`` carrying ``status_code`` and ``body``.
+    ``BackendError`` carrying ``status_code`` and ``body``. A 502 that the
+    server marks as invalid backend output raises ``InvalidOutputError`` at
+    once, without retrying.
 
     Pass ``transport`` to route the client's own connection, or ``http_client``
     to use a configured ``httpx.Client`` (its base URL, headers, and timeout

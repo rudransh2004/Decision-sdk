@@ -2,7 +2,8 @@
 
 Retries connect errors and 429, 502, 503, and 504 responses with exponential
 backoff and full jitter, honoring ``Retry-After``. Every other failure, and the
-last failed attempt, raises ``BackendError``.
+last failed attempt, raises ``BackendError``. A response whose ``ERROR_HEADER``
+says ``invalid_output`` raises ``InvalidOutputError`` without a retry.
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ from typing import Any
 
 import httpx
 
-from futurix_decision.errors import BackendError, ConfigError
+from futurix_decision.errors import BackendError, ConfigError, InvalidOutputError
+from futurix_decision.inference.schemas import ERROR_HEADER, INVALID_OUTPUT
 
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RETRIES = 3
@@ -89,10 +91,20 @@ def _delay(attempt: int, response: httpx.Response | None) -> float:
     return random.uniform(0, min(_BACKOFF_MAX, _BACKOFF_BASE * 2**attempt))
 
 
+def _invalid_output(response: httpx.Response) -> bool:
+    """Whether the server says its backend returned invalid output, which a retry repeats."""
+    return response.headers.get(ERROR_HEADER) == INVALID_OUTPUT
+
+
+def _retryable(response: httpx.Response) -> bool:
+    return response.status_code in RETRY_STATUSES and not _invalid_output(response)
+
+
 def _status_error(response: httpx.Response, attempts: int) -> BackendError:
     request = response.request
     tried = f" after {attempts} attempts" if attempts > 1 else ""
-    return BackendError(
+    error = InvalidOutputError if _invalid_output(response) else BackendError
+    return error(
         f"{request.method} {request.url} returned HTTP {response.status_code}{tried}",
         status_code=response.status_code,
         body=response.text,
@@ -128,7 +140,7 @@ def send(
             continue
         except httpx.TransportError as error:
             raise _transport_error(error, attempt + 1) from error
-        if response.status_code in RETRY_STATUSES and not last:
+        if _retryable(response) and not last:
             response.close()
             time.sleep(_delay(attempt, response))
             continue
@@ -158,7 +170,7 @@ async def send_async(
             continue
         except httpx.TransportError as error:
             raise _transport_error(error, attempt + 1) from error
-        if response.status_code in RETRY_STATUSES and not last:
+        if _retryable(response) and not last:
             await response.aclose()
             await asyncio.sleep(_delay(attempt, response))
             continue
