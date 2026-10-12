@@ -155,11 +155,11 @@ class EvaluatorTrainerTests(unittest.TestCase):
         )
         history = trainer.train(dataset, calibration_dataset=dataset)
         self.assertTrue(history)
-        self.assertGreater(model.temperature, 0)
+        self.assertGreater(model.config.temperature, 0)
         with tempfile.TemporaryDirectory() as temp:
             trainer.save_pretrained(temp)
             restored = DecisionModel.from_pretrained(temp)
-            self.assertAlmostEqual(model.temperature, restored.temperature)
+            self.assertAlmostEqual(model.config.temperature, restored.config.temperature)
 
 
 if __name__ == "__main__":

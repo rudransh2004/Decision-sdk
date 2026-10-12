@@ -78,20 +78,24 @@ class DecisionModelTests(unittest.TestCase):
         model = DecisionModel(backbone, tokenizer, decision_tokens=16, max_sequence_length=256)
         weight = model.backbone.get_output_embeddings().weight.detach()
         self.assertGreater(
-            (weight[model._token_ids[0]] - weight[model._token_ids[1]]).abs().sum().item(), 0
+            (weight[model.readout.token_ids[0]] - weight[model.readout.token_ids[1]])
+            .abs()
+            .sum()
+            .item(),
+            0,
         )
 
     def test_export_preserves_original_model_provenance(self):
         model = tiny_checkpoint()
-        model.source_checkpoint = "Example/Source"
-        model.source_revision = "a" * 40
-        model.base_model_revision = "b" * 40
+        model.config.source_checkpoint = "Example/Source"
+        model.config.source_revision = "a" * 40
+        model.config.base_model_revision = "b" * 40
         with tempfile.TemporaryDirectory() as path:
             model.save_pretrained(path)
             restored = DecisionModel.from_pretrained(path)
-            self.assertEqual(restored.source_checkpoint, "Example/Source")
-            self.assertEqual(restored.source_revision, "a" * 40)
-            self.assertEqual(restored.base_model_revision, "b" * 40)
+            self.assertEqual(restored.config.source_checkpoint, "Example/Source")
+            self.assertEqual(restored.config.source_revision, "a" * 40)
+            self.assertEqual(restored.config.base_model_revision, "b" * 40)
 
     def test_choice_and_abstention(self):
         result = self.model.choice(state={"document": "expired"}, choices=["approve", "reject"])
@@ -141,14 +145,14 @@ class DecisionModelTests(unittest.TestCase):
 
     def test_temperature_changes_probability_sharpness(self):
         example = dict(state="ready", choices=["a", "b", "c"])
-        old_temperature = self.model.temperature
+        old_temperature = self.model.config.temperature
         try:
-            self.model.temperature = 1
+            self.model.config.temperature = 1
             regular = self.model.choice(**example)
-            self.model.temperature = 100
+            self.model.config.temperature = 100
             flattened = self.model.choice(**example)
         finally:
-            self.model.temperature = old_temperature
+            self.model.config.temperature = old_temperature
         uniform = 1 / 3
         self.assertLess(
             max(abs(value - uniform) for value in flattened.probabilities.values()),
@@ -175,13 +179,13 @@ class DecisionModelTests(unittest.TestCase):
                 )
 
     def test_no_silent_truncation(self):
-        old_maximum = self.model.max_sequence_length
+        old_maximum = self.model.config.max_sequence_length
         try:
-            self.model.max_sequence_length = 5
+            self.model.config.max_sequence_length = 5
             with self.assertRaisesRegex(ValueError, "max_sequence_length"):
                 self.model.choice(state="too long", choices=["a", "b"])
         finally:
-            self.model.max_sequence_length = old_maximum
+            self.model.config.max_sequence_length = old_maximum
 
 
 if __name__ == "__main__":

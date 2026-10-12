@@ -151,15 +151,15 @@ class RLCDTrainer(SFTTrainer):
             self.reference_model = copy.deepcopy(self.model)
         if self.reference_model is not None:
             if (
-                self.reference_model.decision_tokens,
-                self.reference_model.seed,
-                self.reference_model.head_type,
-                self.reference_model.head_config,
+                self.reference_model.config.decision_tokens,
+                self.reference_model.config.seed,
+                self.reference_model.config.head_type,
+                self.reference_model.config.head_config,
             ) != (
-                self.model.decision_tokens,
-                self.model.seed,
-                self.model.head_type,
-                self.model.head_config,
+                self.model.config.decision_tokens,
+                self.model.config.seed,
+                self.model.config.head_type,
+                self.model.config.head_config,
             ):
                 raise ConfigError("reference must have identical decision readout and seed")
             self.reference_model.backbone.requires_grad_(False)

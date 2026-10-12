@@ -210,7 +210,7 @@ class CalibrationTests(unittest.TestCase):
         model = tiny_model()
         noul = DecisionInput(kind="noul", state="s", question="q", options=["false", "true"])
         calibrated = Calibrated(model, 2.5).batch_decide([CHOICE, noul])
-        model.temperature = 2.5
+        model.config.temperature = 2.5
         scaled = model.batch_decide([CHOICE, noul])
         for expected, actual in zip(scaled, calibrated, strict=True):
             self.assertEqual(expected.decision, actual.decision)

@@ -57,9 +57,9 @@ class BosunContractTests(unittest.TestCase):
                 loader.assert_called_once_with(
                     checkpoint, trust_remote_code=True, revision=revision
                 )
-                self.assertEqual(model.prompt_format, "bosun-v3")
-                self.assertEqual(model.source_checkpoint, checkpoint)
-                self.assertEqual(model.source_revision, revision)
+                self.assertEqual(model.config.prompt_format, "bosun-v3")
+                self.assertEqual(model.config.source_checkpoint, checkpoint)
+                self.assertEqual(model.config.source_revision, revision)
                 self.assertTrue(identify_family(checkpoint).supports(checkpoint, "training"))
                 with self.assertRaisesRegex(ValueError, "already contains a trained decision head"):
                     load_model(checkpoint, convert=True)
@@ -94,7 +94,7 @@ class BosunContractTests(unittest.TestCase):
             candidate_labels=["Billing", "Account access"],
             candidate_descriptions=["Payment issue", "Login issue"],
         )
-        prompt, slots = model._prompt_and_slots(row, None)
+        prompt, slots = model.readout.prompt(row, None)
         self.assertEqual(prompt, expected["prompt"])
         actual = model.forward_decisions([row]).logits[0, slots]
         probabilities = torch.softmax(actual.float(), dim=-1).tolist()
@@ -113,8 +113,8 @@ class BosunContractTests(unittest.TestCase):
             candidate_labels=["Billing", "Account access", "Other"],
             candidate_descriptions=["Payment issue", "Login issue", "Escalation"],
         )
-        prompt, slots = model._prompt_and_slots(example, None)
-        self.assertEqual(prompt, model._prompt_and_slots(example, None)[0])
+        prompt, slots = model.readout.prompt(example, None)
+        self.assertEqual(prompt, model.readout.prompt(example, None)[0])
         self.assertEqual(sorted(slots), [0, 1, 2])
         self.assertTrue(prompt.startswith("system:Choose exactly one supplied decision token."))
         content = json.loads(prompt.split("user:", 1)[1].split("\nassistant:", 1)[0])
@@ -128,7 +128,7 @@ class BosunContractTests(unittest.TestCase):
             self.assertEqual(mapped["n"], example.candidate_labels[mapped["o"]])
             self.assertEqual(mapped["d"], example.candidate_descriptions[mapped["o"]])
         self.assertNotEqual(
-            model._prompt_and_slots(example, 20)[1], model._prompt_and_slots(example, 21)[1]
+            model.readout.prompt(example, 20)[1], model.readout.prompt(example, 21)[1]
         )
         self.assertEqual(model.tokenizer.padding_side, "left")
 
@@ -152,7 +152,7 @@ class BosunContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             model.save_pretrained(path)
             restored = DecisionModel.from_pretrained(path)
-            self.assertEqual(restored.prompt_format, "bosun-v3")
+            self.assertEqual(restored.config.prompt_format, "bosun-v3")
             self.assertEqual(restored.tokenizer.padding_side, "left")
             other = restored.choice(state="ready", choices=["a", "b"], question="Choose")
             for name in result.probabilities:
@@ -188,7 +188,7 @@ class BosunContractTests(unittest.TestCase):
     def test_null_slot_reserved_and_metadata_must_align(self):
         model = bosun_tiny_model()
         with self.assertRaisesRegex(ValueError, "reserves slot 255"):
-            model._prompt_and_slots(
+            model.readout.prompt(
                 DecisionInput(state="s", question="q", options=[str(i) for i in range(256)]),
                 None,
             )
@@ -211,10 +211,10 @@ class BosunContractTests(unittest.TestCase):
             max_sequence_length=256,
         )
         rows_before = (
-            model.backbone.get_input_embeddings().weight[model._token_ids].detach().clone()
+            model.backbone.get_input_embeddings().weight[model.readout.token_ids].detach().clone()
         )
         head_before = (
-            model.backbone.get_output_embeddings().weight[model._token_ids].detach().clone()
+            model.backbone.get_output_embeddings().weight[model.readout.token_ids].detach().clone()
         )
         model.backbone = get_peft_model(
             model.backbone,
@@ -239,16 +239,18 @@ class BosunContractTests(unittest.TestCase):
         )
         trainer.train([example, example])
         self.assertTrue(model._bosun_continuation_prepared)
-        input_after = model.backbone.get_input_embeddings().weight[model._token_ids].detach().cpu()
+        input_after = (
+            model.backbone.get_input_embeddings().weight[model.readout.token_ids].detach().cpu()
+        )
         output_after = (
-            model.backbone.get_output_embeddings().weight[model._token_ids].detach().cpu()
+            model.backbone.get_output_embeddings().weight[model.readout.token_ids].detach().cpu()
         )
         self.assertGreater((input_after - rows_before.cpu()).abs().sum().item(), 0)
         self.assertGreater((output_after - head_before.cpu()).abs().sum().item(), 0)
         with tempfile.TemporaryDirectory() as path:
             model.save_pretrained(path)
             restored = DecisionModel.from_pretrained(path)
-            self.assertEqual(restored.prompt_format, "bosun-v3")
+            self.assertEqual(restored.config.prompt_format, "bosun-v3")
             self.assertAlmostEqual(
                 sum(restored.decide(example).probabilities.values()), 1.0, places=6
             )

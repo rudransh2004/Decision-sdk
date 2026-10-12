@@ -211,7 +211,7 @@ class SFTTrainingTests(unittest.TestCase):
     def test_lora_merges_to_standalone_checkpoint(self):
         model = tiny_model()
         original_decision_rows = (
-            model.backbone.get_input_embeddings().weight[model._token_ids].detach().clone()
+            model.backbone.get_input_embeddings().weight[model.readout.token_ids].detach().clone()
         )
         trainer = SFTTrainer(
             model,
@@ -231,7 +231,7 @@ class SFTTrainingTests(unittest.TestCase):
             self.assertTrue((Path(temp) / "config.json").exists())
             self.assertFalse((Path(temp) / "adapter_config.json").exists())
             merged_decision_rows = (
-                model.backbone.get_input_embeddings().weight[model._token_ids].detach().cpu()
+                model.backbone.get_input_embeddings().weight[model.readout.token_ids].detach().cpu()
             )
             self.assertFalse(torch.equal(original_decision_rows, merged_decision_rows))
             loaded = DecisionModel.from_pretrained(temp)
@@ -283,7 +283,7 @@ class SFTTrainingTests(unittest.TestCase):
             loaded = DecisionModel.from_pretrained(adapter)
             result = loaded.choice(state="test", choices=["approve", "reject"])
             self.assertAlmostEqual(sum(result.probabilities.values()), 1.0, places=6)
-            self.assertEqual(loaded.decision_tokens, 16)
+            self.assertEqual(loaded.config.decision_tokens, 16)
 
 
 if __name__ == "__main__":

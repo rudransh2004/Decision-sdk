@@ -53,7 +53,7 @@ class BenchmarkTests(unittest.TestCase):
         decision = normalize_decision(row)
         self.assertEqual(decision.kind, "noul")
         self.assertEqual(decision.options, ["c000", "c001"])
-        self.assertIn('"type":"noul"', bosun_tiny_model()._prompt_and_slots(decision, None)[0])
+        self.assertIn('"type":"noul"', bosun_tiny_model().readout.prompt(decision, None)[0])
 
     def test_ordered_scoring_preserves_ids_and_ordinal_values(self):
         row = {

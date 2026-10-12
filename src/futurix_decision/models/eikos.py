@@ -22,11 +22,11 @@ from futurix_decision.models.label_readout import (
     LabelRow,
     cached_label_table,
     choice_description,
-    hub_kwargs,
     noul_description,
     presented_order,
     score_description,
 )
+from futurix_decision.models.sources import hub_kwargs
 
 FORMAT = "eikos-letter-v1-semif"
 SOURCES = {"caiovicentino1/Eikos-4B": 100, "caiovicentino1/Eikos-27B": 160}
@@ -162,11 +162,11 @@ class EikosDecisionModel(LabelReadoutModel):
     seeded_kinds = frozenset({"choice", "noul"})
 
     def _label_token_ids(self) -> list[int]:
-        return eikos_label_table(self.tokenizer, self.decision_tokens)[1]
+        return eikos_label_table(self.tokenizer, self.config.decision_tokens)[1]
 
     def _rows(self, example: DecisionInput, order: list[int]) -> list[LabelRow]:
         tokens, labels, _ = prepare_eikos_row(
-            example, self.tokenizer, max_options=self.decision_tokens, order=order
+            example, self.tokenizer, max_options=self.config.decision_tokens, order=order
         )
         return [LabelRow(tokens, labels)]
 

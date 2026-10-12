@@ -152,20 +152,21 @@ class JPTDecisionModel(LabelReadoutModel):
     # True first: llm2jev trained JPT on "A. Yes / B. No".
     noul_order = NOUL_ORDER
     native_options = ("temperature",)
+    multimodal_backbone = True
 
     def _label_token_ids(self) -> list[int]:
         sample = DecisionInput(state="Calibration state", question="Choose", options=["yes", "no"])
         return _labels(
-            self.tokenizer, _prompt(self.tokenizer, sample, [0, 1]), self.decision_tokens
+            self.tokenizer, _prompt(self.tokenizer, sample, [0, 1]), self.config.decision_tokens
         )
 
     def _rows(self, example: DecisionInput, order: list[int]) -> list[LabelRow]:
         tokens, labels, _ = prepare_jpt_row(
             example,
             self.tokenizer,
-            max_options=self.decision_tokens,
+            max_options=self.config.decision_tokens,
             order=order,
-            expected_ids=self._token_ids,
+            expected_ids=self.readout.token_ids,
         )
         return [LabelRow(tokens, labels)]
 

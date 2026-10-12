@@ -65,22 +65,23 @@ def token_budget_batches(
     longest = 0
     for row in iter_examples(dataset):
         if isinstance(local, DecisionModel):
-            prompt, _ = local._prompt_and_slots(row, None)
-        elif local.prompt_format == "bosun-v3":
-            prompt, _ = format_bosun_prompt(
-                row,
-                local.tokenizer,
-                decision_tokens=local.decision_tokens,
-                seed=local.seed,
-                prompt_schema=local.prompt_schema,
-            )
+            length = local.readout.prompt_tokens(row)
         else:
-            prompt, _ = format_decision_prompt(
-                row,
-                decision_tokens=local.decision_tokens,
-                seed=local.seed,
-            )
-        length = len(local.tokenizer.encode(prompt, add_special_tokens=True))
+            if local.prompt_format == "bosun-v3":
+                prompt, _ = format_bosun_prompt(
+                    row,
+                    local.tokenizer,
+                    decision_tokens=local.decision_tokens,
+                    seed=local.seed,
+                    prompt_schema=local.prompt_schema,
+                )
+            else:
+                prompt, _ = format_decision_prompt(
+                    row,
+                    decision_tokens=local.decision_tokens,
+                    seed=local.seed,
+                )
+            length = len(local.tokenizer.encode(prompt, add_special_tokens=True))
         if pending and (
             len(pending) >= batch_size
             or max(longest, length) * (len(pending) + 1) > max_batch_tokens
@@ -112,13 +113,16 @@ def _journal_identity(model: DecisionBackend) -> dict[str, Any]:
     """What a resumed evaluation must share with the run that wrote the journal."""
     if isinstance(model, Calibrated):
         return {**_journal_identity(model.backend), "calibration_temperature": model.temperature}
-    identity = {
+    if isinstance(model, DecisionModel):
+        config = model.config
+        identity = {"prompt_format": config.prompt_format, "temperature": config.temperature}
+        if model.decision_head is not None:
+            identity.update(head_type=config.head_type, head_config=config.head_config)
+        return identity
+    return {
         "prompt_format": getattr(model, "prompt_format", type(model).__name__),
         "temperature": getattr(model, "temperature", 1.0),
     }
-    if isinstance(model, DecisionModel) and model.decision_head is not None:
-        identity.update(head_type=model.head_type, head_config=model.head_config)
-    return identity
 
 
 def evaluate(
@@ -226,7 +230,7 @@ def evaluate(
                     (
                         row,
                         torch.softmax(
-                            batch.logits[i, slots].float() / model.temperature, dim=-1
+                            batch.logits[i, slots].float() / model.config.temperature, dim=-1
                         ).cpu(),
                     )
                     for subset, batch in _inference_batches(model, examples)

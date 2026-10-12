@@ -55,7 +55,7 @@ class JPTTests(unittest.TestCase):
             self.assertIn("B. No: no", text)
             self.assertIn("Answer:", text)
             self.assertEqual(order, [1, 0])
-            self.assertEqual(labels, model._token_ids[:2])
+            self.assertEqual(labels, model.readout.token_ids[:2])
             batch = model.forward_decisions([noul])
             self.assertEqual(batch.slots, [[0, 1]])
             self.assertAlmostEqual(sum(model.batch_decide([noul])[0].probabilities.values()), 1)
@@ -110,7 +110,7 @@ class JPTTests(unittest.TestCase):
             class FakeLLM:
                 def generate(self, prompts, params, use_tqdm=False):
                     assert len(prompts) == 1
-                    assert params[0].allowed_token_ids == model._token_ids[:2]
+                    assert params[0].allowed_token_ids == model.readout.token_ids[:2]
                     return [
                         SimpleNamespace(
                             outputs=[

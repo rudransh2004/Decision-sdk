@@ -109,7 +109,7 @@ class DeciderIntegrationTests(unittest.TestCase):
             model = DecisionModel.from_decider(source, max_sequence_length=512)
             self.assertIsInstance(model, DeciderDecisionModel)
             self.assertEqual(
-                model._token_ids[:2],
+                model.readout.token_ids[:2],
                 [model.tokenizer.encode(c, add_special_tokens=False)[0] for c in "AB"],
             )
             self.assertNotIn("<|decision_000|>", model.tokenizer.get_vocab())
@@ -297,7 +297,7 @@ class DeciderIntegrationTests(unittest.TestCase):
             source.mkdir()
             make_native(source)
             model = DecisionModel.from_decider(source)
-            model.max_sequence_length = 4096
+            model.config.max_sequence_length = 4096
             export = Path(temp) / "export"
             model.save_pretrained(export)
 

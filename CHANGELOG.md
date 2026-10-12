@@ -8,6 +8,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `DecisionModelConfig` (exported from the top-level package): a dataclass that holds a
+  `DecisionModel`'s settings, validates them, and is what `decision_config.json` stores.
+  Checkpoints saved by earlier versions load unchanged.
+- `ReadoutStrategy` (`futurix_decision.models`): a `DecisionModel`'s readout lives in
+  `model.readout`, one of `TokenReadout` (Futurix and Bosun decision tokens),
+  `PointerReadout` (candidate heads), `LetterCodeReadout`, or, for Decider, JPT, and
+  Eikos, `LabelReadout`.
 - `FamilyAdapter` and `register_family`, exported from the top-level package (no torch
   needed). An adapter names a family, lists the Hub IDs it loads, names its pip extra,
   and implements `load`; `requires`, `finetune`, and `training_kwargs` are optional.
@@ -60,7 +67,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   returns and returns the temperature, relative to the backend's current output. It no
   longer sets `DecisionModel.temperature`. Migration: wrap with
   `Calibrated(backend, fit_temperature(backend, heldout))`, or persist into a checkpoint
-  with `model.temperature *= fit_temperature(model, heldout)`. `CalibrationTrainer` and
+  with `model.config.temperature *= fit_temperature(model, heldout)`. `CalibrationTrainer` and
   `DecisionTrainer` still store the fitted temperature on the model.
 - **Breaking:** `load_model` has an explicit signature: `family`, `convert`,
   `strategy: Literal["pointer", "bosun", "letter_code"] | None`, `head_type`,
@@ -72,6 +79,22 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ConfigError`. Migration: drop `head_type` and `train_backbone` where a release
   rejects them, and narrow the result with `isinstance` before calling
   family-specific methods such as `NativeDecisionModel.finetune`.
+- **Breaking:** `DecisionModel(backbone, tokenizer, config=None, *, decision_head=None,
+  **settings)` takes a `DecisionModelConfig`; keyword `settings` replace its fields, so
+  `DecisionModel(lm, tokenizer, decision_tokens=16)` still works. The settings moved off
+  the model onto `model.config`: `model.temperature`, `model.head_type`,
+  `model.prompt_format`, `model.max_sequence_length`, `model.source_checkpoint`, and the
+  rest are gone. The private `_token_ids`, `_marker_id`, `_prompt_and_slots`, and
+  `_input_device` are gone too. `DecisionBatch` moved to
+  `futurix_decision.models.readouts` and is still exported from
+  `futurix_decision.models`. Migration: read and write `model.config.temperature` and
+  friends; use `model.readout.token_ids` and `model.readout.prompt(example, seed)`.
+- `DecisionModel.from_pretrained` finds the class for a saved `prompt_format` in the
+  family registry, so a registered `LabelReadoutModel` family loads through it like
+  Decider, JPT, and Eikos. A setting that conflicts with the checkpoint raises
+  `cannot override the saved checkpoint's <field>`, naming the field.
+- `evaluate(..., max_batch_tokens=...)` on Decider, JPT, and Eikos measures each row's
+  own tokenized prompt. It used to measure the generic Futurix prompt instead.
 - **Breaking:** each publisher runtime (Kev, Laya, GLiNER, Clef, PPLX Decider, OpenJev,
   Nox, Lux, Liquid d1) is its own `PublisherAdapter` subclass in
   `futurix_decision.models.families`, which loads, checks, runs, and fine-tunes it;

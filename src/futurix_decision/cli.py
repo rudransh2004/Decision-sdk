@@ -187,11 +187,11 @@ def _train(args: argparse.Namespace) -> None:
         return
     if args.resume:
         model = get_family("futurix").load(checkpoint, trainable_adapter=True, **device_kwargs)
-        if model.prompt_format != progress["prompt_format"]:
+        if model.config.prompt_format != progress["prompt_format"]:
             raise ConfigError("resumed checkpoint prompt format differs from progress metadata")
-        if model.head_type != progress.get("head_type", "tokens"):
+        if model.config.head_type != progress.get("head_type", "tokens"):
             raise ConfigError("resumed checkpoint decision head differs from progress metadata")
-        if model_section.get("head_type", model.head_type) != model.head_type:
+        if model_section.get("head_type", model.config.head_type) != model.config.head_type:
             raise ConfigError("resumed checkpoint decision head differs from training config")
     else:
         adapter = _adapter(source_format)
@@ -264,7 +264,7 @@ def _train(args: argparse.Namespace) -> None:
                     "output": str(output),
                     "stages": list(trainer.history),
                     "selected_stage": trainer.selected_stage,
-                    "temperature": trainer.model.temperature,
+                    "temperature": trainer.model.config.temperature,
                 }
             )
         )

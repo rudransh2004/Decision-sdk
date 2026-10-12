@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from futurix_decision.datasets.schema import DecisionExample
 from futurix_decision.errors import ConfigError
-from futurix_decision.models.decision_model import DecisionBatch
+from futurix_decision.models.readouts import DecisionBatch
 
 LossMode = Literal["auto", "hard", "soft"]
 

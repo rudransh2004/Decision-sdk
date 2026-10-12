@@ -1137,7 +1137,7 @@ a **different** calibration split. `fit_temperature(backend, heldout)` works on
 any backend, local or remote, because it fits on the returned probabilities:
 `softmax(log p / T)` equals `softmax(logits / T)`. Apply the result with
 `Calibrated(backend, T)`, or store it in a `DecisionModel` checkpoint with
-`model.temperature *= T` before `save_pretrained`. `evaluate` reports accuracy (expected
+`model.config.temperature *= T` before `save_pretrained`. `evaluate` reports accuracy (expected
 correctness for soft targets), NLL, Brier, 15-bin ECE/MCE, mean confidence,
 and selective accuracy/coverage at 0.50–0.99. Metrics are computed from
 batched masked decision logits, not generated text.

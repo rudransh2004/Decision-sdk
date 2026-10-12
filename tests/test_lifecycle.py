@@ -113,7 +113,7 @@ class LifecycleTests(unittest.TestCase):
             meta = json.loads((output / "training_metadata.json").read_text())
             self.assertEqual(meta["stages"], ["decision_sft", "calibration", "rlcd"])
             restored = DecisionModel.from_pretrained(temp)
-            self.assertAlmostEqual(restored.temperature, model.temperature)
+            self.assertAlmostEqual(restored.config.temperature, model.config.temperature)
             self.assertEqual(evaluate(restored, rows, batch_size=2)["count"], 2)
 
     @unittest.skipUnless(
@@ -147,7 +147,7 @@ class LifecycleTests(unittest.TestCase):
             self.assertTrue((output / "config.json").is_file())
             self.assertFalse((output / "adapter_config.json").exists())
             loaded = DecisionModel.from_pretrained(output)
-            self.assertEqual(loaded.decision_tokens, 16)
+            self.assertEqual(loaded.config.decision_tokens, 16)
             self.assertAlmostEqual(
                 sum(
                     loaded.choice(

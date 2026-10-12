@@ -72,12 +72,12 @@ class LetterCodeConversionTests(unittest.TestCase):
                 decision_tokens=8,
                 max_sequence_length=512,
             )
-            self.assertEqual(model.head_type, "letter_code")
-            self.assertEqual(model.head_prompt_version, "letter-code-v1")
-            self.assertEqual(model.attention_mode, "causal")
+            self.assertEqual(model.config.head_type, "letter_code")
+            self.assertEqual(model.config.head_prompt_version, "letter-code-v1")
+            self.assertEqual(model.config.attention_mode, "causal")
             self.assertNotIn("<|decision_000|>", model.tokenizer.get_vocab())
             self.assertEqual(len(model.tokenizer), original.config.vocab_size)
-            ids = model.head_config["token_ids"]
+            ids = model.config.head_config["token_ids"]
             self.assertTrue(
                 torch.equal(
                     model.decision_head.readout.weight,
@@ -193,7 +193,7 @@ class LetterCodeConversionTests(unittest.TestCase):
             output = Path(temp) / "trained"
             trainer.export(output)
             restored = load_model(output)
-            self.assertEqual(restored.head_type, "letter_code")
+            self.assertEqual(restored.config.head_type, "letter_code")
             self.assertEqual(evaluate(restored, rows)["count"], 2)
 
     @unittest.skipUnless(
@@ -231,7 +231,7 @@ class LetterCodeConversionTests(unittest.TestCase):
             output = Path(temp) / "merged"
             trainer.export(output)
             restored = load_model(output)
-            self.assertEqual(restored.head_type, "letter_code")
+            self.assertEqual(restored.config.head_type, "letter_code")
             self.assertEqual(evaluate(restored, examples)["count"], 1)
 
     @unittest.skipUnless(
@@ -286,8 +286,8 @@ class LetterCodeConversionTests(unittest.TestCase):
                 decision_tokens=8,
                 max_sequence_length=512,
             )
-            self.assertEqual(model.attention_mode, "noncausal_full_attention")
-            self.assertTrue(model.multimodal_loader)
+            self.assertEqual(model.config.attention_mode, "noncausal_full_attention")
+            self.assertTrue(model.config.multimodal_loader)
             before = model.choice(state="ticket", question="Route?", choices=["approve", "reject"])
             self.assertAlmostEqual(sum(before.probabilities.values()), 1, places=6)
             if importlib.util.find_spec("accelerate"):
@@ -371,7 +371,7 @@ class LetterCodeConversionTests(unittest.TestCase):
                                 "full",
                             ]
                         )
-                    self.assertEqual(load_model(output).head_type, "letter_code")
+                    self.assertEqual(load_model(output).config.head_type, "letter_code")
 
     def test_qwen3_5_noncausal_routing_is_explicit_and_mimo_fails_closed(self):
         config = SimpleNamespace(

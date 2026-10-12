@@ -77,7 +77,7 @@ class CLITests(unittest.TestCase):
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 main(["train", "--config", str(config)])
-            self.assertEqual(DecisionModel.from_pretrained(output).head_type, "pointer")
+            self.assertEqual(DecisionModel.from_pretrained(output).config.head_type, "pointer")
             self.assertTrue((output / "decision_head.safetensors").is_file())
             with contextlib.redirect_stdout(io.StringIO()) as captured:
                 main(["evaluate", "--model", str(output), "--dataset", str(data)])

@@ -60,7 +60,7 @@ class CalibrationTrainer(SFTTrainer):
     ) -> list[dict[str, float | int]]:
         history = super().train(dataset)
         # The fit is relative to the current temperature; fold it into the model.
-        self.model.temperature *= fit_temperature(
+        self.model.config.temperature *= fit_temperature(
             self.model, calibration_dataset, batch_size=self.config.batch_size
         )
         return history

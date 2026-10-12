@@ -95,7 +95,7 @@ class ScoringTests(unittest.TestCase):
         reference = copy.deepcopy(model)
         row = example([0.7, 0.3])
         with torch.no_grad():
-            model.backbone.get_output_embeddings().weight[model._token_ids[0]].add_(0.25)
+            model.backbone.get_output_embeddings().weight[model.readout.token_ids[0]].add_(0.25)
         trainer = RLCDTrainer(
             model,
             config=RLCDConfig(group_size=32, kl_beta=0.5, sft_weight=0.2),

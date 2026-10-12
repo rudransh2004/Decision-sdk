@@ -254,8 +254,8 @@ class SourceTests(unittest.TestCase):
             ) as loader:
                 model = load_model(root)
             loader.assert_called_once_with(str(root), trust_remote_code=True)
-            self.assertEqual(model.prompt_format, "bosun-v3")
-            self.assertEqual(model.source_checkpoint, str(root))
+            self.assertEqual(model.config.prompt_format, "bosun-v3")
+            self.assertEqual(model.config.source_checkpoint, str(root))
 
     def test_local_letter_variants_and_futurix_export_route_to_their_readouts(self):
         with tempfile.TemporaryDirectory() as temp:

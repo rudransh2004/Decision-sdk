@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,18 @@ def checkpoint_source(checkpoint: str | Path) -> tuple[str, bool]:
     if isinstance(checkpoint, Path) or value.startswith(("/", "./", "../", "~/")):
         raise FileNotFoundError(f"local checkpoint directory does not exist: {path}")
     return value, False
+
+
+def tokenizer_kwargs(hf_kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """The ``from_pretrained`` options that also apply to tokenizers and configs."""
+    keys = ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
+    return {key: hf_kwargs[key] for key in keys if key in hf_kwargs}
+
+
+def hub_kwargs(hf_kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """The ``from_pretrained`` options that ``hf_hub_download`` accepts."""
+    keys = ("revision", "token", "cache_dir", "local_files_only")
+    return {key: hf_kwargs[key] for key in keys if key in hf_kwargs}
 
 
 def read_checkpoint_json(path: Path) -> dict[str, Any]:

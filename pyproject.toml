@@ -146,7 +146,6 @@ disable_error_code = ["arg-type", "assignment", "var-annotated"]
 [[tool.mypy.overrides]]
 module = [
   "futurix_decision.models.decider",
-  "futurix_decision.models.decision_model",
   "futurix_decision.models.eikos",
   "futurix_decision.models.jpt",
   "futurix_decision.models.letter_code",

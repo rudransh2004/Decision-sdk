@@ -21,7 +21,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import CheckpointError, ConfigError
-from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
+from futurix_decision.models.decision_model import DecisionModel
+from futurix_decision.models.readouts import DecisionBatch, ReadoutStrategy, set_padding
+from futurix_decision.models.sources import tokenizer_kwargs
 from futurix_decision.models.tokenizer import row_seed
 
 LabelTable = tuple[list[str], list[int]]
@@ -48,18 +50,6 @@ def cached_label_table(
         return cached[0][:width], cached[1][:width]
     tables[family] = build(tokenizer, width)
     return tables[family]
-
-
-def tokenizer_kwargs(hf_kwargs: Mapping[str, Any]) -> dict[str, Any]:
-    """The ``from_pretrained`` options that also apply to the tokenizer."""
-    keys = ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
-    return {key: hf_kwargs[key] for key in keys if key in hf_kwargs}
-
-
-def hub_kwargs(hf_kwargs: Mapping[str, Any]) -> dict[str, Any]:
-    """The ``from_pretrained`` options that ``hf_hub_download`` accepts."""
-    keys = ("revision", "token", "cache_dir", "local_files_only")
-    return {key: hf_kwargs[key] for key in keys if key in hf_kwargs}
 
 
 def presented_order(example: DecisionInput, noul_order: tuple[str, str], family: str) -> list[int]:
@@ -121,16 +111,21 @@ class LabelReadoutModel(DecisionModel):
     seeded_kinds: ClassVar[frozenset[str]] = frozenset({"choice", "noul", "score"})
     """Decision kinds whose options ``assignment_seed`` permutes during training."""
 
-    def __init__(self, backbone: torch.nn.Module, tokenizer: Any, **kwargs: Any) -> None:
-        if (
-            kwargs.get("prompt_format", self.release_format) != self.release_format
-            or kwargs.get("head_type", "tokens") != "tokens"
-        ):
+    @classmethod
+    def _defaults(cls) -> dict[str, Any]:
+        defaults: dict[str, Any] = {"prompt_format": cls.release_format}
+        if cls.default_width is not None:
+            defaults["decision_tokens"] = cls.default_width
+        return defaults
+
+    @classmethod
+    def _reads(cls, prompt_format: str) -> bool:
+        return prompt_format == cls.release_format
+
+    def _make_readout(self, decision_head: torch.nn.Module | None) -> ReadoutStrategy:
+        if decision_head is not None:
             raise ConfigError(f"{self.family} requires its released prompt and letter readout")
-        kwargs["prompt_format"] = self.release_format
-        if self.default_width is not None:
-            kwargs.setdefault("decision_tokens", self.default_width)
-        super().__init__(backbone, tokenizer, **kwargs)
+        return LabelReadout(self)
 
     @classmethod
     def from_native(cls, checkpoint: str | Path, **kwargs: Any) -> LabelReadoutModel:
@@ -150,21 +145,6 @@ class LabelReadoutModel(DecisionModel):
     ) -> torch.Tensor:
         """One logit per option, in presented order, from each row's label logits."""
         return selected[0]
-
-    def _register_decision_tokens(self) -> list[int]:
-        if self.tokenizer.pad_token is None:
-            if self.tokenizer.eos_token is None:
-                raise CheckpointError(f"{self.family} tokenizer needs a pad or EOS token")
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.padding_side = "left"
-        ids = self._label_token_ids()
-        # backbone is typed nn.Module, whose __getattr__ hides the HF model's methods.
-        embedding = self.backbone.get_input_embeddings()  # type: ignore[operator]
-        if max(ids) >= embedding.num_embeddings:
-            raise CheckpointError(
-                f"{self.family} tokenizer has label tokens outside the backbone vocabulary"
-            )
-        return ids
 
     @classmethod
     def _load_release(
@@ -198,7 +178,7 @@ class LabelReadoutModel(DecisionModel):
 
     def _row_seed(self, example: DecisionInput, assignment_seed: int) -> int:
         return row_seed(
-            self.seed,
+            self.config.seed,
             assignment_seed,
             example.kind,
             example.state,
@@ -206,33 +186,59 @@ class LabelReadoutModel(DecisionModel):
             example.options,
         )
 
+
+class LabelReadout(ReadoutStrategy):
+    """Score a release's existing option-label rows in the next-token logits.
+
+    The prompt, label IDs, option order, and per-row combination come from the
+    ``LabelReadoutModel`` subclass. Batches are left-padded.
+    """
+
+    model: LabelReadoutModel
+
+    def __init__(self, model: LabelReadoutModel) -> None:
+        super().__init__(model)
+        set_padding(model.tokenizer, "left", f"{model.family} tokenizer")
+        ids = model._label_token_ids()
+        embedding = model.backbone.get_input_embeddings()
+        if max(ids) >= embedding.num_embeddings:
+            raise CheckpointError(
+                f"{model.family} tokenizer has label tokens outside the backbone vocabulary"
+            )
+        self.token_ids = ids
+
+    def prompt_tokens(self, example: DecisionInput) -> int:
+        order = self.model._option_order(example, None)
+        return max(len(row.input_ids) for row in self.model._rows(example, order))
+
     def _next_token_logits(self, rows: Sequence[list[int]]) -> torch.Tensor:
         """Left-pad ``rows`` into one batch and return each row's next-token logits."""
         longest = max(len(tokens) for tokens in rows)
-        if longest > self.max_sequence_length:
+        limit = self.model.config.max_sequence_length
+        if longest > limit:
             raise ConfigError(
-                f"prompt exceeds max_sequence_length={self.max_sequence_length}; "
+                f"prompt exceeds max_sequence_length={limit}; "
                 "increase the limit instead of silently truncating candidates"
             )
-        device = next(self.backbone.parameters()).device
+        backbone = self.model.backbone
+        device = next(backbone.parameters()).device
         ids = torch.full(
-            (len(rows), longest), self.tokenizer.pad_token_id, dtype=torch.long, device=device
+            (len(rows), longest), self.model.tokenizer.pad_token_id, dtype=torch.long, device=device
         )
         mask = torch.zeros_like(ids)
         for index, tokens in enumerate(rows):
             ids[index, -len(tokens) :] = torch.tensor(tokens, device=device)
             mask[index, -len(tokens) :] = 1
-        output = self.backbone(input_ids=ids, attention_mask=mask, logits_to_keep=1)
+        output = backbone(input_ids=ids, attention_mask=mask, logits_to_keep=1)
         return output.logits[:, -1, :]
 
-    def forward_decisions(
-        self, examples: Sequence[DecisionInput], *, assignment_seed: int | None = None
+    def forward(
+        self, examples: Sequence[DecisionInput], assignment_seed: int | None
     ) -> DecisionBatch:
-        if not examples:
-            raise ConfigError("examples must not be empty")
-        orders = [self._option_order(example, assignment_seed) for example in examples]
+        model = self.model
+        orders = [model._option_order(example, assignment_seed) for example in examples]
         groups = [
-            self._rows(example, order) for example, order in zip(examples, orders, strict=True)
+            model._rows(example, order) for example, order in zip(examples, orders, strict=True)
         ]
         logits = self._next_token_logits([row.input_ids for group in groups for row in group])
         results = logits.new_full(
@@ -247,5 +253,5 @@ class LabelReadoutModel(DecisionModel):
                 for offset, row in enumerate(group)
             ]
             cursor += len(group)
-            results[index, order] = self._presented_logits(example, selected)
+            results[index, order] = model._presented_logits(example, selected)
         return DecisionBatch(results, [list(range(len(example.options))) for example in examples])

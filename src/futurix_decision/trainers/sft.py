@@ -159,7 +159,7 @@ class SFTTrainer:
                 )
         existing_adapter = bool(getattr(backbone, "peft_config", None))
         if (
-            self.model.prompt_format == "bosun-v3"
+            self.model.config.prompt_format == "bosun-v3"
             and existing_adapter
             and not getattr(self.model, "_bosun_continuation_prepared", False)
         ):
@@ -218,13 +218,7 @@ class SFTTrainer:
             # The new decision rows in an untied output projection must be
             # learnable and must be retained with the adapter.
             modules_to_save = names
-        trainable_indices = (
-            self.model._token_ids
-            if self.model.decision_head is None
-            else [self.model._marker_id]
-            if self.model._marker_id is not None
-            else None
-        )
+        trainable_indices = self.model.readout.token_ids or None
         adapter = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
             r=self.config.lora_rank,

@@ -20,15 +20,16 @@ from huggingface_hub import hf_hub_download
 
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import CheckpointError, ConfigError
+from futurix_decision.models.decision_config import DecisionModelConfig
 from futurix_decision.models.label_readout import (
     LabelReadoutModel,
     LabelRow,
     cached_label_table,
-    hub_kwargs,
     noul_description,
     presented_order,
     score_description,
 )
+from futurix_decision.models.sources import hub_kwargs
 
 FORMAT = "decider-v2.1"
 MAX_OPTIONS = 255
@@ -207,6 +208,7 @@ class DeciderDecisionModel(LabelReadoutModel):
         self,
         backbone: torch.nn.Module,
         tokenizer: Any,
+        config: DecisionModelConfig | None = None,
         *,
         type_temperatures: Mapping[str, float] | None = None,
         **kwargs: Any,
@@ -219,14 +221,14 @@ class DeciderDecisionModel(LabelReadoutModel):
             raise ConfigError(
                 "decider-v2.1 requires positive finite temperatures for each decision kind"
             )
-        super().__init__(backbone, tokenizer, **kwargs)
+        super().__init__(backbone, tokenizer, config, **kwargs)
 
     def _label_token_ids(self) -> list[int]:
-        return letter_table(self.tokenizer, self.decision_tokens)[1]
+        return letter_table(self.tokenizer, self.config.decision_tokens)[1]
 
     def _rows(self, example: DecisionInput, order: list[int]) -> list[LabelRow]:
         return prepare_decider_rows(
-            example, self.tokenizer, decision_tokens=self.decision_tokens, option_order=order
+            example, self.tokenizer, decision_tokens=self.config.decision_tokens, option_order=order
         )
 
     def _presented_logits(
@@ -264,9 +266,11 @@ class DeciderDecisionModel(LabelReadoutModel):
             type_temperatures=config["temperature_by_type"],
         )
 
-    def _save_decision_metadata(self, path: str | Path, *, adapter_base: str | None = None) -> None:
-        super()._save_decision_metadata(path, adapter_base=adapter_base)
-        filename = Path(path) / "decision_config.json"
-        config = json.loads(filename.read_text(encoding="utf-8"))
-        config["type_temperatures"] = self.type_temperatures
-        filename.write_text(json.dumps(config, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    @classmethod
+    def _saved_options(cls, saved: Mapping[str, Any]) -> dict[str, Any]:
+        if "type_temperatures" not in saved:
+            raise CheckpointError("decider-v2.1 checkpoint is missing type-specific calibration")
+        return {"type_temperatures": saved["type_temperatures"]}
+
+    def _metadata(self) -> dict[str, Any]:
+        return {**super()._metadata(), "type_temperatures": self.type_temperatures}

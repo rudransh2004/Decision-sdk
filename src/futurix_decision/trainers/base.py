@@ -153,9 +153,9 @@ class DecisionTrainer:
                 # RLCD changes the policy, so the pre-RLCD temperature is
                 # stale. Refit on held-out data or reset to uncalibrated T=1.
                 heldout = self._heldout()
-                self.model.temperature = 1.0
+                self.model.config.temperature = 1.0
                 if heldout is not None:
-                    self.model.temperature = fit_temperature(
+                    self.model.config.temperature = fit_temperature(
                         self.model, heldout, batch_size=config.batch_size
                     )
             self.history[stage] = result
@@ -197,8 +197,8 @@ class DecisionTrainer:
                 "checkpoint": str(destination.resolve()),
                 "history": self.history,
                 "validation_metrics": self.validation_metrics,
-                "prompt_format": self.model.prompt_format,
-                "head_type": self.model.head_type,
+                "prompt_format": self.model.config.prompt_format,
+                "head_type": self.model.config.head_type,
             }
             with tempfile.NamedTemporaryFile(
                 mode="w",
@@ -264,11 +264,13 @@ class DecisionTrainer:
                 and not merge_lora
                 and not quantized
             ):
-                if not self.model.base_checkpoint:
+                if not self.model.config.base_checkpoint:
                     raise ConfigError("unmerged LoRA needs a recoverable base checkpoint")
                 self.model.backbone.save_pretrained(output, safe_serialization=safetensors)
                 self.model.tokenizer.save_pretrained(output)
-                self.model._save_decision_metadata(output, adapter_base=self.model.base_checkpoint)
+                self.model._save_decision_metadata(
+                    output, adapter_base=self.model.config.base_checkpoint
+                )
             else:
                 self.model.save_pretrained(output, safe_serialization=safetensors)
             metadata = {
@@ -277,12 +279,12 @@ class DecisionTrainer:
                 if isinstance(self.dataset, (str, Path))
                 else "<in-memory>",
                 "dataset_revision": self.dataset_revision,
-                "model_source": self.model.source_checkpoint,
-                "source_revision": self.model.source_revision,
-                "base_model_revision": self.model.base_model_revision,
-                "prompt_format": self.model.prompt_format,
-                "head_type": self.model.head_type,
-                "head_config": self.model.head_config,
+                "model_source": self.model.config.source_checkpoint,
+                "source_revision": self.model.config.source_revision,
+                "base_model_revision": self.model.config.base_model_revision,
+                "prompt_format": self.model.config.prompt_format,
+                "head_type": self.model.config.head_type,
+                "head_config": self.model.config.head_config,
                 "stages": list(self.history),
                 "sft_config": asdict(self.sft_config),
                 "calibration_config": asdict(self.calibration_config)

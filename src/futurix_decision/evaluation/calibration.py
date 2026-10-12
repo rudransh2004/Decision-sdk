@@ -70,7 +70,7 @@ def fit_temperature(
     so fitting on returned probabilities matches fitting on logits. The result
     is relative to the model's current output. Apply it with
     ``Calibrated(model, T)``, or persist it in a ``DecisionModel`` checkpoint
-    with ``model.temperature *= T`` before ``save_pretrained``.
+    with ``model.config.temperature *= T`` before ``save_pretrained``.
     """
     logits, targets = [], []
     for examples in example_batches(calibration_dataset, batch_size):

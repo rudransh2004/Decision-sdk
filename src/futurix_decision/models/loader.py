@@ -12,7 +12,12 @@ from futurix_decision.models.families.futurix import QWEN35, on_device
 from futurix_decision.models.families.publisher import pinned_remote
 from futurix_decision.models.protocol import DecisionBackend
 from futurix_decision.models.registry import family_for_checkpoint, get_family
-from futurix_decision.models.sources import ALIASES, checkpoint_source, infer_local_family
+from futurix_decision.models.sources import (
+    ALIASES,
+    checkpoint_source,
+    infer_local_family,
+    tokenizer_kwargs,
+)
 
 if TYPE_CHECKING:
     from futurix_decision.models.decision_model import DecisionModel
@@ -221,12 +226,7 @@ def _convert(name: str, *, local: bool, strategy: Strategy | None, **kwargs: Any
         pinned_remote(kwargs.get("revision"), True, "conversion")
     from transformers import AutoConfig
 
-    config_kwargs = {
-        key: kwargs[key]
-        for key in ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
-        if key in kwargs
-    }
-    config = AutoConfig.from_pretrained(name, **config_kwargs)
+    config = AutoConfig.from_pretrained(name, **tokenizer_kwargs(kwargs))
     architectures = getattr(config, "architectures", None) or ()
     selected = strategy or "pointer"
     qwen_multimodal = (

@@ -8,17 +8,21 @@ from futurix_decision.models.registry import get_family, register_family
 
 if TYPE_CHECKING:
     from futurix_decision.models.custom_head import PointerDecisionHead, register_decision_head
-    from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
+    from futurix_decision.models.decision_config import DecisionModelConfig
+    from futurix_decision.models.decision_model import DecisionModel
     from futurix_decision.models.loader import load_model
     from futurix_decision.models.native import NativeCapabilities, NativeDecisionModel
+    from futurix_decision.models.readouts import DecisionBatch, ReadoutStrategy
 
 __getattr__ = lazy_exports(
     __name__,
     {
         "PointerDecisionHead": "futurix_decision.models.custom_head",
         "register_decision_head": "futurix_decision.models.custom_head",
-        "DecisionBatch": "futurix_decision.models.decision_model",
+        "DecisionBatch": "futurix_decision.models.readouts",
         "DecisionModel": "futurix_decision.models.decision_model",
+        "DecisionModelConfig": "futurix_decision.models.decision_config",
+        "ReadoutStrategy": "futurix_decision.models.readouts",
         "NativeCapabilities": "futurix_decision.models.native",
         "NativeDecisionModel": "futurix_decision.models.native",
         "load_model": "futurix_decision.models.loader",
@@ -30,10 +34,12 @@ __all__ = [
     "DecisionBackend",
     "DecisionBatch",
     "DecisionModel",
+    "DecisionModelConfig",
     "FamilyAdapter",
     "NativeCapabilities",
     "NativeDecisionModel",
     "PointerDecisionHead",
+    "ReadoutStrategy",
     "get_family",
     "load_model",
     "register_decision_head",

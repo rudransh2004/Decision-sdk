@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from futurix_decision.evaluation import evaluate, fit_temperature
     from futurix_decision.models import (
         DecisionModel,
+        DecisionModelConfig,
         NativeCapabilities,
         NativeDecisionModel,
         PointerDecisionHead,
@@ -54,6 +55,7 @@ __getattr__ = lazy_exports(
         "evaluate": "futurix_decision.evaluation",
         "fit_temperature": "futurix_decision.evaluation",
         "DecisionModel": "futurix_decision.models",
+        "DecisionModelConfig": "futurix_decision.models",
         "NativeCapabilities": "futurix_decision.models",
         "NativeDecisionModel": "futurix_decision.models",
         "PointerDecisionHead": "futurix_decision.models",
@@ -82,6 +84,7 @@ __all__ = [
     "DecisionExample",
     "DecisionInput",
     "DecisionModel",
+    "DecisionModelConfig",
     "FamilyAdapter",
     "NativeCapabilities",
     "NativeDecisionModel",
