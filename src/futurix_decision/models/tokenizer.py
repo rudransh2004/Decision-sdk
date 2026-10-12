@@ -8,6 +8,7 @@ import random
 from typing import Any
 
 from futurix_decision.datasets.schema import DecisionInput
+from futurix_decision.errors import ConfigError
 from futurix_decision.models.custom_head import CANDIDATE_MARKER
 from futurix_decision.models.decision_head import assign_slots, decision_token
 
@@ -20,7 +21,7 @@ def format_decision_prompt(
     assignment_seed: int | None = None,
 ) -> tuple[str, list[int]]:
     if len(example.options) > decision_tokens:
-        raise ValueError("more options supplied than available decision tokens")
+        raise ConfigError("more options supplied than available decision tokens")
     state = json.dumps(example.state, ensure_ascii=False, sort_keys=True)
     question = json.dumps(example.question, ensure_ascii=False)
     identity = json.dumps(
@@ -46,12 +47,12 @@ def _candidate_order(
     reject_marker: bool = True,
 ) -> tuple[str, str, list[str], list[int], list[int]]:
     if not 2 <= len(example.options) <= max_options:
-        raise ValueError("number of options must be between 2 and max_options")
+        raise ConfigError("number of options must be between 2 and max_options")
     state = json.dumps(example.state, ensure_ascii=False, sort_keys=True)
     question = json.dumps(example.question, ensure_ascii=False)
     choices = [json.dumps(option, ensure_ascii=False) for option in example.options]
     if reject_marker and any(CANDIDATE_MARKER in text for text in (state, question, *choices)):
-        raise ValueError("input contains the reserved decision candidate marker")
+        raise ConfigError("input contains the reserved decision candidate marker")
     identity = json.dumps(
         [seed, assignment_seed, example.kind, state, question, example.options],
         ensure_ascii=False,
@@ -115,11 +116,11 @@ def format_tokenized_head_prompt(
             text += ": " + json.dumps(example.candidate_descriptions[index], ensure_ascii=False)
         segment = tokenizer.encode(text + "\n", add_special_tokens=False)
         if not segment:
-            raise ValueError("each candidate must encode to at least one token")
+            raise ConfigError("each candidate must encode to at least one token")
         ids.extend(segment)
         endpoints[index] = len(ids) - 1
     suffix = tokenizer.encode("Decision:", add_special_tokens=False)
     if not suffix:
-        raise ValueError("the decision query must encode to at least one token")
+        raise ConfigError("the decision query must encode to at least one token")
     ids.extend(suffix)
     return ids, slots, endpoints

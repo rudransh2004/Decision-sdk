@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from futurix_decision.datasets.schema import DecisionExample
+from futurix_decision.errors import (
+    CheckpointError,
+    ConfigError,
+    InvalidOutputError,
+    MissingDependencyError,
+)
 from futurix_decision.models.native import NativeDecisionModel, _images_for_native, _question
 from futurix_decision.trainers.sft import DatasetSource, _canonical_rows
 
@@ -30,11 +36,11 @@ class NativeSFTConfig:
 
     def __post_init__(self) -> None:
         if self.epochs < 1 or self.batch_size < 1:
-            raise ValueError("epochs and batch_size must be positive")
+            raise ConfigError("epochs and batch_size must be positive")
         if not math.isfinite(self.learning_rate) or self.learning_rate <= 0:
-            raise ValueError("learning_rate must be positive and finite")
+            raise ConfigError("learning_rate must be positive and finite")
         if not math.isfinite(self.weight_decay) or self.weight_decay < 0:
-            raise ValueError("weight_decay must be non-negative and finite")
+            raise ConfigError("weight_decay must be non-negative and finite")
 
 
 def _write_manifest(path: Path, model: NativeDecisionModel) -> None:
@@ -73,10 +79,10 @@ def _grouped_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]
             last_group = group
         assert current is not None
         if current["state"] != row.state:
-            raise ValueError(f"group {group!r} contains different states")
+            raise ConfigError(f"group {group!r} contains different states")
         question_id = row.question_id or "decision"
         if question_id in current["questions"]:
-            raise ValueError(f"group {group!r} repeats question ID {question_id!r}")
+            raise ConfigError(f"group {group!r} repeats question ID {question_id!r}")
         current["questions"][question_id] = _question(row)
         current["gold"][question_id] = {
             "probabilities": dict(zip(_option_keys(row), row.target_distribution(), strict=True))
@@ -88,18 +94,18 @@ def _grouped_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]
 def _text_only(rows: Iterable[DecisionExample], family: str) -> Iterable[DecisionExample]:
     for row in rows:
         if row.images:
-            raise ValueError(f"{family} native training accepts text/JSON decisions, not images")
+            raise ConfigError(f"{family} native training accepts text/JSON decisions, not images")
         yield row
 
 
 def _gliner_record(row: DecisionExample, *, target_policy: str) -> dict[str, Any]:
     if row.images:
-        raise ValueError("GLiNER's encoder cannot train on image decisions")
+        raise ConfigError("GLiNER's encoder cannot train on image decisions")
     target = row.target_distribution()
     if target_policy not in ("error", "argmax"):
-        raise ValueError("target_policy must be 'error' or 'argmax'")
+        raise ConfigError("target_policy must be 'error' or 'argmax'")
     if max(target) < 1 - 1e-7 and target_policy != "argmax":
-        raise ValueError(
+        raise ConfigError(
             "GLiNER's native classifier only accepts hard labels; use "
             "target_policy='argmax' to explicitly discard soft probabilities"
         )
@@ -130,7 +136,7 @@ def _write_rows(destination: Path, rows: Iterable[Mapping[str, Any]]) -> int:
             stream.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
             count += 1
     if not count:
-        raise ValueError("training dataset contains no labeled decisions")
+        raise ConfigError("training dataset contains no labeled decisions")
     return count
 
 
@@ -140,7 +146,7 @@ def _kev_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]]:
         for qid, question in record["questions"].items():
             probs = record["gold"][qid]["probabilities"]
             if len(probs) > 255:
-                raise ValueError("Kev native pointer head supports at most 255 options")
+                raise ConfigError("Kev native pointer head supports at most 255 options")
             winner = max(probs, key=probs.__getitem__)
             questions[qid] = {
                 **question,
@@ -180,7 +186,7 @@ def _train_pplx(
         for offset in range(0, len(rows), config.batch_size):
             examples = rows[offset : offset + config.batch_size]
             if any(len(row.options) > 255 for row in examples):
-                raise ValueError("PPLX native readout supports at most 255 options")
+                raise ConfigError("PPLX native readout supports at most 255 options")
             records = [
                 {
                     "state": row.state,
@@ -192,11 +198,11 @@ def _train_pplx(
             batch = native.prepare(records)
             logits = native(batch)
             if logits.shape[0] != len(examples):
-                raise ValueError("PPLX returned the wrong batch size")
+                raise InvalidOutputError("PPLX returned the wrong batch size")
             terms = []
             for prediction, row in zip(logits, examples, strict=True):
                 if prediction.shape[0] < len(row.options):
-                    raise ValueError("PPLX returned fewer logits than decision options")
+                    raise InvalidOutputError("PPLX returned fewer logits than decision options")
                 target = torch.tensor(
                     row.target_distribution(), device=prediction.device, dtype=torch.float32
                 )
@@ -233,7 +239,7 @@ def _train_clef(
     source = Path(module.__file__).parent
     for filename in ("joint_schema_model.py", "joint_head_config.json"):
         if not (source / filename).is_file():
-            raise FileNotFoundError(f"Clef cannot export without its native {filename}")
+            raise CheckpointError(f"Clef cannot export without its native {filename}")
     native.language_model.requires_grad_(config.train_backbone)
     native.head.requires_grad_(True)
     native.train()
@@ -267,12 +273,12 @@ def _train_clef(
             batch = module.collate_records(records, processor.tokenizer.pad_token_id, device)
             logits = native(batch)
             if len(logits) != len(examples) or any(len(question) != 1 for question in logits):
-                raise ValueError("Clef returned unexpected joint-schema logits")
+                raise InvalidOutputError("Clef returned unexpected joint-schema logits")
             terms = []
             for i, (question, row) in enumerate(zip(logits, examples, strict=True)):
                 prediction = question[0].float()
                 if len(prediction) != len(row.options):
-                    raise ValueError("Clef returned a different option count")
+                    raise InvalidOutputError("Clef returned a different option count")
                 # The native encoder may sort choice IDs. Align targets to the
                 # option IDs actually encoded instead of assuming user order.
                 keys = _option_keys(row)
@@ -332,7 +338,9 @@ def finetune_native(
             try:
                 from laya.train import finetune
             except ImportError as exc:
-                raise ImportError("install futurix-decision[laya] to train Laya") from exc
+                raise MissingDependencyError(
+                    "install futurix-decision[laya] to train Laya"
+                ) from exc
             if isinstance(config, NativeSFTConfig):
                 from laya.train import TrainConfig
 
@@ -367,12 +375,14 @@ def finetune_native(
                 from gliner2 import AutoExtractor
                 from gliner2.training.trainer import ExtractorTrainer, TrainingConfig
             except ImportError as exc:
-                raise ImportError("install futurix-decision[gliner-train] to train GLiNER") from exc
+                raise MissingDependencyError(
+                    "install futurix-decision[gliner-train] to train GLiNER"
+                ) from exc
             if config is None:
                 config = TrainingConfig(output_dir=str(path))
             elif isinstance(config, NativeSFTConfig):
                 if not config.train_backbone:
-                    raise ValueError(
+                    raise ConfigError(
                         "GLiNER's native trainer does not expose readout-only training"
                     )
                 config = TrainingConfig(
@@ -385,7 +395,7 @@ def finetune_native(
                     num_workers=0,
                 )
             elif Path(config.output_dir) != path:
-                raise ValueError("GLiNER config.output_dir must equal output_dir")
+                raise ConfigError("GLiNER config.output_dir must equal output_dir")
             extractor = AutoExtractor.from_pretrained(model.checkpoint)
             report = ExtractorTrainer(extractor, config).train(train_data=str(data))
             path = path / "final"  # Native GLiNER trainer writes a reloadable release here.
@@ -395,12 +405,16 @@ def finetune_native(
             flags = dict(config or {})
             flags.update(kwargs)
             if flags.keys() & {"data", "out", "init_from", "base", "base_revision"}:
-                raise ValueError("Kev data/out/init_from/base/base_revision are managed by the SDK")
+                raise ConfigError(
+                    "Kev data/out/init_from/base/base_revision are managed by the SDK"
+                )
             count = _write_rows(data, _kev_records(_text_only(_canonical_rows(dataset), "Kev")))
             try:
                 from kev.checkpoint import Checkpoint
             except ImportError as exc:
-                raise ImportError("install futurix-decision[kev-native] to train Kev") from exc
+                raise MissingDependencyError(
+                    "install futurix-decision[kev-native] to train Kev"
+                ) from exc
             source = (
                 f"{model.checkpoint}@{model.source_revision}"
                 if model.source_revision and not Path(model.checkpoint).is_dir()
@@ -424,7 +438,7 @@ def finetune_native(
                 command.extend(["--base_revision", release.meta.base_revision])
             for key, value in flags.items():
                 if not key.replace("_", "").isalnum() or key.startswith("_"):
-                    raise ValueError(f"invalid Kev training option: {key}")
+                    raise ConfigError(f"invalid Kev training option: {key}")
                 command.extend(
                     [f"--{key}", str(int(value)) if isinstance(value, bool) else str(value)]
                 )
@@ -435,7 +449,7 @@ def finetune_native(
                 raise TypeError(f"unsupported {model.family} training options: {sorted(kwargs)}")
             rows = list(_canonical_rows(dataset))
             if not rows:
-                raise ValueError("training dataset contains no labeled decisions")
+                raise ConfigError("training dataset contains no labeled decisions")
             if config is not None and not isinstance(config, NativeSFTConfig):
                 raise TypeError(f"{model.family} fine-tuning uses NativeSFTConfig")
             if model.family == "clef":

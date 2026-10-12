@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
+from futurix_decision.errors import ConfigError
+
 DEFAULT_THRESHOLDS = (0.50, 0.60, 0.70, 0.80, 0.90, 0.95, 0.99)
 
 
@@ -21,20 +23,20 @@ def compute_metrics(
 ) -> dict:
     """Accuracy means expected correctness under soft targets (hard: 0/1)."""
     if not probabilities or len(probabilities) != len(targets) or bins < 1:
-        raise ValueError("provide equally many nonempty probabilities and targets")
+        raise ConfigError("provide equally many nonempty probabilities and targets")
     confidence, correct, nll, brier = [], [], [], []
     for raw_p, raw_y in zip(probabilities, targets):
         p, y = [float(v) for v in raw_p], [float(v) for v in raw_y]
         if len(p) != len(y) or len(p) < 2:
-            raise ValueError("probabilities and target dimensions must match")
+            raise ConfigError("probabilities and target dimensions must match")
         if not all(map(math.isfinite, p + y)):
-            raise ValueError("distributions must be finite")
+            raise ConfigError("distributions must be finite")
         if min(p) < 0 or min(y) < 0:
-            raise ValueError("distributions must be non-negative")
+            raise ConfigError("distributions must be non-negative")
         if not math.isclose(sum(p), 1.0, rel_tol=0, abs_tol=1e-5) or not math.isclose(
             sum(y), 1.0, rel_tol=0, abs_tol=1e-5
         ):
-            raise ValueError("distributions must sum to 1")
+            raise ConfigError("distributions must sum to 1")
         winner = max(range(len(p)), key=p.__getitem__)
         confidence.append(p[winner])
         correct.append(y[winner])
@@ -61,7 +63,7 @@ def compute_metrics(
     coverage: dict[float, float] = {}
     for threshold in thresholds:
         if not 0 <= threshold <= 1:
-            raise ValueError("thresholds must be in [0, 1]")
+            raise ConfigError("thresholds must be in [0, 1]")
         kept = [y for c, y in zip(confidence, correct) if c >= threshold]
         coverage[float(threshold)] = len(kept) / count
         selective_accuracy[float(threshold)] = _mean(kept) if kept else None

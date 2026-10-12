@@ -14,6 +14,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from futurix_decision.datasets.schema import DecisionInput, State
+from futurix_decision.errors import CheckpointError, ConfigError, MissingDependencyError
 from futurix_decision.inference.schemas import DecisionResult
 from futurix_decision.models.bosun import (
     BOSUN_CONVERSION_CHAT_TEMPLATE,
@@ -95,11 +96,11 @@ class DecisionModel:
         multimodal_loader: bool = False,
     ) -> None:
         if not 2 <= decision_tokens <= 256:
-            raise ValueError("decision_tokens must be between 2 and 256")
+            raise ConfigError("decision_tokens must be between 2 and 256")
         if not math.isfinite(temperature) or temperature <= 0:
-            raise ValueError("temperature must be finite and positive")
+            raise ConfigError("temperature must be finite and positive")
         if max_sequence_length <= 0:
-            raise ValueError("max_sequence_length must be positive")
+            raise ConfigError("max_sequence_length must be positive")
         if prompt_format not in (
             "futurix",
             "bosun-v3",
@@ -107,61 +108,61 @@ class DecisionModel:
             "jpt-llm2jev-chat",
             "eikos-letter-v1-semif",
         ):
-            raise ValueError("unsupported decision prompt format")
+            raise ConfigError("unsupported decision prompt format")
         if prompt_format == "bosun-v3" and decision_tokens != 256:
-            raise ValueError("Bosun v3 requires exactly 256 decision tokens")
+            raise ConfigError("Bosun v3 requires exactly 256 decision tokens")
         if head_type != "tokens" and prompt_format != "futurix":
-            raise ValueError(
+            raise ConfigError(
                 "custom heads require prompt_format='futurix', not Bosun's token contract"
             )
         if prompt_format == "decider-v2.1" and type(self) is DecisionModel:
-            raise ValueError(
+            raise ConfigError(
                 "decider-v2.1 requires DeciderDecisionModel to preserve its letter readout"
             )
         if prompt_format == "jpt-llm2jev-chat" and type(self) is DecisionModel:
-            raise ValueError("JPT requires JPTDecisionModel to preserve its chat-letter readout")
+            raise ConfigError("JPT requires JPTDecisionModel to preserve its chat-letter readout")
         if prompt_format == "eikos-letter-v1-semif" and type(self) is DecisionModel:
-            raise ValueError("Eikos requires EikosDecisionModel to preserve its SemIf readout")
+            raise ConfigError("Eikos requires EikosDecisionModel to preserve its SemIf readout")
         if head_type == "tokens" and (decision_head is not None or head_config):
-            raise ValueError("token readout does not take a custom decision head")
+            raise ConfigError("token readout does not take a custom decision head")
         # Read old local exports but always write new metadata when re-exporting.
         if head_type == "pplx" and head_prompt_version == "pplx-v1":
             head_type, head_prompt_version = "letter_code", "letter-code-v1"
         if head_prompt_version not in ("marker-v1", "span-v1", "letter-code-v1"):
-            raise ValueError("unsupported candidate prompt version")
+            raise ConfigError("unsupported candidate prompt version")
         if head_type == "tokens" and head_prompt_version != "marker-v1":
-            raise ValueError("candidate prompt versions require a custom decision head")
+            raise ConfigError("candidate prompt versions require a custom decision head")
         if (head_type == "letter_code") != (head_prompt_version == "letter-code-v1"):
-            raise ValueError(
+            raise ConfigError(
                 "letter-code readouts require head_type='letter_code' "
                 "and head_prompt_version='letter-code-v1'"
             )
         if head_type == "letter_code" and decision_tokens > 255:
-            raise ValueError("letter-code readout supports at most 255 options")
+            raise ConfigError("letter-code readout supports at most 255 options")
         if attention_mode not in ("causal", "noncausal_full_attention"):
-            raise ValueError("attention_mode must be causal or noncausal_full_attention")
+            raise ConfigError("attention_mode must be causal or noncausal_full_attention")
         if attention_mode != "causal" and head_type != "letter_code":
-            raise ValueError("noncausal attention is only implemented for letter-code readouts")
+            raise ConfigError("noncausal attention is only implemented for letter-code readouts")
         if not isinstance(multimodal_loader, bool):
-            raise ValueError("multimodal_loader must be a boolean")
+            raise ConfigError("multimodal_loader must be a boolean")
         if not isinstance(train_backbone, bool):
-            raise ValueError("train_backbone must be a boolean")
+            raise ConfigError("train_backbone must be a boolean")
         if not isinstance(bosun_template_fallback, bool) or (
             bosun_template_fallback and prompt_format != "bosun-v3"
         ):
-            raise ValueError("Bosun chat-template fallback requires prompt_format='bosun-v3'")
+            raise ConfigError("Bosun chat-template fallback requires prompt_format='bosun-v3'")
         if not isinstance(learn_abstain, bool) or (
             learn_abstain
             and not (
                 head_type == "pointer" or (head_type == "tokens" and prompt_format == "bosun-v3")
             )
         ):
-            raise ValueError("learn_abstain requires a pointer head or Bosun token readout")
+            raise ConfigError("learn_abstain requires a pointer head or Bosun token readout")
         if head_type == "pointer" and head_config and "abstain" in head_config:
-            raise ValueError("configure pointer abstention with learn_abstain, not head_config")
+            raise ConfigError("configure pointer abstention with learn_abstain, not head_config")
         if prompt_format == "bosun-v3" and not getattr(tokenizer, "chat_template", None):
             if not bosun_template_fallback:
-                raise ValueError("Bosun prompt requires a tokenizer chat template")
+                raise ConfigError("Bosun prompt requires a tokenizer chat template")
             tokenizer.chat_template = BOSUN_CONVERSION_CHAT_TEMPLATE
         self.backbone = backbone
         self.tokenizer = tokenizer
@@ -187,7 +188,7 @@ class DecisionModel:
             codes, token_ids = answer_codes(tokenizer, decision_tokens)
             expected = {"codes": codes, "token_ids": token_ids}
             if self.head_config and self.head_config != expected:
-                raise ValueError("saved letter-code answers differ from this tokenizer")
+                raise CheckpointError("saved letter-code answers differ from this tokenizer")
             self.head_config = expected
         # Store only simple, JSON-safe architecture parameters in checkpoints.
         json.dumps(self.head_config, allow_nan=False)
@@ -201,14 +202,16 @@ class DecisionModel:
             if marker_id is None:
                 if self.tokenizer.pad_token is None:
                     if self.tokenizer.eos_token is None:
-                        raise ValueError("tokenizer needs a pad or EOS token for batch inference")
+                        raise CheckpointError(
+                            "tokenizer needs a pad or EOS token for batch inference"
+                        )
                     self.tokenizer.pad_token = self.tokenizer.eos_token
                 self.tokenizer.padding_side = "left" if head_type == "letter_code" else "right"
             self._token_ids = []
             text_config = getattr(self.backbone.config, "text_config", self.backbone.config)
             hidden_size = getattr(text_config, "hidden_size", None)
             if not isinstance(hidden_size, int) or hidden_size < 1:
-                raise ValueError("causal LM config must expose a positive text hidden_size")
+                raise CheckpointError("causal LM config must expose a positive text hidden_size")
             config = dict(self.head_config)
             if learn_abstain:
                 config["abstain"] = True
@@ -236,20 +239,20 @@ class DecisionModel:
         )
         if tokenizer.pad_token is None:
             if tokenizer.eos_token is None:
-                raise ValueError("tokenizer needs a pad or EOS token for batch inference")
+                raise CheckpointError("tokenizer needs a pad or EOS token for batch inference")
             tokenizer.pad_token = tokenizer.eos_token
         tokenizer.padding_side = "right"
         embeddings = self.backbone.get_input_embeddings()
         if embeddings.num_embeddings != len(tokenizer):
             if getattr(self.backbone, "is_loaded_in_4bit", False):
-                raise ValueError(
+                raise ConfigError(
                     "cannot resize a 4-bit checkpoint; add the candidate marker "
                     "and save the unquantized base before loading it with BitsAndBytesConfig"
                 )
             self.backbone.resize_token_embeddings(len(tokenizer), mean_resizing=False)
         marker_id = tokenizer.convert_tokens_to_ids(CANDIDATE_MARKER)
         if tokenizer.encode(CANDIDATE_MARKER, add_special_tokens=False) != [marker_id]:
-            raise ValueError("candidate marker must encode to exactly one token")
+            raise ConfigError("candidate marker must encode to exactly one token")
         if is_new:
             # Qwen may consume a pre-existing padded vocabulary row without a
             # resize. Initialize that row rather than treating it as trained.
@@ -282,13 +285,13 @@ class DecisionModel:
         )
         if self.tokenizer.pad_token is None:
             if self.tokenizer.eos_token is None:
-                raise ValueError("tokenizer needs a pad or EOS token for batch inference")
+                raise CheckpointError("tokenizer needs a pad or EOS token for batch inference")
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left" if self.prompt_format == "bosun-v3" else "right"
         embedding = self.backbone.get_input_embeddings()
         if embedding.num_embeddings != len(self.tokenizer):
             if getattr(self.backbone, "is_loaded_in_4bit", False):
-                raise ValueError(
+                raise ConfigError(
                     "cannot resize a 4-bit checkpoint; add decision tokens and "
                     "save the unquantized base before loading it with BitsAndBytesConfig"
                 )
@@ -300,7 +303,7 @@ class DecisionModel:
             self.tokenizer.encode(token, add_special_tokens=False) != [id_]
             for token, id_ in zip(tokens, ids)
         ):
-            raise ValueError("each decision token must encode to exactly one token ID")
+            raise ConfigError("each decision token must encode to exactly one token ID")
         new_ids = [id_ for token, id_ in zip(tokens, ids) if token in added_tokens]
         if new_ids:
             # Some LMs (including Qwen3) ship more embedding rows than the
@@ -369,17 +372,17 @@ class DecisionModel:
             decision_config.get("prompt_format") == "decider-v2.1"
             and "type_temperatures" not in decision_config
         ):
-            raise ValueError("decider-v2.1 checkpoint is missing type-specific calibration")
+            raise CheckpointError("decider-v2.1 checkpoint is missing type-specific calibration")
         stored_head_type = decision_config.get("head_type")
         if stored_head_type == "pplx":
             stored_head_type = "letter_code"
         if head_type == "pplx":
             head_type = "letter_code"
         if stored_head_type is not None and head_type is not None and head_type != stored_head_type:
-            raise ValueError("cannot override the saved checkpoint's decision head type")
+            raise ConfigError("cannot override the saved checkpoint's decision head type")
         if "head_config" in decision_config and head_config is not None:
             if dict(head_config) != decision_config["head_config"]:
-                raise ValueError(
+                raise ConfigError(
                     "cannot override the saved checkpoint's decision head configuration"
                 )
         stored_prompt_version = decision_config.get("head_prompt_version")
@@ -392,34 +395,34 @@ class DecisionModel:
             and head_prompt_version is not None
             and head_prompt_version != stored_prompt_version
         ):
-            raise ValueError("cannot override the saved checkpoint's candidate prompt version")
+            raise ConfigError("cannot override the saved checkpoint's candidate prompt version")
         stored_train_backbone = decision_config.get("train_backbone")
         if (
             stored_train_backbone is not None
             and train_backbone is not None
             and train_backbone != stored_train_backbone
         ):
-            raise ValueError("cannot override the saved checkpoint's backbone training policy")
+            raise ConfigError("cannot override the saved checkpoint's backbone training policy")
         stored_bosun_fallback = decision_config.get("bosun_template_fallback")
         if (
             stored_bosun_fallback is not None
             and bosun_template_fallback is not None
             and bosun_template_fallback != stored_bosun_fallback
         ):
-            raise ValueError("cannot override the saved checkpoint's Bosun chat-template fallback")
+            raise ConfigError("cannot override the saved checkpoint's Bosun chat-template fallback")
         stored_learn_abstain = decision_config.get("learn_abstain", False)
         if (
             decision_config.get("architecture") == "futurix-decision"
             and learn_abstain is not None
             and learn_abstain != stored_learn_abstain
         ):
-            raise ValueError("cannot override the saved checkpoint's abstain readout")
+            raise ConfigError("cannot override the saved checkpoint's abstain readout")
         for key, override in (
             ("attention_mode", attention_mode),
             ("multimodal_loader", multimodal_loader),
         ):
             if key in decision_config and override is not None and override != decision_config[key]:
-                raise ValueError(f"cannot override the saved checkpoint's {key}")
+                raise ConfigError(f"cannot override the saved checkpoint's {key}")
         tokenizer_kwargs = {
             key: hf_kwargs[key]
             for key in ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
@@ -435,7 +438,7 @@ class DecisionModel:
             else str(checkpoint)
         )
         if adapter and not base_checkpoint:
-            raise ValueError(
+            raise CheckpointError(
                 "adapter checkpoint is missing base_checkpoint in decision_config.json"
             )
         qwen35_base = str(checkpoint) in (
@@ -458,7 +461,7 @@ class DecisionModel:
             try:
                 from transformers import AutoModelForMultimodalLM
             except ImportError as exc:
-                raise ImportError(
+                raise MissingDependencyError(
                     "JPT and Qwen3.5-9B require Transformers 5.17+; "
                     "install futurix-decision[jpt] or futurix-decision[qwen3.5]"
                 ) from exc
@@ -469,7 +472,7 @@ class DecisionModel:
         resolved_attention = attention_mode or decision_config.get("attention_mode", "causal")
         if resolved_attention == "noncausal_full_attention":
             if backbone_kwargs.get("attn_implementation", "sdpa") != "sdpa":
-                raise ValueError("noncausal letter-code attention requires SDPA")
+                raise ConfigError("noncausal letter-code attention requires SDPA")
             backbone_kwargs["attn_implementation"] = "sdpa"
         if adapter and decision_config.get("base_model_revision"):
             backbone_kwargs["revision"] = decision_config["base_model_revision"]
@@ -537,7 +540,7 @@ class DecisionModel:
             try:
                 from peft import PeftModel
             except ImportError as exc:
-                raise ImportError(
+                raise MissingDependencyError(
                     "adapter loading needs pip install futurix-decision[train]"
                 ) from exc
             model.backbone = PeftModel.from_pretrained(
@@ -545,11 +548,11 @@ class DecisionModel:
             )
         if stored_head_type is not None and stored_head_type != "tokens":
             if not path.is_dir() or not (path / HEAD_WEIGHTS).is_file():
-                raise ValueError(f"custom head checkpoint is missing {HEAD_WEIGHTS}")
+                raise CheckpointError(f"custom head checkpoint is missing {HEAD_WEIGHTS}")
             try:
                 from safetensors.torch import load_file
             except ImportError as exc:
-                raise ImportError("custom head loading requires safetensors") from exc
+                raise MissingDependencyError("custom head loading requires safetensors") from exc
             assert model.decision_head is not None
             model.decision_head.load_state_dict(load_file(str(path / HEAD_WEIGHTS)), strict=True)
         return model
@@ -580,7 +583,7 @@ class DecisionModel:
                 or any(digit not in "0123456789abcdefABCDEF" for digit in revision)
             )
         ):
-            raise ValueError("pin the Bosun repository to a full 40-character commit revision")
+            raise ConfigError("pin the Bosun repository to a full 40-character commit revision")
         if local:
             require_checkpoint_files(Path(source), "bosun")
         package = AutoModelForCausalLM.from_pretrained(
@@ -594,11 +597,11 @@ class DecisionModel:
             or getattr(package.config, "decision_token_count", None) != 256
             or getattr(package.config, "null_token_index", None) != 255
         ):
-            raise ValueError(
+            raise CheckpointError(
                 "checkpoint does not implement the supported Bosun v3 decision contract"
             )
         if package.tokenizer is None:
-            raise ValueError("Bosun checkpoint did not load its tokenizer")
+            raise CheckpointError("Bosun checkpoint did not load its tokenizer")
         return cls(
             package.model,
             package.tokenizer,
@@ -645,12 +648,12 @@ class DecisionModel:
         if getattr(self.backbone, "peft_config", None):
             if getattr(self.backbone, "is_loaded_in_4bit", False):
                 if not self.base_checkpoint:
-                    raise ValueError("a 4-bit adapter needs a recoverable base_checkpoint")
+                    raise ConfigError("a 4-bit adapter needs a recoverable base_checkpoint")
                 if (
                     Path(self.base_checkpoint).is_dir()
                     and Path(self.base_checkpoint).resolve() == path.resolve()
                 ):
-                    raise ValueError("QLoRA adapter output cannot overwrite its base checkpoint")
+                    raise ConfigError("QLoRA adapter output cannot overwrite its base checkpoint")
                 adapter_base = self.base_checkpoint
             else:
                 # Merge unquantized LoRA and trainable decision-token rows into
@@ -667,7 +670,7 @@ class DecisionModel:
             try:
                 from safetensors.torch import save_file
             except ImportError as exc:
-                raise ImportError("custom head saving requires safetensors") from exc
+                raise MissingDependencyError("custom head saving requires safetensors") from exc
             state = {
                 name: value.detach().cpu().contiguous()
                 for name, value in self.decision_head.state_dict().items()
@@ -756,7 +759,7 @@ class DecisionModel:
     ) -> dict[str, Any]:
         """Answer typed System One questions with this model's trained readout."""
         if not questions:
-            raise ValueError("system_one needs at least one question")
+            raise ConfigError("system_one needs at least one question")
         examples = []
         for question_id, question in questions.items():
             if (
@@ -764,14 +767,14 @@ class DecisionModel:
                 or not question_id
                 or not isinstance(question, Mapping)
             ):
-                raise ValueError("system_one questions must be named mappings")
+                raise ConfigError("system_one questions must be named mappings")
             kind = question.get("type", "choice")
             criteria = question.get("criteria")
             if kind == "noul":
                 if criteria is not None and (
                     not isinstance(criteria, Mapping) or set(criteria) - {"false", "true"}
                 ):
-                    raise ValueError("noul criteria must use false/true keys")
+                    raise ConfigError("noul criteria must use false/true keys")
                 names = ["false", "true"]
                 descriptions = [(criteria or {}).get(name) for name in names]
             elif kind in ("choice", "score"):
@@ -791,9 +794,9 @@ class DecisionModel:
                     )
                     descriptions = list(criteria) if kind == "score" else [None] * len(names)
                 else:
-                    raise ValueError(f"{kind} question needs criteria options")
+                    raise ConfigError(f"{kind} question needs criteria options")
             else:
-                raise ValueError(f"unsupported system_one question type: {kind!r}")
+                raise ConfigError(f"unsupported system_one question type: {kind!r}")
             examples.append(
                 DecisionInput(
                     kind=kind,
@@ -850,7 +853,9 @@ class DecisionModel:
             source = source.get_base_model()
         base = getattr(source, "base_model", None)
         if not isinstance(base, torch.nn.Module) or base is source:
-            raise ValueError("the causal LM must expose a base transformer for pointer decisions")
+            raise CheckpointError(
+                "the causal LM must expose a base transformer for pointer decisions"
+            )
         output = base(**encoded, return_dict=True, use_cache=False)
         hidden = getattr(output, "last_hidden_state", None)
         if not isinstance(hidden, torch.Tensor) or hidden.ndim != 3:
@@ -866,9 +871,9 @@ class DecisionModel:
         candidate-to-slot mapping reproducibly. Inference uses a stable mapping.
         """
         if not examples:
-            raise ValueError("examples must not be empty")
+            raise ConfigError("examples must not be empty")
         if any(row.images for row in examples):
-            raise ValueError("Futurix's text-only decision head does not accept images")
+            raise ConfigError("Futurix's text-only decision head does not accept images")
         endpoints: list[list[int]] | None = None
         if self.decision_head is not None and self.head_prompt_version == "span-v1":
             prepared = [
@@ -904,7 +909,7 @@ class DecisionModel:
                 prompts, padding=True, return_tensors="pt", add_special_tokens=True
             )
         if encoded["input_ids"].shape[1] > self.max_sequence_length:
-            raise ValueError(
+            raise ConfigError(
                 f"prompt exceeds max_sequence_length={self.max_sequence_length}; "
                 "increase the limit instead of silently truncating candidates"
             )
@@ -915,7 +920,7 @@ class DecisionModel:
             hidden = self._candidate_hidden_states(encoded)
             if next(self.decision_head.parameters()).device != hidden.device:
                 if self.backbone.training:
-                    raise ValueError(
+                    raise ConfigError(
                         "training a device-dispatched decision head needs a single execution device"
                     )
                 self.decision_head.to(hidden.device)
@@ -947,7 +952,7 @@ class DecisionModel:
                 ).hidden_states[-1]
             if next(self.decision_head.parameters()).device != hidden.device:
                 if self.backbone.training:
-                    raise ValueError(
+                    raise ConfigError(
                         "training a device-dispatched pointer head needs a single execution device"
                     )
                 self.decision_head.to(hidden.device)
@@ -1000,7 +1005,7 @@ class DecisionModel:
             return []
         for threshold in thresholds:
             if threshold is not None and (not math.isfinite(threshold) or not 0 <= threshold <= 1):
-                raise ValueError("confidence_threshold must be between 0 and 1")
+                raise ConfigError("confidence_threshold must be between 0 and 1")
         device = self._input_device()
         if device.type == "cuda":
             torch.cuda.synchronize(device)
@@ -1091,12 +1096,12 @@ class DecisionModel:
         for row in examples:
             if isinstance(row, DecisionInput):
                 if row.kind != "choice":
-                    raise ValueError("batch_choice accepts only choice inputs")
+                    raise ConfigError("batch_choice accepts only choice inputs")
                 inputs.append(row)
                 thresholds.append(confidence_threshold)
             else:
                 if row.get("kind", "choice") != "choice":
-                    raise ValueError("batch_choice accepts only choice inputs")
+                    raise ConfigError("batch_choice accepts only choice inputs")
                 inputs.append(
                     DecisionInput(
                         state=row["state"],

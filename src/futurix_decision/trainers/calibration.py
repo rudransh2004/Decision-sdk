@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 
 from futurix_decision.datasets import DecisionExample
+from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.calibration import fit_temperature
 from futurix_decision.models import DecisionBatch, DecisionModel
 from futurix_decision.trainers.sft import DatasetSource, SFTConfig, SFTTrainer
@@ -29,7 +30,7 @@ class CalibrationConfig(SFTConfig):
             )
             or self.ce_weight + self.brier_weight <= 0
         ):
-            raise ValueError("calibration loss weights must be non-negative and nonzero in total")
+            raise ConfigError("calibration loss weights must be non-negative and nonzero in total")
 
 
 class CalibrationTrainer(SFTTrainer):

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from futurix_decision.errors import MissingDependencyError
+
 
 class TrainingLogger:
     def __init__(
@@ -23,7 +25,7 @@ class TrainingLogger:
                 import wandb
             except ImportError as exc:
                 self.close()
-                raise ImportError(
+                raise MissingDependencyError(
                     "W&B logging requires pip install futurix-decision[wandb]"
                 ) from exc
             self._wandb = wandb.init(project=wandb_project)

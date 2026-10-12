@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from futurix_decision import __version__
 from futurix_decision.datasets import DecisionInput
+from futurix_decision.errors import ConfigError
 from futurix_decision.inference.schemas import DecisionRequest, DecisionResponse
 
 PROFILE_INSTRUCTIONS = {
@@ -52,7 +53,7 @@ def _compat_input(
 ) -> DecisionInput:
     kind = question.type
     if kind not in ("noul", "choice", "score"):
-        raise ValueError(f"question {question_id!r}: unsupported type {kind!r}")
+        raise ConfigError(f"question {question_id!r}: unsupported type {kind!r}")
     criteria = question.criteria
     if kind == "noul":
         options = ["false", "true"]
@@ -61,7 +62,7 @@ def _compat_input(
     elif isinstance(criteria, dict):
         options = sorted(criteria, key=lambda key: int(key)) if kind == "score" else list(criteria)
     else:
-        raise ValueError(f"question {question_id!r}: criteria must list choices")
+        raise ConfigError(f"question {question_id!r}: criteria must list choices")
     prompt = question.instructions or question_id
     if PROFILE_INSTRUCTIONS[prompt_profile]:
         prompt = PROFILE_INSTRUCTIONS[prompt_profile] + "\n" + prompt

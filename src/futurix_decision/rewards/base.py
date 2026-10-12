@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 import torch
 
+from futurix_decision.errors import ConfigError
+
 
 @dataclass(frozen=True)
 class ProperScoringRule(ABC):
@@ -15,7 +17,7 @@ class ProperScoringRule(ABC):
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.weight) or self.weight < 0:
-            raise ValueError("reward weight must be finite and non-negative")
+            raise ConfigError("reward weight must be finite and non-negative")
 
     @abstractmethod
     def reward(self, probabilities: torch.Tensor, target: torch.Tensor) -> torch.Tensor:

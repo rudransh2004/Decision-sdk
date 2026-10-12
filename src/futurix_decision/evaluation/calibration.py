@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 
+from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.evaluator import EvaluationSource, example_batches
 from futurix_decision.models import DecisionModel
 
@@ -21,14 +22,16 @@ def fit_temperature_from_logits(
 ) -> float:
     """Minimize held-out soft-label NLL in log-temperature space on CPU."""
     if not logits or len(logits) != len(targets) or max_iter < 1:
-        raise ValueError("provide matching nonempty logits and targets")
+        raise ConfigError("provide matching nonempty logits and targets")
     for z, y in zip(logits, targets):
         if z.ndim != 1 or z.shape != y.shape or z.numel() < 2:
-            raise ValueError("each logit vector and target must have matching candidate dimensions")
+            raise ConfigError(
+                "each logit vector and target must have matching candidate dimensions"
+            )
         if not torch.isfinite(z).all() or not torch.isfinite(y).all() or (y < 0).any():
-            raise ValueError("logits must be finite and targets non-negative finite")
+            raise ConfigError("logits must be finite and targets non-negative finite")
         if not torch.isclose(y.float().sum(), torch.tensor(1.0), atol=1e-5):
-            raise ValueError("targets must sum to 1")
+            raise ConfigError("targets must sum to 1")
     padded_logits = pad_sequence(
         [z.detach().float().cpu() for z in logits], batch_first=True, padding_value=-1e9
     )

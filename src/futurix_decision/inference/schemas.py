@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from futurix_decision.datasets.schema import DecisionInput, DecisionKind, State
+from futurix_decision.errors import ConfigError
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,7 @@ class DecisionRequest(BaseModel):
     def to_input(self) -> DecisionInput:
         if self.kind == "choice":
             if self.choices is None:
-                raise ValueError("choice requests require choices")
+                raise ConfigError("choice requests require choices")
             options = self.choices
         elif self.kind == "noul":
             options = ["false", "true"]

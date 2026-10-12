@@ -14,6 +14,7 @@ from typing import Any
 
 from futurix_decision import DecisionModel, DecisionTrainer, evaluate, load_model
 from futurix_decision.datasets import load_decisions
+from futurix_decision.errors import ConfigError, MissingDependencyError
 from futurix_decision.rewards import BrierScore, LogScore, RankedProbabilityScore, SphericalScore
 from futurix_decision.trainers import CalibrationConfig, RLCDConfig, SFTConfig
 from futurix_decision.utils.config import load_config
@@ -42,7 +43,7 @@ def _rewards(config: dict[str, Any]):
     }
     unknown = set(weights) - set(constructors)
     if unknown:
-        raise ValueError(f"unknown reward rules: {sorted(unknown)}")
+        raise ConfigError(f"unknown reward rules: {sorted(unknown)}")
     return [constructors[name](weight=weight) for name, weight in weights.items()]
 
 
@@ -53,10 +54,10 @@ def _select_gpu(index: int | None) -> dict[str, Any]:
     import torch
 
     if index < 0 or torch.cuda.is_initialized():
-        raise ValueError("--gpu must be non-negative and selected before CUDA initializes")
+        raise ConfigError("--gpu must be non-negative and selected before CUDA initializes")
     os.environ["CUDA_VISIBLE_DEVICES"] = str(index)
     if not torch.cuda.is_available():
-        raise ValueError(f"GPU {index} is not available")
+        raise ConfigError(f"GPU {index} is not available")
     return {"dtype": torch.bfloat16, "device_map": {"": 0}}
 
 
@@ -68,7 +69,7 @@ def _train(args: argparse.Namespace) -> None:
     dataset = args.dataset or config.get("dataset")
     output = args.output or config.get("output")
     if not all((checkpoint, dataset, output)):
-        raise ValueError("train requires model, dataset and output (arguments or YAML)")
+        raise ConfigError("train requires model, dataset and output (arguments or YAML)")
     if args.method:
         stages = [{"sft": "decision_sft"}.get(args.method, args.method)]
     elif args.stages:
@@ -87,18 +88,18 @@ def _train(args: argparse.Namespace) -> None:
     previous_history: dict[str, list[dict[str, float | int]]] = {}
     if args.resume:
         if not checkpoint_dir:
-            raise ValueError("--resume requires --checkpoint-dir (or checkpoint_dir in config)")
+            raise ConfigError("--resume requires --checkpoint-dir (or checkpoint_dir in config)")
         progress = json.loads((Path(checkpoint_dir) / "progress.json").read_text(encoding="utf-8"))
         if progress["dataset"] != dataset:
-            raise ValueError("resume dataset differs from the stage checkpoint")
+            raise ConfigError("resume dataset differs from the stage checkpoint")
         completed = progress["completed_stages"]
         if completed != stages[: len(completed)]:
-            raise ValueError("resume stages differ from the completed stage prefix")
+            raise ConfigError("resume stages differ from the completed stage prefix")
         previous_history = progress["history"]
         checkpoint = progress["checkpoint"]
         stages = stages[len(completed) :]
         if not stages:
-            raise ValueError("all configured stages have already completed")
+            raise ConfigError("all configured stages have already completed")
     selected_method = args.finetune_method or next(
         (
             config.get("training", {}).get(stage, {}).get("method")
@@ -120,15 +121,15 @@ def _train(args: argparse.Namespace) -> None:
     source_format = args.model_format or model_section.get("format", "standard")
     conversion = args.convert_strategy or model_section.get("strategy")
     if conversion and (args.resume or source_format != "standard"):
-        raise ValueError("raw-model conversion requires a fresh run with --model-format standard")
+        raise ConfigError("raw-model conversion requires a fresh run with --model-format standard")
     if source_format == "native":
         if args.resume or stages != ["decision_sft"] or args.finetune_method:
-            raise ValueError(
+            raise ConfigError(
                 "native fine-tuning supports a fresh decision_sft run; "
                 "use publisher config for other recipes"
             )
         if args.calibration_dataset or args.validation_dataset or args.log_jsonl or checkpoint_dir:
-            raise ValueError(
+            raise ConfigError(
                 "native trainers manage their own checkpoints/calibration; "
                 "use the Python API for customization"
             )
@@ -158,14 +159,14 @@ def _train(args: argparse.Namespace) -> None:
     if args.resume:
         model = DecisionModel.from_pretrained(checkpoint, trainable_adapter=True, **device_kwargs)
         if model.prompt_format != progress["prompt_format"]:
-            raise ValueError("resumed checkpoint prompt format differs from progress metadata")
+            raise ConfigError("resumed checkpoint prompt format differs from progress metadata")
         if model.head_type != progress.get("head_type", "tokens"):
-            raise ValueError("resumed checkpoint decision head differs from progress metadata")
+            raise ConfigError("resumed checkpoint decision head differs from progress metadata")
         if model_section.get("head_type", model.head_type) != model.head_type:
-            raise ValueError("resumed checkpoint decision head differs from training config")
+            raise ConfigError("resumed checkpoint decision head differs from training config")
     elif source_format == "bosun":
         if model_section.get("head_type", "tokens") != "tokens":
-            raise ValueError("Bosun's prompt contract requires the token decision head")
+            raise ConfigError("Bosun's prompt contract requires the token decision head")
         bosun_kwargs = dict(device_kwargs)
         if revision:
             bosun_kwargs["revision"] = revision
@@ -177,7 +178,7 @@ def _train(args: argparse.Namespace) -> None:
             if model_section.get("head_type", "tokens") != "tokens" or model_section.get(
                 "head_config"
             ):
-                raise ValueError(
+                raise ConfigError(
                     "native letter models use their trained readout, not a new decision head"
                 )
             expected_format = {
@@ -186,11 +187,11 @@ def _train(args: argparse.Namespace) -> None:
                 "eikos": "eikos-letter-v1-semif",
             }[source_format]
             if source_format == "eikos" and "decision_tokens" in model_section:
-                raise ValueError("Eikos one-pass width comes from the release metadata")
+                raise ConfigError("Eikos one-pass width comes from the release metadata")
             if source_format != "eikos" and model_section.get("decision_tokens", 255) != 255:
-                raise ValueError("native letter models support 255 existing option labels")
+                raise ConfigError("native letter models support 255 existing option labels")
             if model_section.get("prompt_format", expected_format) != expected_format:
-                raise ValueError(f"{source_format} requires its native prompt")
+                raise ConfigError(f"{source_format} requires its native prompt")
             load_kwargs = {
                 key: load_kwargs[key]
                 for key in ("max_sequence_length", "seed")
@@ -257,7 +258,7 @@ def _train(args: argparse.Namespace) -> None:
         validation_max_rows=args.validation_max_rows,
     )
     if args.resume and progress.get("dataset_revision") != trainer.dataset_revision:
-        raise ValueError("resume dataset revision differs from the stage checkpoint")
+        raise ConfigError("resume dataset revision differs from the stage checkpoint")
     trainer.history.update(previous_history)
     if args.resume:
         trainer.validation_metrics.update(progress.get("validation_metrics", {}))
@@ -287,23 +288,23 @@ def _evaluate(args: argparse.Namespace) -> None:
     dataset = _source(args.dataset, split=args.split, revision=args.dataset_revision)
     if args.skip_rows:
         if args.skip_rows < 0:
-            raise ValueError("--skip-rows must be non-negative")
+            raise ConfigError("--skip-rows must be non-negative")
         dataset = islice(dataset, args.skip_rows, None)
     if args.max_rows is not None:
         if args.max_rows < 1:
-            raise ValueError("--max-rows must be positive")
+            raise ConfigError("--max-rows must be positive")
         dataset = islice(dataset, args.max_rows)
     if args.backend == "vllm":
         if args.model_format == "native":
-            raise ValueError(
+            raise ConfigError(
                 "native decision heads need the publisher runtime; OpenJev uses --native-base-url"
             )
         if args.revision:
-            raise ValueError(
+            raise ConfigError(
                 "--revision is for PyTorch upstream loading; export a pinned model for vLLM"
             )
         if args.model_format == "bosun":
-            raise ValueError("export the pinned Bosun checkpoint before vLLM evaluation")
+            raise ConfigError("export the pinned Bosun checkpoint before vLLM evaluation")
         from futurix_decision.vllm import VLLMEngine
 
         model = VLLMEngine(
@@ -365,7 +366,7 @@ def _evaluate(args: argparse.Namespace) -> None:
 
 def _export(args: argparse.Namespace) -> None:
     if args.model_format == "native":
-        raise ValueError(
+        raise ConfigError(
             "native publisher artifacts are exported by load_model(...).finetune(dataset, output)"
         )
     device_kwargs = _select_gpu(args.gpu)
@@ -403,12 +404,12 @@ def _serve(args: argparse.Namespace) -> None:
     try:
         import uvicorn
     except ImportError as exc:
-        raise ImportError("serve requires pip install futurix-decision[serve]") from exc
+        raise MissingDependencyError("serve requires pip install futurix-decision[serve]") from exc
     from futurix_decision.vllm.api import create_app
 
     if args.backend == "vllm":
         if args.model_format == "native":
-            raise ValueError(
+            raise ConfigError(
                 "native decision heads need the publisher runtime, not the generic vLLM engine"
             )
         from futurix_decision.vllm import VLLMEngine
@@ -447,7 +448,7 @@ def _serve(args: argparse.Namespace) -> None:
             if torch.cuda.is_available():
                 engine.backbone.to("cuda")
             elif args.device == "cuda":
-                raise ValueError("CUDA requested but not available")
+                raise ConfigError("CUDA requested but not available")
     uvicorn.run(create_app(engine), host=args.host, port=args.port)
 
 

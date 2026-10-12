@@ -9,6 +9,8 @@ from typing import Any
 from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError
 
+from futurix_decision.errors import ConfigError, MissingDependencyError
+
 
 def load_decision_config(checkpoint: str | Path, **hub_kwargs: Any) -> dict[str, Any]:
     path = Path(checkpoint)
@@ -36,8 +38,8 @@ def load_config(path: str | Path) -> dict[str, Any]:
     try:
         import yaml
     except ImportError as exc:
-        raise ImportError("YAML configuration requires pip install pyyaml") from exc
+        raise MissingDependencyError("YAML configuration requires pip install pyyaml") from exc
     parsed = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(parsed, dict):
-        raise ValueError("configuration must be a YAML mapping")
+        raise ConfigError("configuration must be a YAML mapping")
     return parsed

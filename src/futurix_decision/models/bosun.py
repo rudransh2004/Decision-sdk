@@ -13,6 +13,7 @@ import random
 from typing import Any
 
 from futurix_decision.datasets.schema import DecisionInput
+from futurix_decision.errors import ConfigError
 from futurix_decision.models.decision_head import decision_token
 
 BOSUN_PROMPT_SCHEMA = "bosun-decision-prompt-v3-stable-slots"
@@ -47,7 +48,7 @@ def format_bosun_prompt(
     """Render Bosun's ChatML/JSON request and return slots in candidate order."""
     count = len(example.options)
     if not 2 <= count <= min(255, decision_tokens - 1):
-        raise ValueError("Bosun reserves slot 255 for null and supports 2 to 255 choices")
+        raise ConfigError("Bosun reserves slot 255 for null and supports 2 to 255 choices")
     row_id = str(getattr(example, "id", "0"))
     permutation = list(range(count))
     order_seed = seed if assignment_seed is None else assignment_seed

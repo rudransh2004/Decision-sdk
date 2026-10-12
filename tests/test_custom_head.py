@@ -29,6 +29,7 @@ from futurix_decision import (
     load_model,
     register_decision_head,
 )
+from futurix_decision.errors import CheckpointError
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA
 from futurix_decision.models.custom_head import CANDIDATE_MARKER, HEAD_WEIGHTS
 from futurix_decision.trainers import RLCDConfig
@@ -138,7 +139,7 @@ class CustomHeadTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "cannot override"):
                 DecisionModel.from_pretrained(temp, head_type="tokens")
             (Path(temp) / HEAD_WEIGHTS).unlink()
-            with self.assertRaisesRegex(ValueError, "missing decision_head.safetensors"):
+            with self.assertRaisesRegex(CheckpointError, "missing decision_head.safetensors"):
                 DecisionModel.from_pretrained(temp)
 
     def test_marker_spoofing_and_unregistered_heads_are_rejected(self):

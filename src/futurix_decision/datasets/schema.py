@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from futurix_decision.errors import ConfigError
+
 DecisionKind = Literal["choice", "noul", "score"]
 State = str | dict[str, Any] | list[Any]
 ABSTAIN_TARGET = "__abstain__"
@@ -133,20 +135,20 @@ class DecisionExample(DecisionInput):
         """Return probabilities aligned with options, optionally followed by abstain."""
         if self.target == ABSTAIN_TARGET:
             if ABSTAIN_TARGET in self.options:
-                raise ValueError(f"{ABSTAIN_TARGET} is reserved for the abstain label")
+                raise ConfigError(f"{ABSTAIN_TARGET} is reserved for the abstain label")
             if not include_abstain:
-                raise ValueError("abstain targets require a model with learn_abstain=True")
+                raise ConfigError("abstain targets require a model with learn_abstain=True")
             return [0.0] * len(self.options) + [1.0]
         if isinstance(self.target, list):
             values = self.target
             if len(values) not in (len(self.options), len(self.options) + 1):
-                raise ValueError("target length must match options or options plus abstain")
+                raise ConfigError("target length must match options or options plus abstain")
             if len(values) > len(self.options) and not include_abstain:
-                raise ValueError("abstain targets require a model with learn_abstain=True")
+                raise ConfigError("abstain targets require a model with learn_abstain=True")
             if any(not math.isfinite(value) or not 0 <= value <= 1 for value in values):
-                raise ValueError("target probabilities must be finite and in [0, 1]")
+                raise ConfigError("target probabilities must be finite and in [0, 1]")
             if not math.isclose(sum(values), 1.0, abs_tol=1e-5, rel_tol=0):
-                raise ValueError("target probabilities must sum to 1")
+                raise ConfigError("target probabilities must sum to 1")
             return (
                 values + [0.0] if include_abstain and len(values) == len(self.options) else values
             )
@@ -154,23 +156,23 @@ class DecisionExample(DecisionInput):
         label = self.target
         if isinstance(label, bool):
             if self.kind != "noul":
-                raise ValueError("boolean labels are only valid for noul")
+                raise ConfigError("boolean labels are only valid for noul")
             index = int(label)
         elif isinstance(label, str):
             if label not in self.options:
-                raise ValueError(f"target label {label!r} is not an option")
+                raise ConfigError(f"target label {label!r} is not an option")
             index = self.options.index(label)
         elif isinstance(label, int):
             # Integer targets for a score are level values, not positional indices.
             if self.kind == "score":
                 if str(label) not in self.options:
-                    raise ValueError(f"target score {label} is not an option")
+                    raise ConfigError(f"target score {label} is not an option")
                 index = self.options.index(str(label))
             else:
                 index = label
                 if not 0 <= index < len(self.options):
-                    raise ValueError("target index is out of range")
+                    raise ConfigError("target index is out of range")
         else:
-            raise ValueError("unsupported target type")
+            raise ConfigError("unsupported target type")
         values = [float(i == index) for i in range(len(self.options))]
         return values + [0.0] if include_abstain else values

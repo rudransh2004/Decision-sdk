@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from futurix_decision.errors import ConfigError
+
 _backends: dict[str, Callable[..., Any]] = {}
 
 
 def register_backend(name: str, factory: Callable[..., Any]) -> None:
     if not name or name in _backends or not callable(factory):
-        raise ValueError("backend name must be new and factory callable")
+        raise ConfigError("backend name must be new and factory callable")
     _backends[name] = factory
 
 
@@ -24,5 +26,5 @@ def create_backend(name: str, checkpoint: str, **kwargs: Any) -> Any:
 
         return VLLMEngine(checkpoint, **kwargs)
     if name not in _backends:
-        raise ValueError(f"unknown decision backend: {name}")
+        raise ConfigError(f"unknown decision backend: {name}")
     return _backends[name](checkpoint, **kwargs)

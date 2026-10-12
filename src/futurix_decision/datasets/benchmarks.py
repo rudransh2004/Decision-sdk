@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from futurix_decision.datasets.schema import DecisionExample
+from futurix_decision.errors import ConfigError
 
 PRIMITIVES = {
     "binary_classification": "noul",
@@ -23,10 +24,10 @@ def normalize_decisionbench(row: Mapping[str, Any], *, compact: bool = False) ->
     instruction_key = "compact_instruction" if compact else "instruction"
     candidates = json.loads(row[candidate_key])
     if not isinstance(candidates, list) or not 2 <= len(candidates) <= 255:
-        raise ValueError("DecisionBench candidates must be a list of 2 to 255 rows")
+        raise ConfigError("DecisionBench candidates must be a list of 2 to 255 rows")
     state = json.loads(row[state_key])
     if not isinstance(state, (str, dict)):
-        raise ValueError("DecisionBench state must be a JSON string or object")
+        raise ConfigError("DecisionBench state must be a JSON string or object")
     ids = [str(candidate["id"]) for candidate in candidates]
     labels = [str(candidate["label"]) for candidate in candidates]
     descriptions = [
@@ -37,9 +38,9 @@ def normalize_decisionbench(row: Mapping[str, Any], *, compact: bool = False) ->
     if probabilities is None:
         probabilities = [float(candidate_id == row["gold_candidate_id"]) for candidate_id in ids]
     if len(probabilities) != len(candidates):
-        raise ValueError("DecisionBench gold probabilities must align with the candidates")
+        raise ConfigError("DecisionBench gold probabilities must align with the candidates")
     if kind == "noul" and len(candidates) != 2:
-        raise ValueError("DecisionBench binary classification requires exactly two candidates")
+        raise ConfigError("DecisionBench binary classification requires exactly two candidates")
     # Keep the benchmark's presented order (even when true comes first): reordering
     # would alter Bosun's row-ID-seeded prompt. Numeric IDs need not be integral or sorted.
     options = ids

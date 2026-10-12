@@ -10,14 +10,27 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - A `torch` extra (`torch>=2.4`, `transformers>=5.17,<6`). Every model-family extra,
   `train`, `qlora`, `serve`, the vLLM extras, and `dev` include it.
-- `futurix_decision.errors` with `FuturixError` and `MissingDependencyError`
-  (an `ImportError` subclass).
+- `futurix_decision.errors`, exported from the top-level package: `FuturixError` is the
+  base class of `ConfigError` (also a `ValueError`), `CheckpointError`,
+  `MissingDependencyError` (also an `ImportError`), and `BackendError` (with
+  `status_code` and `body`), whose subclass is `InvalidOutputError`.
 - The package ships a `py.typed` marker, so type checkers read its inline annotations.
 - The `dev` extra installs `fastapi`, `httpx`, `ruff`, `mypy`, and `types-PyYAML`.
   The serving tests now run under `pip install -e ".[dev]"` instead of skipping.
 
 ### Changed
 
+- **Breaking:** the SDK raises its own exception types. Bad arguments and configuration
+  raise `ConfigError`, which still subclasses `ValueError`. These changed type:
+  - Incomplete, unrecognizable, or wrong-family checkpoints and invalid checkpoint
+    metadata raise `CheckpointError` instead of `ValueError` or `FileNotFoundError`.
+    A missing local checkpoint directory still raises `FileNotFoundError`.
+  - Publisher runtimes and vLLM returning malformed probabilities or answers raise
+    `InvalidOutputError` instead of `ValueError`. The OpenJev server check raises
+    `BackendError`.
+  - Missing optional packages raise `MissingDependencyError`, still an `ImportError`.
+    `load_model` on a transformers checkpoint without torch raises it instead of
+    `ModuleNotFoundError`.
 - **Breaking:** the base install no longer depends on torch or transformers. It needs
   only `pydantic`, `httpx`, `pyyaml`, and `huggingface-hub`. Install
   `futurix-decision[torch]` (or a model-family extra) to run local models.

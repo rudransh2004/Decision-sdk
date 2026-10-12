@@ -52,6 +52,23 @@ SCRIPT = textwrap.dedent(
     assert callable(futurix_decision.load_model)
     assert futurix_decision.NativeDecisionModel.__name__ == "NativeDecisionModel"
 
+    # A transformers checkpoint names the missing extra instead of failing on `import torch`.
+    import json
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        (root / "decision_config.json").write_text(json.dumps({"architecture": "futurix-decision"}))
+        for name in ("config.json", "model.safetensors", "tokenizer.json"):
+            (root / name).write_text("{}")
+        try:
+            futurix_decision.load_model(root)
+        except MissingDependencyError as error:
+            assert "futurix-decision[torch]" in str(error), error
+        else:
+            raise AssertionError("load_model loaded a transformers checkpoint without torch")
+
     leaked = sorted(m for m in sys.modules if m.partition(".")[0] in BLOCKED)
     assert not leaked, leaked
     print("ok")

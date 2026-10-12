@@ -15,12 +15,13 @@ import torch
 from torch import nn
 
 from futurix_decision.datasets.schema import DecisionInput
+from futurix_decision.errors import CheckpointError, ConfigError
 
 
 def answer_codes(tokenizer: Any, count: int) -> tuple[list[str], list[int]]:
     """Select codes that remain single tokens after the model's answer prefix."""
     if not 2 <= count <= 255:
-        raise ValueError("letter-code decisions support 2 to 255 answer codes")
+        raise ConfigError("letter-code decisions support 2 to 255 answer codes")
     prefix = (
         tokenizer.apply_chat_template(
             [{"role": "user", "content": "Choose an option."}],
@@ -51,7 +52,7 @@ def answer_codes(tokenizer: Any, count: int) -> tuple[list[str], list[int]]:
         if len(codes) >= count:
             break
     if len(codes) < count:
-        raise ValueError(
+        raise ConfigError(
             f"this tokenizer provides only {len(codes)} distinct single-token "
             f"letter codes; letter-code conversion needs {count}. "
             "Choose a smaller decision_tokens value or another strategy."
@@ -64,7 +65,7 @@ def format_letter_code_prompt(
 ) -> tuple[str, list[int]]:
     """Present the supplied options in letter-code order."""
     if len(example.options) > len(codes):
-        raise ValueError("more options supplied than letter-code answer codes")
+        raise ConfigError("more options supplied than letter-code answer codes")
     state = (
         example.state
         if isinstance(example.state, str)
@@ -118,11 +119,13 @@ class LetterCodeHead(nn.Module):
     ) -> None:
         weight = getattr(output_embeddings, "weight", None)
         if not isinstance(weight, torch.Tensor) or weight.ndim != 2:
-            raise ValueError("letter-code initialization needs an LM output embedding matrix")
+            raise CheckpointError("letter-code initialization needs an LM output embedding matrix")
         if weight.device.type == "meta":
-            raise ValueError("letter-code initialization requires materialized LM output weights")
+            raise CheckpointError(
+                "letter-code initialization requires materialized LM output weights"
+            )
         if max(token_ids) >= weight.shape[0] or weight.shape[1] != self.readout.in_features:
-            raise ValueError("LM output embeddings do not match the decision readout")
+            raise CheckpointError("LM output embeddings do not match the decision readout")
         with torch.no_grad():
             rows = weight.detach().index_select(
                 0, torch.tensor(token_ids, dtype=torch.long, device=weight.device)
@@ -140,9 +143,9 @@ def enable_qwen_noncausal_attention(backbone: nn.Module) -> None:
     source = backbone.get_base_model() if getattr(backbone, "peft_config", None) else backbone
     text_model = getattr(getattr(source, "model", None), "language_model", None)
     if text_model is None or getattr(text_model.config, "model_type", None) != "qwen3_5_text":
-        raise ValueError("noncausal letter-code attention requires a Qwen3.5 text backbone")
+        raise ConfigError("noncausal letter-code attention requires a Qwen3.5 text backbone")
     if text_model.config._attn_implementation != "sdpa":
-        raise ValueError("noncausal letter-code attention requires attn_implementation='sdpa'")
+        raise ConfigError("noncausal letter-code attention requires attn_implementation='sdpa'")
     from transformers.masking_utils import create_recurrent_attention_mask
 
     def provide_masks(module: nn.Module, args: tuple, kwargs: dict) -> tuple[tuple, dict]:

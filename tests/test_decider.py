@@ -18,6 +18,7 @@ from transformers import GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
 
 from futurix_decision import DecisionInput, DecisionModel, DecisionTrainer, SFTConfig
 from futurix_decision.datasets.schema import DecisionExample
+from futurix_decision.errors import CheckpointError
 from futurix_decision.models.decider import (
     DeciderDecisionModel,
     letter_table,
@@ -89,13 +90,13 @@ class DeciderIntegrationTests(unittest.TestCase):
         self.assertTrue(jpt.supports("kirp/jpt-4b", "training"))
         self.assertFalse(jpt.supports("kirp/jpt-35b-a3b", "training"))
         with patch("futurix_decision.models.decision_model.load_decision_config", return_value={}):
-            with self.assertRaisesRegex(ValueError, "publisher's native"):
+            with self.assertRaisesRegex(CheckpointError, "publisher's native"):
                 DecisionModel.from_pretrained("Cloudflare/clef")
         with patch(
             "futurix_decision.models.decision_model.load_decision_config",
             return_value={"architecture": "autojev"},
         ):
-            with self.assertRaisesRegex(ValueError, "non-Futurix"):
+            with self.assertRaisesRegex(CheckpointError, "non-Futurix"):
                 DecisionModel.from_pretrained("example/unknown-native-decision-model")
 
     def test_local_import_prompt_all_three_types_and_roundtrip(self):
@@ -103,7 +104,7 @@ class DeciderIntegrationTests(unittest.TestCase):
             source = Path(temp) / "native"
             source.mkdir()
             make_native(source)
-            with self.assertRaisesRegex(ValueError, "native decision"):
+            with self.assertRaisesRegex(CheckpointError, "native decision"):
                 DecisionModel.from_pretrained(source)
             model = DecisionModel.from_decider(source, max_sequence_length=512)
             self.assertIsInstance(model, DeciderDecisionModel)
@@ -428,7 +429,7 @@ class DeciderIntegrationTests(unittest.TestCase):
             data = json.loads(config.read_text())
             data["layout"] = "chat"
             config.write_text(json.dumps(data))
-            with self.assertRaisesRegex(ValueError, "only the Mapika decider-4b"):
+            with self.assertRaisesRegex(CheckpointError, "only the Mapika decider-4b"):
                 DecisionModel.from_decider(path)
 
 

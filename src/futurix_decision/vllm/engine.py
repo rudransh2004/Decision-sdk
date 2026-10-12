@@ -11,6 +11,12 @@ from typing import Any
 from transformers import AutoTokenizer
 
 from futurix_decision.datasets.schema import DecisionInput, State
+from futurix_decision.errors import (
+    CheckpointError,
+    ConfigError,
+    InvalidOutputError,
+    MissingDependencyError,
+)
 from futurix_decision.inference.schemas import DecisionResult
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA, format_bosun_prompt
 from futurix_decision.models.decider import FORMAT as DECIDER_FORMAT
@@ -43,9 +49,9 @@ class VLLMEngine:
     ) -> None:
         metadata = load_decision_config(checkpoint)
         if metadata.get("architecture") != "futurix-decision":
-            raise ValueError("vLLM requires an exported Futurix decision_config.json")
+            raise CheckpointError("vLLM requires an exported Futurix decision_config.json")
         if metadata.get("head_type", "tokens") != "tokens":
-            raise ValueError(
+            raise ConfigError(
                 "vLLM token-logprob backend does not support custom decision heads; "
                 "use the PyTorch inference backend"
             )
@@ -60,17 +66,17 @@ class VLLMEngine:
             or not math.isfinite(self.temperature)
             or self.temperature <= 0
         ):
-            raise ValueError("invalid decision token count or calibration temperature")
+            raise CheckpointError("invalid decision token count or calibration temperature")
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(str(checkpoint))
         if self.prompt_format == DECIDER_FORMAT:
             if "type_temperatures" not in metadata:
-                raise ValueError("decider-v2.1 export is missing type-specific calibration")
+                raise CheckpointError("decider-v2.1 export is missing type-specific calibration")
             self.type_temperatures = metadata["type_temperatures"]
             if set(self.type_temperatures) != {"choice", "noul", "score"} or any(
                 not isinstance(value, (float, int)) or not math.isfinite(value) or value <= 0
                 for value in self.type_temperatures.values()
             ):
-                raise ValueError("decider-v2.1 export has invalid type-specific calibration")
+                raise CheckpointError("decider-v2.1 export has invalid type-specific calibration")
             _, self._token_ids = letter_table(self.tokenizer, self.decision_tokens)
         elif self.prompt_format == JPT_FORMAT:
             self._token_ids = []
@@ -85,12 +91,12 @@ class VLLMEngine:
                 self.tokenizer.encode(decision_token(i), add_special_tokens=False) != [token_id]
                 for i, token_id in enumerate(self._token_ids)
             ):
-                raise ValueError("checkpoint is missing single-token decision slots")
+                raise CheckpointError("checkpoint is missing single-token decision slots")
         if llm is None:
             try:
                 from vllm import LLM
             except ImportError as exc:
-                raise ImportError(
+                raise MissingDependencyError(
                     "vLLM serving requires pip install futurix-decision[vllm]"
                 ) from exc
             # Current GPU workers compute top-k logprobs and do not honor
@@ -109,11 +115,13 @@ class VLLMEngine:
         if confidence_threshold is not None and (
             not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
         ):
-            raise ValueError("confidence_threshold must be in [0, 1]")
+            raise ConfigError("confidence_threshold must be in [0, 1]")
         try:
             from vllm import SamplingParams
         except ImportError as exc:
-            raise ImportError("vLLM serving requires pip install futurix-decision[vllm]") from exc
+            raise MissingDependencyError(
+                "vLLM serving requires pip install futurix-decision[vllm]"
+            ) from exc
         prompts, params, slots_list, group_sizes, orders = [], [], [], [], []
         for example in examples:
             if self.prompt_format == DECIDER_FORMAT:
@@ -161,7 +169,7 @@ class VLLMEngine:
             group_sizes.append(len(prepared))
             for ids, selected_ids in prepared:
                 if len(ids) > self.max_sequence_length:
-                    raise ValueError("prompt exceeds max_sequence_length")
+                    raise ConfigError("prompt exceeds max_sequence_length")
                 prompts.append({"prompt_token_ids": ids})
                 params.append(
                     SamplingParams(
@@ -178,7 +186,7 @@ class VLLMEngine:
         output = self.llm.generate(prompts, params, use_tqdm=False)
         latency_ms = (time.perf_counter() - started) * 1000
         if len(output) != len(prompts):
-            raise ValueError("vLLM returned a different number of outputs")
+            raise InvalidOutputError("vLLM returned a different number of outputs")
         results = []
         cursor = 0
         for row, count in zip(examples, group_sizes):
@@ -189,7 +197,7 @@ class VLLMEngine:
             ):
                 token_logprobs = generated.outputs[0].logprobs
                 if not token_logprobs:
-                    raise ValueError("vLLM returned no decision logprobs")
+                    raise InvalidOutputError("vLLM returned no decision logprobs")
                 temp = (
                     self.type_temperatures[row.kind]
                     * (self.temperature if row.kind != "score" else 1.0)

@@ -21,6 +21,7 @@ import torch
 from transformers import AutoTokenizer
 
 from futurix_decision.datasets.schema import DecisionInput
+from futurix_decision.errors import CheckpointError, ConfigError, MissingDependencyError
 from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
 
 FORMAT = "jpt-llm2jev-chat"
@@ -67,9 +68,9 @@ def _prompt(tokenizer: Any, example: DecisionInput, order: Sequence[int]) -> str
             and messages
             and all(isinstance(message, dict) and "role" in message for message in messages)
         ):
-            raise ValueError("JPT state.messages must contain valid chat messages")
+            raise ConfigError("JPT state.messages must contain valid chat messages")
         if any(not isinstance(message.get("content"), str) for message in messages):
-            raise ValueError("JPT multimodal message parts need the publisher's native adapter")
+            raise ConfigError("JPT multimodal message parts need the publisher's native adapter")
     else:
         messages = [{"role": "user", "content": _render_value(state)}]
     marker = f"FUTURIX_JPT_{uuid.uuid4().hex}"
@@ -79,7 +80,7 @@ def _prompt(tokenizer: Any, example: DecisionInput, order: Sequence[int]) -> str
         messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
     if rendered.count(marker) != 1:
-        raise ValueError("JPT chat template dropped or duplicated the question slot")
+        raise ConfigError("JPT chat template dropped or duplicated the question slot")
     prefix, ending = rendered.split(marker)
     texts = []
     for index in order:
@@ -130,7 +131,9 @@ def _labels(tokenizer: Any, prompt: str, count: int) -> list[int]:
             ids.append(full[-1])
         if len(ids) == count:
             return ids
-    raise ValueError(f"JPT tokenizer has only {len(ids)} contextual one-token labels; need {count}")
+    raise CheckpointError(
+        f"JPT tokenizer has only {len(ids)} contextual one-token labels; need {count}"
+    )
 
 
 def prepare_jpt_row(
@@ -142,20 +145,20 @@ def prepare_jpt_row(
     expected_ids: Sequence[int] | None = None,
 ) -> tuple[list[int], list[int], list[int]]:
     if len(example.options) > max_options:
-        raise ValueError(f"JPT supports at most {max_options} options")
+        raise ConfigError(f"JPT supports at most {max_options} options")
     if order is None:
         if example.kind == "noul":
             if set(example.options) != {"true", "false"}:
-                raise ValueError("JPT noul requires literal true/false options")
+                raise ConfigError("JPT noul requires literal true/false options")
             order = [example.options.index("true"), example.options.index("false")]
         else:
             order = list(range(len(example.options)))
     if sorted(order) != list(range(len(example.options))):
-        raise ValueError("JPT option order must be a permutation")
+        raise ConfigError("JPT option order must be a permutation")
     prompt = _prompt(tokenizer, example, order)
     token_ids = _labels(tokenizer, prompt, len(example.options))
     if expected_ids is not None and token_ids != list(expected_ids[: len(token_ids)]):
-        raise ValueError("JPT contextual label IDs changed with the prompt; cannot score this row")
+        raise ConfigError("JPT contextual label IDs changed with the prompt; cannot score this row")
     return tokenizer.encode(prompt, add_special_tokens=False), token_ids, list(order)
 
 
@@ -165,7 +168,7 @@ class JPTDecisionModel(DecisionModel):
             kwargs.get("prompt_format", FORMAT) != FORMAT
             or kwargs.get("head_type", "tokens") != "tokens"
         ):
-            raise ValueError("JPT requires its original chat prompt and LM letter readout")
+            raise ConfigError("JPT requires its original chat prompt and LM letter readout")
         kwargs["prompt_format"] = FORMAT
         kwargs.setdefault("decision_tokens", MAX_OPTIONS)
         super().__init__(backbone, tokenizer, **kwargs)
@@ -173,14 +176,16 @@ class JPTDecisionModel(DecisionModel):
     def _register_decision_tokens(self) -> list[int]:
         if self.tokenizer.pad_token is None:
             if self.tokenizer.eos_token is None:
-                raise ValueError("JPT tokenizer requires a pad or EOS token")
+                raise CheckpointError("JPT tokenizer requires a pad or EOS token")
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left"
         sample = DecisionInput(state="Calibration state", question="Choose", options=["yes", "no"])
         prompt = _prompt(self.tokenizer, sample, [0, 1])
         ids = _labels(self.tokenizer, prompt, self.decision_tokens)
         if max(ids) >= self.backbone.get_input_embeddings().num_embeddings:
-            raise ValueError("JPT tokenizer contains label tokens outside the model vocabulary")
+            raise CheckpointError(
+                "JPT tokenizer contains label tokens outside the model vocabulary"
+            )
         return ids
 
     @classmethod
@@ -195,22 +200,24 @@ class JPTDecisionModel(DecisionModel):
     ) -> JPTDecisionModel:
         source = str(checkpoint)
         if source not in TEMPERATURES and not Path(checkpoint).is_dir():
-            raise ValueError("supported JPT releases are kirp/jpt-4b and kirp/jpt-9b")
+            raise CheckpointError("supported JPT releases are kirp/jpt-4b and kirp/jpt-9b")
         if Path(checkpoint).is_dir():
             card = Path(checkpoint) / "README.md"
             if not card.is_file() or not any(
                 title in card.read_text(encoding="utf-8")[:4096]
                 for title in ("# JPT-4B", "# JPT-9B")
             ):
-                raise ValueError("local JPT import needs an unmodified 4B or 9B release card")
+                raise CheckpointError("local JPT import needs an unmodified 4B or 9B release card")
         if temperature is None:
             if source not in TEMPERATURES:
-                raise ValueError("local JPT checkpoint needs its published temperature")
+                raise CheckpointError("local JPT checkpoint needs its published temperature")
             temperature = TEMPERATURES[source]
         try:
             from transformers import AutoModelForMultimodalLM
         except ImportError as exc:
-            raise ImportError("JPT requires Transformers 5.17+ and futurix-decision[jpt]") from exc
+            raise MissingDependencyError(
+                "JPT requires Transformers 5.17+ and futurix-decision[jpt]"
+            ) from exc
         tok_kwargs = {
             key: hf_kwargs[key]
             for key in ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
@@ -235,13 +242,13 @@ class JPTDecisionModel(DecisionModel):
         self, examples: Sequence[DecisionInput], *, assignment_seed: int | None = None
     ) -> DecisionBatch:
         if not examples:
-            raise ValueError("examples must not be empty")
+            raise ConfigError("examples must not be empty")
         prepared = []
         for example in examples:
             order = None
             if assignment_seed is not None:
                 if example.kind == "noul" and set(example.options) != {"true", "false"}:
-                    raise ValueError("JPT noul requires literal true/false options")
+                    raise ConfigError("JPT noul requires literal true/false options")
                 identity = json.dumps(
                     [
                         self.seed,
@@ -270,7 +277,7 @@ class JPTDecisionModel(DecisionModel):
             )
         longest = max(len(ids) for ids, _, _ in prepared)
         if longest > self.max_sequence_length:
-            raise ValueError("prompt exceeds max_sequence_length; increase the limit")
+            raise ConfigError("prompt exceeds max_sequence_length; increase the limit")
         device = next(self.backbone.parameters()).device
         ids = torch.full(
             (len(examples), longest), self.tokenizer.pad_token_id, dtype=torch.long, device=device

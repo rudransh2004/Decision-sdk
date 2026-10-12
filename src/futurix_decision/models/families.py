@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from futurix_decision.errors import CheckpointError, ConfigError
+
 
 @dataclass(frozen=True)
 class ModelFamily:
@@ -25,7 +27,7 @@ class ModelFamily:
 
     def supports(self, checkpoint: str, capability: str) -> bool:
         if capability not in ("inference", "training", "vllm_export"):
-            raise ValueError(f"unknown decision capability: {capability}")
+            raise ConfigError(f"unknown decision capability: {capability}")
         return checkpoint in self.supported_checkpoints and getattr(self, capability)
 
 
@@ -155,12 +157,12 @@ def reject_native_checkpoint(checkpoint: str | Path, metadata: dict) -> None:
             "jpt": "DecisionModel.from_jpt (4B/9B)",
             "eikos": "DecisionModel.from_eikos",
         }.get(family.name, "load_model (the publisher's native decision runtime)")
-        raise ValueError(
+        raise CheckpointError(
             f"{checkpoint} is a {family.name} decision checkpoint; use {entrypoint}. "
             "The generic LM loader would replace its trained decision contract."
         )
     if metadata:
-        raise ValueError(
+        raise CheckpointError(
             "decision_config.json belongs to a non-Futurix checkpoint; "
             "the generic loader cannot preserve its native decision readout"
         )
@@ -177,7 +179,7 @@ def reject_native_checkpoint(checkpoint: str | Path, metadata: dict) -> None:
             "quyet_config.json",
         )
     ):
-        raise ValueError(
+        raise CheckpointError(
             "local checkpoint contains a native decision configuration or head; "
             "the generic LM loader would replace its trained decision contract"
         )
@@ -187,6 +189,6 @@ def reject_native_checkpoint(checkpoint: str | Path, metadata: dict) -> None:
         and card.is_file()
         and "# JPT-" in card.read_text(encoding="utf-8", errors="replace")[:4096]
     ):
-        raise ValueError(
+        raise CheckpointError(
             "local JPT checkpoint requires DecisionModel.from_jpt to preserve its letter readout"
         )

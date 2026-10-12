@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from futurix_decision import DecisionInput, DecisionModel, DecisionTrainer, SFTConfig
 from futurix_decision.datasets.schema import DecisionExample
+from futurix_decision.errors import CheckpointError
 from futurix_decision.models.eikos import EikosDecisionModel, eikos_label_table, prepare_eikos_row
 from futurix_decision.vllm.engine import VLLMEngine
 from test_decider import make_native
@@ -56,7 +57,7 @@ class EikosTests(unittest.TestCase):
             source = Path(temp) / "native"
             source.mkdir()
             make_eikos(source)
-            with self.assertRaisesRegex(ValueError, "non-Futurix"):
+            with self.assertRaisesRegex(CheckpointError, "non-Futurix"):
                 DecisionModel.from_pretrained(source)
             model = DecisionModel.from_eikos(source, max_sequence_length=512)
             self.assertIsInstance(model, EikosDecisionModel)

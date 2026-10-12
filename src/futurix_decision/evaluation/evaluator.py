@@ -15,6 +15,7 @@ import torch
 
 from futurix_decision.datasets import DecisionExample, load_decisions, normalize_decision
 from futurix_decision.datasets.systemone import expand_systemone_row
+from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.metrics import DEFAULT_THRESHOLDS, compute_metrics
 from futurix_decision.models import DecisionBatch, DecisionModel
 from futurix_decision.models.bosun import format_bosun_prompt
@@ -39,7 +40,7 @@ def iter_examples(dataset: EvaluationSource) -> Iterator[DecisionExample]:
 
 def example_batches(dataset: EvaluationSource, batch_size: int) -> Iterator[list[DecisionExample]]:
     if batch_size < 1:
-        raise ValueError("batch_size must be positive")
+        raise ConfigError("batch_size must be positive")
     rows = iter_examples(dataset)
     while batch := list(islice(rows, batch_size)):
         yield batch
@@ -50,7 +51,7 @@ def token_budget_batches(
 ) -> Iterator[list[DecisionExample]]:
     """Keep input order while avoiding padding seven short rows to one long row."""
     if batch_size < 1 or max_batch_tokens < 1:
-        raise ValueError("batch_size and max_batch_tokens must be positive")
+        raise ConfigError("batch_size and max_batch_tokens must be positive")
     pending: list[DecisionExample] = []
     longest = 0
     for row in iter_examples(dataset):
@@ -113,11 +114,11 @@ def evaluate(
 ) -> dict:
     """Evaluate stable inference slots; no token generation or per-item LM pass."""
     if progress_every < 0:
-        raise ValueError("progress_every must be non-negative")
+        raise ConfigError("progress_every must be non-negative")
     if resume and predictions_output is None:
-        raise ValueError("resuming evaluation requires predictions_output")
+        raise ConfigError("resuming evaluation requires predictions_output")
     if max_batch_tokens is not None and max_batch_tokens < 1:
-        raise ValueError("max_batch_tokens must be positive")
+        raise ConfigError("max_batch_tokens must be positive")
     predicted: list[list[float]] = []
     targets: list[list[float]] = []
     next_progress = progress_every
@@ -155,7 +156,7 @@ def evaluate(
             if not output.is_file() or not manifest.is_file():
                 raise FileNotFoundError("cannot resume without the prediction journal and manifest")
             if json.loads(manifest.read_text(encoding="utf-8")) != identity:
-                raise ValueError("evaluation identity differs from the saved journal")
+                raise ConfigError("evaluation identity differs from the saved journal")
             with output.open("r+b") as stream:
                 while line := stream.readline():
                     position = stream.tell() - len(line)
@@ -163,7 +164,7 @@ def evaluate(
                         saved = json.loads(line)
                     except (json.JSONDecodeError, UnicodeDecodeError) as error:
                         if stream.read(1):
-                            raise ValueError(
+                            raise ConfigError(
                                 "evaluation journal has a corrupt nonfinal row"
                             ) from error
                         # An interrupted append can leave only the last row
@@ -172,14 +173,14 @@ def evaluate(
                         break
                     row = next(rows, None)
                     if row is None or row.id != saved["id"] or row.options != saved["options"]:
-                        raise ValueError("saved evaluation rows no longer match the dataset")
+                        raise ConfigError("saved evaluation rows no longer match the dataset")
                     if not torch.allclose(
                         torch.tensor(row.target_distribution()),
                         torch.tensor(saved["target"]),
                         rtol=0,
                         atol=1e-7,
                     ):
-                        raise ValueError("saved evaluation targets no longer match the dataset")
+                        raise ConfigError("saved evaluation targets no longer match the dataset")
                     record(
                         row,
                         torch.tensor(saved["probabilities"], dtype=torch.float32),

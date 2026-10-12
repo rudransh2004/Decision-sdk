@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader, IterableDataset
 
 from futurix_decision.datasets import DecisionExample, load_decisions, normalize_decision
 from futurix_decision.datasets.systemone import expand_systemone_row
+from futurix_decision.errors import ConfigError, MissingDependencyError
 from futurix_decision.models import DecisionBatch, DecisionModel
 from futurix_decision.trainers.losses import LossMode, decision_sft_loss
 from futurix_decision.utils.logging import TrainingLogger
@@ -49,25 +50,27 @@ class SFTConfig:
 
     def __post_init__(self) -> None:
         if self.epochs < 1 or self.batch_size < 1 or self.gradient_accumulation_steps < 1:
-            raise ValueError("epochs, batch_size, and gradient_accumulation_steps must be positive")
+            raise ConfigError(
+                "epochs, batch_size, and gradient_accumulation_steps must be positive"
+            )
         if not math.isfinite(self.learning_rate) or self.learning_rate <= 0:
-            raise ValueError("learning_rate must be positive and finite")
+            raise ConfigError("learning_rate must be positive and finite")
         if not math.isfinite(self.weight_decay) or self.weight_decay < 0:
-            raise ValueError("weight_decay must be finite and non-negative")
+            raise ConfigError("weight_decay must be finite and non-negative")
         if not math.isfinite(self.max_grad_norm) or self.max_grad_norm <= 0:
-            raise ValueError("max_grad_norm must be positive and finite")
+            raise ConfigError("max_grad_norm must be positive and finite")
         if not 0 <= self.label_smoothing < 1:
-            raise ValueError("label_smoothing must be in [0, 1)")
+            raise ConfigError("label_smoothing must be in [0, 1)")
         if self.method not in ("full", "lora", "qlora"):
-            raise ValueError("method must be full, lora, or qlora")
+            raise ConfigError("method must be full, lora, or qlora")
         if self.loss_mode not in ("auto", "hard", "soft"):
-            raise ValueError("loss_mode must be auto, hard, or soft")
+            raise ConfigError("loss_mode must be auto, hard, or soft")
         if self.precision not in ("no", "bf16", "fp16"):
-            raise ValueError("precision must be no, bf16, or fp16")
+            raise ConfigError("precision must be no, bf16, or fp16")
         if self.lora_rank < 1 or self.lora_alpha < 1 or not 0 <= self.lora_dropout < 1:
-            raise ValueError("invalid LoRA rank, alpha, or dropout")
+            raise ConfigError("invalid LoRA rank, alpha, or dropout")
         if self.max_examples is not None and self.max_examples < 1:
-            raise ValueError("max_examples must be positive when set")
+            raise ConfigError("max_examples must be positive when set")
 
 
 def _canonical_rows(source: DatasetSource) -> Iterator[DecisionExample]:
@@ -84,7 +87,7 @@ def _canonical_rows(source: DatasetSource) -> Iterator[DecisionExample]:
             else:
                 yield normalize_decision(row, index=index)
         else:
-            raise ValueError(f"row {index}: expected a DecisionExample or mapping")
+            raise ConfigError(f"row {index}: expected a DecisionExample or mapping")
 
 
 def _representative_rows(source: DatasetSource, *, count: int, seed: int) -> list[DecisionExample]:
@@ -138,11 +141,11 @@ class SFTTrainer:
         method = self.config.method
         quantized = getattr(backbone, "is_loaded_in_4bit", False)
         if method == "full" and quantized:
-            raise ValueError("full fine-tuning cannot update quantized weights")
+            raise ConfigError("full fine-tuning cannot update quantized weights")
         if method == "lora" and quantized:
-            raise ValueError("4-bit checkpoint detected; use method='qlora'")
+            raise ConfigError("4-bit checkpoint detected; use method='qlora'")
         if method == "qlora" and not quantized:
-            raise ValueError(
+            raise ConfigError(
                 "QLoRA requires a 4-bit checkpoint loaded with BitsAndBytesConfig; "
                 "marker-based heads must be prepared before quantizing the base"
             )
@@ -150,7 +153,7 @@ class SFTTrainer:
         if device_map:
             placements = {str(value) for value in device_map.values()}
             if len(placements) > 1 or "cpu" in placements or "disk" in placements:
-                raise ValueError(
+                raise ConfigError(
                     "training a device-dispatched or offloaded backbone is not supported; "
                     "use a single-device model or a distributed training setup"
                 )
@@ -161,7 +164,7 @@ class SFTTrainer:
             and not getattr(self.model, "_bosun_continuation_prepared", False)
         ):
             if quantized:
-                raise ValueError("merge the original Bosun adapter before 4-bit continuation")
+                raise ConfigError("merge the original Bosun adapter before 4-bit continuation")
             # Bosun ships a frozen inference adapter and separately trained
             # input/output rows. Merge its adapter into the already-restored
             # base, then train a fresh LoRA and both decision-token surfaces.
@@ -171,11 +174,11 @@ class SFTTrainer:
             self.model._bosun_continuation_prepared = True
             existing_adapter = False
         if existing_adapter and method == "full":
-            raise ValueError(
+            raise ConfigError(
                 "cannot full-fine-tune a PEFT adapter; use its current LoRA/QLoRA method"
             )
         if existing_adapter and not any(param.requires_grad for param in backbone.parameters()):
-            raise ValueError(
+            raise ConfigError(
                 "the loaded PEFT adapter is frozen; reload with "
                 "DecisionModel.from_pretrained(..., trainable_adapter=True)"
             )
@@ -189,7 +192,9 @@ class SFTTrainer:
         try:
             from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
         except ImportError as exc:
-            raise ImportError("LoRA/QLoRA needs pip install futurix-decision[train]") from exc
+            raise MissingDependencyError(
+                "LoRA/QLoRA needs pip install futurix-decision[train]"
+            ) from exc
         if method == "qlora":
             backbone = prepare_model_for_kbit_training(
                 backbone,
@@ -199,17 +204,17 @@ class SFTTrainer:
         input_embedding = backbone.get_input_embeddings()
         output_embedding = backbone.get_output_embeddings()
         if output_embedding is None:
-            raise ValueError("the causal LM must expose output embeddings")
+            raise ConfigError("the causal LM must expose output embeddings")
         tied = input_embedding.weight is output_embedding.weight
         modules_to_save = None
         if not tied and self.model.decision_head is None:
             if not isinstance(output_embedding, torch.nn.Linear):
-                raise ValueError("untied output embeddings must be a linear module for LoRA")
+                raise ConfigError("untied output embeddings must be a linear module for LoRA")
             names = [
                 name for name, module in backbone.named_modules() if module is output_embedding
             ]
             if len(names) != 1:
-                raise ValueError("could not identify the LM's output projection")
+                raise ConfigError("could not identify the LM's output projection")
             # The new decision rows in an untied output projection must be
             # learnable and must be retained with the adapter.
             modules_to_save = names
@@ -242,7 +247,7 @@ class SFTTrainer:
                     rows, count=self.config.max_examples, seed=self.config.seed
                 )
             if not rows:
-                raise ValueError("SFT dataset is empty")
+                raise ConfigError("SFT dataset is empty")
             generator = torch.Generator().manual_seed(self.config.seed)
             return DataLoader(
                 rows,
@@ -252,7 +257,7 @@ class SFTTrainer:
                 collate_fn=_collate,
             )
         if self.config.epochs > 1 and isinstance(dataset, Iterator):
-            raise ValueError(
+            raise ConfigError(
                 "one-shot iterators cannot be replayed across epochs; "
                 "pass a dataset path, HF ID, or re-iterable collection instead"
             )
@@ -277,7 +282,7 @@ class SFTTrainer:
             from accelerate import Accelerator, DataLoaderConfiguration
             from accelerate.utils import set_seed
         except ImportError as exc:
-            raise ImportError("SFT needs pip install futurix-decision[train]") from exc
+            raise MissingDependencyError("SFT needs pip install futurix-decision[train]") from exc
         if self._trained:
             raise RuntimeError("this trainer has already trained; create a new SFTTrainer")
         set_seed(self.config.seed)
@@ -299,7 +304,7 @@ class SFTTrainer:
                 param for param in self.model.decision_head.parameters() if param.requires_grad
             )
         if not params:
-            raise ValueError("the backbone and decision head have no trainable parameters")
+            raise ConfigError("the backbone and decision head have no trainable parameters")
         optimizer = torch.optim.AdamW(
             params, lr=self.config.learning_rate, weight_decay=self.config.weight_decay
         )
@@ -369,7 +374,7 @@ class SFTTrainer:
                         accumulated_loss = 0.0
                         accumulated_batches = 0
                 if seen == 0:
-                    raise ValueError("SFT dataset is empty")
+                    raise ConfigError("SFT dataset is empty")
         finally:
             logger.close()
             self.model.backbone = accelerator.unwrap_model(prepared)

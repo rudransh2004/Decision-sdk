@@ -11,6 +11,7 @@ from typing import Any
 from futurix_decision.datasets.benchmarks import normalize_decisionbench
 from futurix_decision.datasets.schema import ABSTAIN_TARGET, DecisionExample
 from futurix_decision.datasets.systemone import expand_systemone_row
+from futurix_decision.errors import ConfigError, MissingDependencyError
 
 OPEN_DECISIONS_DATASET = "SargeDev/jev-distill-corpus-v3"
 
@@ -24,7 +25,7 @@ def normalize_decision(row: Mapping[str, Any], *, index: int = 0) -> DecisionExa
     if "primitive" in row and "candidates_json" in row:
         return normalize_decisionbench(row)
     if row.get("videos") or row.get("media"):
-        raise ValueError("video and generic media datasets need a model-specific adapter")
+        raise ConfigError("video and generic media datasets need a model-specific adapter")
     kind = row.get("kind", row.get("type", "choice"))
     kind = {"binary": "noul", "boolean": "noul", "ordinal": "score"}.get(kind, kind)
     options = row.get("options", row.get("choices", row.get("candidates")))
@@ -34,11 +35,11 @@ def normalize_decision(row: Mapping[str, Any], *, index: int = 0) -> DecisionExa
         elif kind == "score":
             options = [str(level) for level in range(6)]
         else:
-            raise ValueError("choice rows must provide options/choices/candidates")
+            raise ConfigError("choice rows must provide options/choices/candidates")
     options = [str(option) for option in options]
     target = row.get("target", row.get("probabilities", row.get("label", row.get("answer"))))
     if target is None:
-        raise ValueError("row must provide target/probabilities/label/answer")
+        raise ConfigError("row must provide target/probabilities/label/answer")
     if isinstance(target, Mapping):
         target = [target.get(option, 0.0) for option in options] + (
             [target[ABSTAIN_TARGET]] if ABSTAIN_TARGET in target else []
@@ -61,7 +62,7 @@ def normalize_decision(row: Mapping[str, Any], *, index: int = 0) -> DecisionExa
             target = [value / total for value in target]
     if isinstance(target, float) and kind == "noul":
         if not 0 <= target <= 1:
-            raise ValueError("noul probability must be in [0, 1]")
+            raise ConfigError("noul probability must be in [0, 1]")
         target = [1.0 - target, target]
     if isinstance(target, str) and kind == "noul" and target.lower() in ("false", "true"):
         target = target.lower()
@@ -98,9 +99,9 @@ def _jsonl_rows(path: Path) -> Iterator[Mapping[str, Any]]:
             try:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"{path}:{line_number}: invalid JSON") from exc
+                raise ConfigError(f"{path}:{line_number}: invalid JSON") from exc
             if not isinstance(row, Mapping):
-                raise ValueError(f"{path}:{line_number}: expected a JSON object")
+                raise ConfigError(f"{path}:{line_number}: expected a JSON object")
             yield row
 
 
@@ -125,14 +126,14 @@ def _rows(
             if isinstance(contents, Mapping):
                 return [contents]
             if not isinstance(contents, list):
-                raise ValueError("JSON dataset must be a row or an array of rows")
+                raise ConfigError("JSON dataset must be a row or an array of rows")
             return contents
         if isinstance(source, Path) or path.exists():
-            raise ValueError("local dataset files must end in .json or .jsonl")
+            raise ConfigError("local dataset files must end in .json or .jsonl")
         try:
             from datasets import load_dataset
         except ImportError as exc:
-            raise ImportError(
+            raise MissingDependencyError(
                 "Hugging Face loading requires pip install futurix-decision[datasets]"
             ) from exc
         options = {"revision": revision} if revision is not None else {}
@@ -152,7 +153,7 @@ def load_decisions(
     def validated() -> Iterator[DecisionExample]:
         for index, row in enumerate(_rows(source, split, streaming, revision)):
             if not isinstance(row, Mapping):
-                raise ValueError(f"row {index}: expected a mapping")
+                raise ConfigError(f"row {index}: expected a mapping")
             try:
                 if "questions" in row:
                     for question in expand_systemone_row(row, index=index):
@@ -160,7 +161,7 @@ def load_decisions(
                 else:
                     yield normalize_decision(row, index=index)
             except (ValueError, TypeError) as exc:
-                raise ValueError(f"row {index}: {exc}") from exc
+                raise ConfigError(f"row {index}: {exc}") from exc
 
     return validated() if streaming else list(validated())
 

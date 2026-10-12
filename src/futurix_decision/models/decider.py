@@ -24,6 +24,7 @@ from huggingface_hub import hf_hub_download
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from futurix_decision.datasets.schema import DecisionInput
+from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
 
 FORMAT = "decider-v2.1"
@@ -59,12 +60,12 @@ def letter_table(tokenizer: Any, width: int = MAX_OPTIONS) -> tuple[list[str], l
         if len(ids) == width:
             break
     if len(ids) != width:
-        raise ValueError(
+        raise CheckpointError(
             f"decider-v2.1 needs {width} distinct existing letter tokens; "
             f"tokenizer only provides {len(ids)}"
         )
     if names[: min(width, 10)] != list("ABCDEFGHIJ")[: min(width, 10)]:
-        raise ValueError("decider-v2.1's trained A-J option labels are unavailable")
+        raise CheckpointError("decider-v2.1's trained A-J option labels are unavailable")
     _LABEL_CACHE[tokenizer] = names, ids
     return names, ids
 
@@ -93,7 +94,7 @@ def _render_state(state: Any) -> str:
 def _option_text(example: DecisionInput, position: int) -> str:
     if example.kind == "noul":
         if example.options[position] not in ("true", "false"):
-            raise ValueError("decider-v2.1 noul requires literal true/false options")
+            raise ConfigError("decider-v2.1 noul requires literal true/false options")
         name = "yes" if example.options[position] == "true" else "no"
         description = (
             example.candidate_descriptions[position] if example.candidate_descriptions else None
@@ -120,15 +121,15 @@ def prepare_decider_rows(
 ) -> list[DeciderRow]:
     """Tokenize parts independently as the released decider.prompt.build does."""
     if len(example.options) > decision_tokens:
-        raise ValueError(f"decider-v2.1 supports at most {decision_tokens} choices")
+        raise ConfigError(f"decider-v2.1 supports at most {decision_tokens} choices")
     names, token_ids = letter_table(tokenizer, decision_tokens)
     context = tokenizer.encode(
         "Context:\n" + _render_state(example.state), add_special_tokens=False
     )
     if len(context) > max_state_tokens:
-        raise ValueError("state exceeds the decider-v2.1 maximum state length")
+        raise ConfigError("state exceeds the decider-v2.1 maximum state length")
     if example.kind == "score" and len(example.options) > MAX_SCORE_LEVELS:
-        raise ValueError("decider-v2.1 isolated score supports at most 10 levels")
+        raise ConfigError("decider-v2.1 isolated score supports at most 10 levels")
     if option_order is None:
         option_order = (
             [example.options.index("false"), example.options.index("true")]
@@ -136,7 +137,7 @@ def prepare_decider_rows(
             else list(range(len(example.options)))
         )
     if sorted(option_order) != list(range(len(example.options))):
-        raise ValueError("option_order must be a permutation of the original options")
+        raise ConfigError("option_order must be a permutation of the original options")
     specs: list[tuple[str, list[str]]] = []
     if example.kind == "score":
         for index, level in enumerate(example.options):
@@ -207,7 +208,7 @@ def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> dict[str, Any]:
         or config.get("isolated_levels") is not True
         or config.get("max_options") != MAX_OPTIONS
     ):
-        raise ValueError(
+        raise CheckpointError(
             "only the Mapika decider-4b v2.1 plain, isolated-score contract is supported"
         )
     return config
@@ -225,9 +226,9 @@ class DeciderDecisionModel(DecisionModel):
         **kwargs: Any,
     ) -> None:
         if kwargs.get("prompt_format", FORMAT) != FORMAT:
-            raise ValueError("decider-v2.1 wrapper requires its native prompt format")
+            raise ConfigError("decider-v2.1 wrapper requires its native prompt format")
         if kwargs.get("head_type", "tokens") != "tokens":
-            raise ValueError("decider-v2.1 uses its trained LM letter readout, not a new head")
+            raise ConfigError("decider-v2.1 uses its trained LM letter readout, not a new head")
         kwargs["prompt_format"] = FORMAT
         kwargs.setdefault("decision_tokens", MAX_OPTIONS)
         self.type_temperatures = dict(type_temperatures or DEFAULT_TEMPERATURES)
@@ -235,7 +236,7 @@ class DeciderDecisionModel(DecisionModel):
             not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0
             for value in self.type_temperatures.values()
         ):
-            raise ValueError(
+            raise ConfigError(
                 "decider-v2.1 requires positive finite temperatures for each decision kind"
             )
         super().__init__(backbone, tokenizer, **kwargs)
@@ -243,12 +244,14 @@ class DeciderDecisionModel(DecisionModel):
     def _register_decision_tokens(self) -> list[int]:
         if self.tokenizer.pad_token is None:
             if self.tokenizer.eos_token is None:
-                raise ValueError("decider-v2.1 tokenizer requires EOS or pad token")
+                raise CheckpointError("decider-v2.1 tokenizer requires EOS or pad token")
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left"
         _, ids = letter_table(self.tokenizer, self.decision_tokens)
         if max(ids) >= self.backbone.get_input_embeddings().num_embeddings:
-            raise ValueError("decider tokenizer has letter tokens outside the backbone vocabulary")
+            raise CheckpointError(
+                "decider tokenizer has letter tokens outside the backbone vocabulary"
+            )
         return ids
 
     @classmethod
@@ -265,7 +268,7 @@ class DeciderDecisionModel(DecisionModel):
         ):
             config = _native_config(checkpoint, **hf_kwargs)
         else:
-            raise ValueError(
+            raise CheckpointError(
                 "only Mapika/decider-4b or a local copy of its v2.1 release is supported"
             )
         tok_kwargs = {
@@ -292,7 +295,7 @@ class DeciderDecisionModel(DecisionModel):
         self, examples: Sequence[DecisionInput], *, assignment_seed: int | None = None
     ) -> DecisionBatch:
         if not examples:
-            raise ValueError("examples must not be empty")
+            raise ConfigError("examples must not be empty")
         orders = []
         groups = []
         for example in examples:
@@ -330,7 +333,7 @@ class DeciderDecisionModel(DecisionModel):
         flat = [row for group in groups for row in group]
         longest = max(len(row.input_ids) for row in flat)
         if longest > self.max_sequence_length:
-            raise ValueError(
+            raise ConfigError(
                 f"prompt exceeds max_sequence_length={self.max_sequence_length}; "
                 "increase the limit instead of silently truncating candidates"
             )

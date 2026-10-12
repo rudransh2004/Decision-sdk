@@ -19,7 +19,15 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+from futurix_decision._lazy import torch_required
 from futurix_decision.datasets.schema import DecisionInput, State
+from futurix_decision.errors import (
+    BackendError,
+    CheckpointError,
+    ConfigError,
+    InvalidOutputError,
+    MissingDependencyError,
+)
 from futurix_decision.inference.schemas import DecisionResult
 from futurix_decision.models.families import identify_family, reject_native_checkpoint
 from futurix_decision.models.sources import (
@@ -81,13 +89,13 @@ def _source(checkpoint: str | Path) -> tuple[str, str]:
     if local:
         family = infer_local_family(Path(name))
         if family not in set(_NATIVE.values()):
-            raise ValueError(
+            raise CheckpointError(
                 f"cannot identify native decision checkpoint at {name!r}; "
                 "pass family='clef', 'pplx-decider', 'kev', 'laya', etc."
             )
         return name, family
     if name not in _NATIVE:
-        raise ValueError(f"unknown selected decision checkpoint: {name}")
+        raise ConfigError(f"unknown selected decision checkpoint: {name}")
     return name, _NATIVE[name]
 
 
@@ -106,17 +114,11 @@ def _pinned_remote(
             or any(digit not in "0123456789abcdefABCDEF" for digit in revision)
         )
     ):
-        raise ValueError(
+        raise ConfigError(
             f"{family} runs publisher code: pass trust_remote_code=True"
             + ("" if local else " and an immutable 40-character revision from the model card")
             + ". Review that code before loading."
         )
-
-
-def _missing(package: str, extra: str) -> ImportError:
-    return ImportError(
-        f"{package} is required: install futurix-decision[{extra}] in a compatible environment"
-    )
 
 
 def _require_hub_files(name: str, family: str, revision: str | None, *filenames: str) -> None:
@@ -128,7 +130,7 @@ def _require_hub_files(name: str, family: str, revision: str | None, *filenames:
         try:
             hf_hub_download(name, filename, revision=revision)
         except EntryNotFoundError as exc:
-            raise FileNotFoundError(
+            raise CheckpointError(
                 f"incomplete {family} Hub checkpoint {name!r}; missing: {filename}"
             ) from exc
 
@@ -140,7 +142,7 @@ def _requires_transformers(extra: str, minimum: tuple[int, int]) -> None:
     except (PackageNotFoundError, ValueError, IndexError):
         installed = (0, 0)
     if installed < minimum:
-        raise ImportError(
+        raise MissingDependencyError(
             f"{extra} needs Transformers {minimum[0]}.{minimum[1]}+; "
             f"install futurix-decision[{extra}] in a compatible environment"
         )
@@ -170,7 +172,7 @@ def _verify_openjev(client: Any, checkpoint: str) -> None:
         or flags.get("targeted") is not True
         or flags.get("instr_style") != "pyrepr"
     ):
-        raise ValueError(
+        raise BackendError(
             f"OpenJev helper does not serve {checkpoint} with its published "
             "decision readout and calibration; inspect /v1/version"
         )
@@ -181,25 +183,25 @@ def _question(example: DecisionInput) -> dict[str, Any]:
         question = copy.deepcopy(example.native_question)
         criteria = question.get("criteria")
         if question.get("type", "choice") != example.kind:
-            raise ValueError("native question type differs from its canonical decision")
+            raise ConfigError("native question type differs from its canonical decision")
         if example.kind == "choice" and isinstance(criteria, Mapping):
             if list(criteria) != example.options:
-                raise ValueError("native choice criteria order differs from canonical options")
+                raise ConfigError("native choice criteria order differs from canonical options")
             return question
         if example.kind == "score" and isinstance(criteria, list):
             if len(criteria) != len(example.options):
-                raise ValueError("native score criteria count differs from canonical options")
+                raise ConfigError("native score criteria count differs from canonical options")
             return question
         if example.kind == "noul" and (
             criteria is None
             or (isinstance(criteria, Mapping) and not (set(criteria) - {"false", "true"}))
         ):
             if set(example.options) != {"false", "true"}:
-                raise ValueError("native noul readouts require explicit false/true candidate IDs")
+                raise ConfigError("native noul readouts require explicit false/true candidate IDs")
             return question
     if example.kind == "noul":
         if set(example.options) != {"false", "true"}:
-            raise ValueError("native noul readouts require explicit false/true candidate IDs")
+            raise ConfigError("native noul readouts require explicit false/true candidate IDs")
         criteria = (
             {
                 key: example.candidate_descriptions[example.options.index(key)]
@@ -213,7 +215,7 @@ def _question(example: DecisionInput) -> dict[str, Any]:
             int(option) != index + int(example.options[0])
             for index, option in enumerate(example.options)
         ):
-            raise ValueError("native score readouts need consecutive, ordered integer levels")
+            raise ConfigError("native score readouts need consecutive, ordered integer levels")
         criteria = [
             (example.candidate_descriptions[i] or example.candidate_labels[i])
             if example.candidate_descriptions and example.candidate_labels
@@ -246,16 +248,16 @@ def _result(
     confidence_threshold: float | None,
 ) -> DecisionResult:
     if answer.get("type") not in (None, example.kind):
-        raise ValueError("publisher returned the wrong decision type")
+        raise InvalidOutputError("publisher returned the wrong decision type")
     if example.kind == "noul":
         if "noul" not in answer:
-            raise ValueError("publisher did not return P(true)")
+            raise InvalidOutputError("publisher did not return P(true)")
         yes = float(answer["noul"])
         probabilities = {"false": 1.0 - yes, "true": yes}
     else:
         values = answer.get("probabilities")
         if not isinstance(values, Mapping):
-            raise ValueError(
+            raise InvalidOutputError(
                 "publisher must return per-option probabilities (not only a label/mean)"
             )
         keys = (
@@ -264,15 +266,17 @@ def _result(
             else example.options
         )
         if set(values) != set(keys):
-            raise ValueError(f"publisher returned different option IDs: {set(values) ^ set(keys)}")
+            raise InvalidOutputError(
+                f"publisher returned different option IDs: {set(values) ^ set(keys)}"
+            )
         probabilities = dict(
             zip(example.options, (float(values[key]) for key in keys), strict=True)
         )
     if any(not math.isfinite(value) or value < 0 or value > 1 for value in probabilities.values()):
-        raise ValueError("publisher returned invalid probabilities")
+        raise InvalidOutputError("publisher returned invalid probabilities")
     total = sum(probabilities.values())
     if abs(total - 1.0) > len(probabilities) * 0.000051:
-        raise ValueError("publisher probabilities do not sum to 1")
+        raise InvalidOutputError("publisher probabilities do not sum to 1")
     probabilities = {key: value / total for key, value in probabilities.items()}
     winner = max(example.options, key=probabilities.__getitem__)
     confidence = probabilities[winner]
@@ -301,7 +305,7 @@ def _pplx_answer(example: DecisionInput, values: Sequence[float]) -> dict[str, A
         else example.options
     )
     if len(values) != len(keys):
-        raise ValueError("PPLX returned a different number of option probabilities")
+        raise InvalidOutputError("PPLX returned a different number of option probabilities")
     return {
         "type": example.kind,
         "probabilities": dict(zip(keys, values, strict=True)),
@@ -365,7 +369,7 @@ class NativeDecisionModel:
     ) -> NativeDecisionModel:
         """Inject an already loaded native model/server for custom loading and tests."""
         if family not in set(_NATIVE.values()):
-            raise ValueError(f"unknown selected native family: {family}")
+            raise ConfigError(f"unknown selected native family: {family}")
         return cls(checkpoint, family, runtime, backend, source_revision=source_revision)
 
     @classmethod
@@ -386,24 +390,24 @@ class NativeDecisionModel:
         resolved, local = checkpoint_source(checkpoint)
         if family is not None and local:
             if family not in set(_NATIVE.values()):
-                raise ValueError(f"unknown selected native family: {family}")
+                raise ConfigError(f"unknown selected native family: {family}")
             name = resolved
             identified = infer_local_family(Path(name))
             if identified is not None and identified != family:
-                raise ValueError(f"{name} belongs to {identified}, not {family}")
+                raise CheckpointError(f"{name} belongs to {identified}, not {family}")
         else:
             name, identified = _source(checkpoint)
             if family is not None and family != identified:
-                raise ValueError(f"{name} belongs to {identified}, not {family}")
+                raise CheckpointError(f"{name} belongs to {identified}, not {family}")
             family = identified
         manifest = Path(name) / "futurix_native.json"
         if revision is None and manifest.is_file():
             revision = read_checkpoint_json(manifest).get("source_revision")
         if base_url is not None:
             if family == "gliner":
-                raise ValueError("GLiNER does not publish a System One HTTP runtime")
+                raise ConfigError("GLiNER does not publish a System One HTTP runtime")
             if client is not None and api_key is not None:
-                raise ValueError("configure api_key headers on your supplied client")
+                raise ConfigError("configure api_key headers on your supplied client")
             import httpx
 
             runtime = client or httpx.Client(
@@ -415,22 +419,26 @@ class NativeDecisionModel:
                 _verify_openjev(runtime, name)
             return cls(name, family, runtime, "http")
         if client is not None:
-            raise ValueError("client needs base_url for a native System One server")
+            raise ConfigError("client needs base_url for a native System One server")
         if api_key is not None:
-            raise ValueError("api_key is only for a native System One server")
+            raise ConfigError("api_key is only for a native System One server")
         if local and family != "openjev":
             require_checkpoint_files(Path(name), family, source=name)
         if family == "laya":
             try:
                 import laya
             except ImportError as exc:
-                raise _missing("laya", "laya") from exc
+                raise MissingDependencyError(
+                    "laya is required: install futurix-decision[laya]"
+                ) from exc
             runtime = laya.load(name, device=device, revision=revision, **native_kwargs)
         elif family == "gliner":
             try:
                 from gliner2.classification import Classifier
             except ImportError as exc:
-                raise _missing("gliner2", "gliner") from exc
+                raise MissingDependencyError(
+                    "gliner2 is required: install futurix-decision[gliner]"
+                ) from exc
             runtime = Classifier.from_pretrained(
                 name, device=device, **({"revision": revision} if revision else {}), **native_kwargs
             )
@@ -441,14 +449,16 @@ class NativeDecisionModel:
             try:
                 from kev.checkpoint import Checkpoint, LoadOptions
             except ImportError as exc:
-                raise _missing("kev", "kev-native") from exc
+                raise MissingDependencyError(
+                    "kev is required: install futurix-decision[kev-native]"
+                ) from exc
             if not local:
                 _require_hub_files(name, family, revision, "head.pt")
             source = f"{name}@{revision}" if revision and not Path(name).is_dir() else name
             tokenizer, model = Checkpoint(source).load(device, LoadOptions(**native_kwargs))
             runtime = (tokenizer, model)
         elif family == "openjev":
-            raise ValueError(
+            raise ConfigError(
                 "OpenJev's supported decision readout needs its vLLM System One helper; "
                 "pass base_url"
             )
@@ -490,7 +500,7 @@ class NativeDecisionModel:
             try:
                 from autojev.model import DecisionModel as PplxModel
             except ImportError as exc:
-                raise ImportError(
+                raise MissingDependencyError(
                     "Install the publisher's pinned source/src/autojev package to load "
                     "PPLX; a Transformers causal model cannot restore its readout"
                 ) from exc
@@ -523,7 +533,7 @@ class NativeDecisionModel:
 
     def _predict(self, example: DecisionInput) -> Mapping[str, Any]:
         if self.family in ("kev", "pplx-decider") and len(example.options) > 255:
-            raise ValueError(f"{self.family} native readout supports at most 255 options")
+            raise ConfigError(f"{self.family} native readout supports at most 255 options")
         question = _question(example)
         payload = {
             "model": self.checkpoint,
@@ -532,7 +542,7 @@ class NativeDecisionModel:
         }
         if example.images:
             if self.family not in ("clef", "pplx-decider", "liquid-d1"):
-                raise ValueError(f"{self.family} does not expose an image decision path here")
+                raise ConfigError(f"{self.family} does not expose an image decision path here")
             payload["images"] = (
                 example.images
                 if self.backend == "http"
@@ -563,7 +573,9 @@ class NativeDecisionModel:
             )
             result = self.runtime.classify(text, schema)
             if not result["decision"].exclusive:
-                raise ValueError("GLiNER returned a multi-label rather than exclusive decision")
+                raise InvalidOutputError(
+                    "GLiNER returned a multi-label rather than exclusive decision"
+                )
             keys = example.options
             if example.kind == "score":
                 values = dict(
@@ -615,10 +627,10 @@ class NativeDecisionModel:
                 **({"images": payload["images"]} if example.images else {}),
             )
         if not isinstance(output, Mapping) or not isinstance(output.get("answers"), Mapping):
-            raise ValueError("native model did not return a System One answers mapping")
+            raise InvalidOutputError("native model did not return a System One answers mapping")
         answer = output["answers"].get("decision")
         if not isinstance(answer, Mapping):
-            raise ValueError("native model did not answer the requested question")
+            raise InvalidOutputError("native model did not answer the requested question")
         return answer
 
     def system_one(
@@ -634,9 +646,9 @@ class NativeDecisionModel:
         and any native metadata. Images are only sent to verified media paths.
         """
         if not questions:
-            raise ValueError("system_one needs at least one named question")
+            raise ConfigError("system_one needs at least one named question")
         if images and self.family not in ("clef", "pplx-decider", "liquid-d1"):
-            raise ValueError(f"{self.family} does not expose an image decision path here")
+            raise ConfigError(f"{self.family} does not expose an image decision path here")
         payload = {"model": self.checkpoint, "state": state, "questions": dict(questions)}
         if images:
             payload["images"] = (
@@ -677,7 +689,7 @@ class NativeDecisionModel:
             ]
             probabilities = self.runtime.predict(records)
             if len(probabilities) != len(questions):
-                raise ValueError("PPLX returned a different number of answers")
+                raise InvalidOutputError("PPLX returned a different number of answers")
             output = {
                 "answers": {
                     qid: native_answer(question, values)
@@ -697,14 +709,14 @@ class NativeDecisionModel:
                     if criteria is not None and (
                         not isinstance(criteria, Mapping) or set(criteria) - {"false", "true"}
                     ):
-                        raise ValueError("noul criteria must be a false/true mapping")
+                        raise ConfigError("noul criteria must be a false/true mapping")
                     labels = {key: (criteria or {}).get(key) for key in ("false", "true")}
                 elif kind == "score" and isinstance(criteria, list):
                     labels = {str(i): description for i, description in enumerate(criteria)}
                 elif kind == "choice" and isinstance(criteria, Mapping):
                     labels = dict(criteria)
                 else:
-                    raise ValueError(f"{qid!r} needs native choice/noul/score criteria")
+                    raise ConfigError(f"{qid!r} needs native choice/noul/score criteria")
                 schema.single(qid, labels, instruction=question.get("instructions") or qid)
             text = state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)
             result = self.runtime.classify(text, schema)
@@ -712,7 +724,7 @@ class NativeDecisionModel:
             for qid, question in questions.items():
                 probs = dict(result.probabilities(qid))
                 if not probs or not result[qid].exclusive:
-                    raise ValueError("GLiNER did not return exclusive label probabilities")
+                    raise InvalidOutputError("GLiNER did not return exclusive label probabilities")
                 winner = max(probs, key=probs.__getitem__)
                 if question["type"] == "noul":
                     answer = {"type": "noul", "noul": probs["true"]}
@@ -733,9 +745,9 @@ class NativeDecisionModel:
                 **({"images": payload["images"]} if images else {}),
             )
         if not isinstance(output, Mapping) or not isinstance(output.get("answers"), Mapping):
-            raise ValueError("native model did not return a System One answers mapping")
+            raise InvalidOutputError("native model did not return a System One answers mapping")
         if set(output["answers"]) != set(questions):
-            raise ValueError("native model answered a different set of question IDs")
+            raise InvalidOutputError("native model answered a different set of question IDs")
         return dict(output)
 
     def decide(
@@ -744,7 +756,7 @@ class NativeDecisionModel:
         if confidence_threshold is not None and (
             not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
         ):
-            raise ValueError("confidence_threshold must be between 0 and 1")
+            raise ConfigError("confidence_threshold must be between 0 and 1")
         started = time.perf_counter()
         answer = self._predict(example)
         return _result(
@@ -759,10 +771,10 @@ class NativeDecisionModel:
         if confidence_threshold is not None and (
             not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
         ):
-            raise ValueError("confidence_threshold must be between 0 and 1")
+            raise ConfigError("confidence_threshold must be between 0 and 1")
         if self.backend == "local" and self.family == "pplx-decider":
             if any(len(row.options) > 255 for row in examples):
-                raise ValueError("PPLX native readout supports at most 255 options")
+                raise ConfigError("PPLX native readout supports at most 255 options")
             started = time.perf_counter()
             rows = [
                 {
@@ -774,7 +786,7 @@ class NativeDecisionModel:
             ]
             predictions = self.runtime.predict(rows)
             if len(predictions) != len(examples):
-                raise ValueError("PPLX returned a different batch size")
+                raise InvalidOutputError("PPLX returned a different batch size")
             latency = (time.perf_counter() - started) * 1000 / len(examples)
             return [
                 _result(row, _pplx_answer(row, values), latency, confidence_threshold)
@@ -788,7 +800,7 @@ class NativeDecisionModel:
             grouped: dict[str, list[tuple[int, DecisionInput]]] = {}
             for index, row in enumerate(examples):
                 if row.images:
-                    raise ValueError("Laya's encoder does not accept images")
+                    raise ConfigError("Laya's encoder does not accept images")
                 schema = json.dumps(_question(row), ensure_ascii=False, sort_keys=True)
                 grouped.setdefault(schema, []).append((index, row))
             results: dict[int, DecisionResult] = {}
@@ -799,12 +811,12 @@ class NativeDecisionModel:
                     {"decision": json.loads(schema)},
                 )
                 if len(predictions) != len(group):
-                    raise ValueError("Laya returned a different batch size")
+                    raise InvalidOutputError("Laya returned a different batch size")
                 latency = (time.perf_counter() - started) * 1000 / len(group)
                 for (index, row), prediction in zip(group, predictions, strict=True):
                     answer = prediction.get("answers", {}).get("decision")
                     if not isinstance(answer, Mapping):
-                        raise ValueError("Laya did not answer the requested question")
+                        raise InvalidOutputError("Laya did not answer the requested question")
                     results[index] = _result(row, answer, latency, confidence_threshold)
             return [results[index] for index in range(len(examples))]
         # Other native readouts can have heterogeneous schemas and runtimes.
@@ -893,14 +905,28 @@ def load_model(
     This never converts a trained native decision readout into an untrained LM.
     For raw LMs, ``convert=True`` accepts pointer, Bosun-style tokens, or a
     fixed letter-code readout. Only Qwen3.5 has a noncausal adapter.
+
+    Raises ``MissingDependencyError`` when the checkpoint needs torch and it is
+    not installed.
     """
+    with torch_required(f"loading {checkpoint}"):
+        return _load_model(checkpoint, convert=convert, family=family, **kwargs)
+
+
+def _load_model(
+    checkpoint: str | Path,
+    *,
+    convert: bool,
+    family: str | None,
+    **kwargs: Any,
+) -> Any:
     strategy = kwargs.pop("strategy", None)
     if strategy == "pplx":  # Legacy call sites; never write this name to new exports.
         strategy = "letter_code"
     if strategy is not None and strategy not in ("pointer", "bosun", "letter_code"):
-        raise ValueError("strategy must be 'pointer', 'bosun', or 'letter_code'")
+        raise ConfigError("strategy must be 'pointer', 'bosun', or 'letter_code'")
     if strategy is not None and not convert:
-        raise ValueError("strategy is only for converting a plain causal LM")
+        raise ConfigError("strategy is only for converting a plain causal LM")
     if convert and kwargs.get("head_type") == "pplx":
         kwargs["head_type"] = "letter_code"
     original, _ = checkpoint_source(checkpoint)
@@ -915,21 +941,21 @@ def load_model(
     if identified == "encoder":  # Hub catalogue groups two different publisher runtimes.
         identified = _NATIVE.get(name)
     if family is not None and identified is not None and family != identified:
-        raise ValueError(f"{name} belongs to {identified}, not {family}")
+        raise CheckpointError(f"{name} belongs to {identified}, not {family}")
     family = family or identified
     if family == "futurix":
         if convert:
-            raise ValueError("already trained Futurix checkpoints do not need conversion")
+            raise ConfigError("already trained Futurix checkpoints do not need conversion")
         if not local:
             from futurix_decision.utils.config import load_decision_config
 
             metadata = load_decision_config(name, **kwargs)
             if not metadata:
-                raise FileNotFoundError(
+                raise CheckpointError(
                     f"incomplete Futurix Hub checkpoint {name!r}; missing: decision_config.json"
                 )
             if metadata.get("architecture") != "futurix-decision":
-                raise ValueError(f"{name} does not contain a Futurix decision checkpoint")
+                raise CheckpointError(f"{name} does not contain a Futurix decision checkpoint")
         if local:
             require_checkpoint_files(path, "futurix")
             metadata = read_checkpoint_json(path / "decision_config.json")
@@ -950,7 +976,7 @@ def load_model(
         )
     ):
         if convert:
-            raise ValueError("Bosun v3.1 already contains a trained decision head")
+            raise ConfigError("Bosun v3.1 already contains a trained decision head")
         if local:
             require_checkpoint_files(path, "bosun")
         from futurix_decision.models.decision_model import DecisionModel
@@ -960,7 +986,7 @@ def load_model(
         local or (registered is not None and registered.supports(name, "inference"))
     ):
         if convert:
-            raise ValueError(f"{family} already contains a trained decision readout")
+            raise ConfigError(f"{family} already contains a trained decision readout")
         if local:
             require_checkpoint_files(path, family)
         from futurix_decision.models.decision_model import DecisionModel
@@ -968,7 +994,7 @@ def load_model(
         return getattr(DecisionModel, f"from_{family}")(name, **kwargs)
     if name in ("Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B-Base"):
         if not convert:
-            raise ValueError(
+            raise ConfigError(
                 "Qwen3.5-9B is not decision-trained; pass convert=True and train before inference"
             )
         _requires_transformers("qwen3.5", (5, 17))
@@ -976,14 +1002,14 @@ def load_model(
 
         if strategy == "bosun":
             if kwargs.pop("head_type", "tokens") != "tokens":
-                raise ValueError("strategy='bosun' requires head_type='tokens'")
+                raise ConfigError("strategy='bosun' requires head_type='tokens'")
             if kwargs.get("decision_tokens", 256) != 256:
-                raise ValueError("strategy='bosun' requires exactly 256 decision tokens")
+                raise ConfigError("strategy='bosun' requires exactly 256 decision tokens")
             quantization = kwargs.get("quantization_config")
             if getattr(quantization, "load_in_4bit", False) or getattr(
                 quantization, "load_in_8bit", False
             ):
-                raise ValueError("Bosun token rows must be added before quantizing the base")
+                raise ConfigError("Bosun token rows must be added before quantizing the base")
             return DecisionModel.from_pretrained(
                 name,
                 head_type="tokens",
@@ -994,7 +1020,7 @@ def load_model(
             )
         if strategy == "letter_code":
             if kwargs.pop("head_type", "letter_code") != "letter_code":
-                raise ValueError("strategy='letter_code' requires head_type='letter_code'")
+                raise ConfigError("strategy='letter_code' requires head_type='letter_code'")
             return DecisionModel.from_pretrained(
                 name,
                 head_type="letter_code",
@@ -1005,18 +1031,18 @@ def load_model(
                 **kwargs,
             )
         if strategy == "pointer" and kwargs.get("head_type", "pointer") != "pointer":
-            raise ValueError("strategy='pointer' requires head_type='pointer'")
+            raise ConfigError("strategy='pointer' requires head_type='pointer'")
         return DecisionModel.from_pretrained(
             name, head_type=kwargs.pop("head_type", "pointer"), **kwargs
         )
     if convert:
         if family is not None or registered is not None:
-            raise ValueError(
+            raise ConfigError(
                 f"{name} is a known decision-model family; convert=True would discard "
                 "its native readout. Load it through its supported importer instead"
             )
         if not local and name.count("/") != 1:
-            raise ValueError(
+            raise ConfigError(
                 "convert=True needs an existing local directory or a Hugging Face model ID"
             )
         from futurix_decision.models.decision_model import DecisionModel
@@ -1024,7 +1050,7 @@ def load_model(
 
         metadata = load_decision_config(name, **kwargs)
         if metadata.get("architecture") == "futurix-decision":
-            raise ValueError(
+            raise ConfigError(
                 "this is already a trained Futurix decision checkpoint; omit convert=True"
             )
         reject_native_checkpoint(name, metadata)
@@ -1048,7 +1074,7 @@ def load_model(
         if getattr(config, "is_encoder_decoder", False) or (
             getattr(config, "vision_config", None) and not qwen_multimodal
         ):
-            raise ValueError(
+            raise CheckpointError(
                 "conversion supports text-only causal LMs, not seq2seq or multimodal models"
             )
         if (
@@ -1059,7 +1085,7 @@ def load_model(
             )
             and not (qwen_multimodal and "Qwen3_5ForConditionalGeneration" in architectures)
         ):
-            raise ValueError(
+            raise CheckpointError(
                 f"{name} does not declare a text causal LM architecture: {architectures}"
             )
         required_head = {"bosun": "tokens", "pointer": "pointer", "letter_code": "letter_code"}[
@@ -1067,18 +1093,18 @@ def load_model(
         ]
         head_type = kwargs.pop("head_type", required_head)
         if head_type != required_head:
-            raise ValueError(f"strategy={selected!r} requires head_type={required_head!r}")
+            raise ConfigError(f"strategy={selected!r} requires head_type={required_head!r}")
         if selected == "bosun":
             if kwargs.get("decision_tokens", 256) != 256:
-                raise ValueError("strategy='bosun' requires exactly 256 decision tokens")
+                raise ConfigError("strategy='bosun' requires exactly 256 decision tokens")
             quantization = kwargs.get("quantization_config")
             if getattr(quantization, "load_in_4bit", False) or getattr(
                 quantization, "load_in_8bit", False
             ):
-                raise ValueError("Bosun token rows must be added before quantizing the base")
+                raise ConfigError("Bosun token rows must be added before quantizing the base")
         train_backbone = kwargs.pop("train_backbone", selected != "pointer")
         if not isinstance(train_backbone, bool):
-            raise ValueError("train_backbone must be a boolean")
+            raise ConfigError("train_backbone must be a boolean")
         if selected == "letter_code":
             if qwen_multimodal:
                 _requires_transformers("qwen3.5", (5, 17))
@@ -1089,9 +1115,9 @@ def load_model(
                 else "causal",
             )
             if attention_mode != "causal" and getattr(config, "model_type", None) != "qwen3_5":
-                raise ValueError("noncausal letter-code attention needs a Qwen3.5-family backbone")
+                raise ConfigError("noncausal letter-code attention needs a Qwen3.5-family backbone")
             if kwargs.get("decision_tokens", 255) > 255:
-                raise ValueError("letter-code readout supports at most 255 answer codes")
+                raise ConfigError("letter-code readout supports at most 255 answer codes")
             return DecisionModel.from_pretrained(
                 name,
                 head_type="letter_code",
@@ -1121,7 +1147,7 @@ def load_model(
 
             return DecisionModel.from_pretrained(name, **kwargs)
     if local and family is None:
-        raise ValueError(
+        raise CheckpointError(
             f"cannot identify local decision checkpoint at {name!r}; "
             "pass the correct family=... or include the publisher's native config/head"
         )

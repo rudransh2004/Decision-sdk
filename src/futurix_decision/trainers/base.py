@@ -14,6 +14,7 @@ from pathlib import Path
 from huggingface_hub import HfApi
 
 from futurix_decision.datasets import load_decisions
+from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation import evaluate, fit_temperature
 from futurix_decision.models import DecisionModel
 from futurix_decision.rewards import ProperScoringRule
@@ -48,7 +49,7 @@ class DecisionTrainer:
         self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
         self.validation_dataset = validation_dataset
         if validation_max_rows is not None and validation_max_rows < 1:
-            raise ValueError("validation_max_rows must be positive")
+            raise ConfigError("validation_max_rows must be positive")
         self.validation_max_rows = validation_max_rows
         self.validation_metrics: dict[str, dict] = {}
         self.selected_stage: str | None = None
@@ -85,19 +86,19 @@ class DecisionTrainer:
             or len(set(stages)) != len(stages)
             or any(stage not in ("decision_sft", "calibration", "rlcd") for stage in stages)
         ):
-            raise ValueError("stages must be unique entries from decision_sft, calibration, rlcd")
+            raise ConfigError("stages must be unique entries from decision_sft, calibration, rlcd")
         if len(stages) > 1 and isinstance(self.dataset, Iterator):
-            raise ValueError("multi-stage training requires a re-iterable dataset or path")
+            raise ConfigError("multi-stage training requires a re-iterable dataset or path")
         if (
             "calibration" in stages
             and "rlcd" in stages
             and isinstance(self.calibration_dataset, Iterator)
         ):
-            raise ValueError("calibration_dataset must be re-iterable for post-RLCD refitting")
+            raise ConfigError("calibration_dataset must be re-iterable for post-RLCD refitting")
         if len(stages) > 1 and isinstance(self.validation_dataset, Iterator):
-            raise ValueError("validation_dataset must be re-iterable across stages")
+            raise ConfigError("validation_dataset must be re-iterable across stages")
         if "calibration" in stages and self._heldout() is None:
-            raise ValueError(
+            raise ConfigError(
                 "provide a separate calibration_dataset for held-out temperature fitting"
             )
         for stage in stages:
@@ -219,9 +220,9 @@ class DecisionTrainer:
     def select_best(self, *, metric: str = "accuracy") -> str:
         """Choose a saved stage on validation only; never use held-out test rows."""
         if metric not in ("accuracy", "nll"):
-            raise ValueError("selection metric must be accuracy or nll")
+            raise ConfigError("selection metric must be accuracy or nll")
         if not self.validation_metrics or self.checkpoint_dir is None:
-            raise ValueError("selection needs validation metrics and stage checkpoints")
+            raise ConfigError("selection needs validation metrics and stage checkpoints")
         self.selected_stage = max(
             self.validation_metrics,
             key=lambda stage: (
@@ -262,7 +263,7 @@ class DecisionTrainer:
                 and not quantized
             ):
                 if not self.model.base_checkpoint:
-                    raise ValueError("unmerged LoRA needs a recoverable base checkpoint")
+                    raise ConfigError("unmerged LoRA needs a recoverable base checkpoint")
                 self.model.backbone.save_pretrained(output, safe_serialization=safetensors)
                 self.model.tokenizer.save_pretrained(output)
                 self.model._save_decision_metadata(output, adapter_base=self.model.base_checkpoint)

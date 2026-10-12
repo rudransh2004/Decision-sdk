@@ -6,6 +6,7 @@ from unittest.mock import patch
 import httpx
 
 from futurix_decision import DecisionInput, NativeDecisionModel, load_model
+from futurix_decision.errors import BackendError, InvalidOutputError
 from futurix_decision.models.native import _question
 
 CHOICE = DecisionInput(
@@ -75,7 +76,7 @@ class NativeInferenceTests(unittest.TestCase):
                 def predict(self, _state, _questions, values=values):
                     return {"answers": {"decision": {"type": "choice", **values}}}
 
-            with self.subTest(values=values), self.assertRaises(ValueError):
+            with self.subTest(values=values), self.assertRaises(InvalidOutputError):
                 NativeDecisionModel.from_runtime("convaiinnovations/laya", "laya", Agent()).decide(
                     CHOICE
                 )
@@ -106,7 +107,7 @@ class NativeInferenceTests(unittest.TestCase):
         model = load_model("openjev-flash", base_url="http://localhost:3000", client=client)
         self.assertEqual(model.decide(CHOICE).decision, "billing")
         self.assertTrue(model.capabilities.vllm_inference)
-        with self.assertRaisesRegex(ValueError, "does not serve"):
+        with self.assertRaisesRegex(BackendError, "does not serve"):
             load_model("openjev", base_url="http://localhost:3000", client=client)
         with self.assertRaisesRegex(ValueError, "base_url"):
             load_model("openjev")

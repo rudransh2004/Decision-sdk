@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.families import FAMILIES
 
 
@@ -26,9 +27,9 @@ def read_checkpoint_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"invalid checkpoint metadata: {path}") from exc
+        raise CheckpointError(f"invalid checkpoint metadata: {path}") from exc
     if not isinstance(value, dict):
-        raise ValueError(f"checkpoint metadata must be an object: {path}")
+        raise CheckpointError(f"checkpoint metadata must be an object: {path}")
     return value
 
 
@@ -48,7 +49,7 @@ def infer_local_family(directory: Path) -> str | None:
             "lux",
             "liquid-d1",
         }:
-            raise ValueError(f"unknown native family in {manifest}: {family!r}")
+            raise CheckpointError(f"unknown native family in {manifest}: {family!r}")
         return family
     decision_config = directory / "decision_config.json"
     if decision_config.is_file():
@@ -119,7 +120,7 @@ def require_checkpoint_files(
 
     def safe(relative: str) -> None:
         if Path(relative).is_absolute() or ".." in Path(relative).parts:
-            raise ValueError(f"checkpoint file must be inside its directory: {relative!r}")
+            raise CheckpointError(f"checkpoint file must be inside its directory: {relative!r}")
 
     def require(relative: str) -> None:
         safe(relative)
@@ -144,7 +145,7 @@ def require_checkpoint_files(
                         isinstance(filename, str) and filename for filename in files.values()
                     )
                 ):
-                    raise ValueError(f"invalid weight_map in {index}")
+                    raise CheckpointError(f"invalid weight_map in {index}")
                 for filename in sorted(set(files.values())):
                     require(filename)
                 return
@@ -212,7 +213,7 @@ def require_checkpoint_files(
         if (directory / "decision_config.json").is_file():
             metadata = read_checkpoint_json(directory / "decision_config.json")
             if metadata.get("architecture") != "futurix-decision":
-                raise ValueError(f"not a Futurix decision checkpoint: {directory}")
+                raise CheckpointError(f"not a Futurix decision checkpoint: {directory}")
             if metadata.get("head_type", "tokens") != "tokens":
                 require("decision_head.safetensors")
         if (directory / "adapter_config.json").is_file():
@@ -226,14 +227,16 @@ def require_checkpoint_files(
         if (directory / "config.json").is_file():
             config = read_checkpoint_json(directory / "config.json")
             if config.get("decision_format") != "vllm-sr-decision":
-                raise ValueError(f"{directory} is not a vLLM Semantic Router decision release")
+                raise CheckpointError(f"{directory} is not a vLLM Semantic Router decision release")
             version = config.get("format_version")
             if version not in (1, 2):
-                raise ValueError(f"unsupported Decision release format {version!r}: {directory}")
+                raise CheckpointError(
+                    f"unsupported Decision release format {version!r}: {directory}"
+                )
             for field in ("model_config", "manifest") if version == 2 else ("model_config",):
                 filename = config.get(field)
                 if not isinstance(filename, str) or not filename:
-                    raise ValueError(
+                    raise CheckpointError(
                         f"Decision {version} checkpoint is missing {field}: {directory}"
                     )
                 require(filename)
@@ -245,7 +248,7 @@ def require_checkpoint_files(
                 or not isinstance(backbone, dict)
                 or not isinstance(tokenizer, dict)
             ):
-                raise ValueError(
+                raise CheckpointError(
                     f"Decision {version} checkpoint is missing "
                     f"head/backbone/tokenizer metadata: {directory}"
                 )
@@ -259,7 +262,7 @@ def require_checkpoint_files(
             ):
                 filename = section.get(field)
                 if not isinstance(filename, str) or not filename:
-                    raise ValueError(
+                    raise CheckpointError(
                         f"Decision {version} checkpoint is missing {field} metadata: {directory}"
                     )
                 require(filename)
@@ -269,7 +272,7 @@ def require_checkpoint_files(
                 or not filenames
                 or not all(isinstance(filename, str) and filename for filename in filenames)
             ):
-                raise ValueError(
+                raise CheckpointError(
                     f"Decision {version} checkpoint has no backbone shard list: {directory}"
                 )
             for filename in filenames:
@@ -278,10 +281,10 @@ def require_checkpoint_files(
             if index.is_file():
                 mapping = read_checkpoint_json(index).get("weight_map")
                 if not isinstance(mapping, dict) or not mapping:
-                    raise ValueError(f"invalid backbone weight_map in {index}")
+                    raise CheckpointError(f"invalid backbone weight_map in {index}")
                 for filename in set(mapping.values()):
                     if not isinstance(filename, str) or not filename:
-                        raise ValueError(f"invalid backbone shard in {index}")
+                        raise CheckpointError(f"invalid backbone shard in {index}")
                     relative = Path(filename)
                     if relative.parts[:1] != Path(backbone["index"]).parts[:1]:
                         relative = Path(backbone["index"]).parent / relative
@@ -290,7 +293,7 @@ def require_checkpoint_files(
             if isinstance(calibration, dict) and calibration.get("temperature_file"):
                 filename = calibration["temperature_file"]
                 if not isinstance(filename, str):
-                    raise ValueError(f"Decision calibration filename is invalid: {directory}")
+                    raise CheckpointError(f"Decision calibration filename is invalid: {directory}")
                 require(filename)
     elif family == "liquid-d1":
         for filename in (
@@ -309,9 +312,9 @@ def require_checkpoint_files(
             require(filename)
         weights()
     else:
-        raise ValueError(f"unsupported decision-model family: {family}")
+        raise ConfigError(f"unsupported decision-model family: {family}")
     if missing:
-        raise FileNotFoundError(
+        raise CheckpointError(
             f"incomplete {family} checkpoint {source or str(directory)!r}; "
             f"missing: {', '.join(missing)}"
         )

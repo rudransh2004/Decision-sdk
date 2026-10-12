@@ -13,6 +13,7 @@ from collections.abc import Callable
 import torch
 from torch import nn
 
+from futurix_decision.errors import ConfigError
 from futurix_decision.models.letter_code import LetterCodeHead
 
 HeadFactory = Callable[..., nn.Module]
@@ -29,15 +30,15 @@ def register_decision_head(name: str, factory: HeadFactory) -> None:
     from checkpoint metadata.
     """
     if not name or not name.isidentifier() or not callable(factory):
-        raise ValueError("head name must be an identifier and factory must be callable")
+        raise ConfigError("head name must be an identifier and factory must be callable")
     if name in _HEADS:
-        raise ValueError(f"decision head {name!r} is already registered")
+        raise ConfigError(f"decision head {name!r} is already registered")
     _HEADS[name] = factory
 
 
 def build_decision_head(name: str, hidden_size: int, config: dict) -> nn.Module:
     if name not in _HEADS:
-        raise ValueError(
+        raise ConfigError(
             f"unknown decision head {name!r}; register_decision_head before loading this checkpoint"
         )
     head = _HEADS[name](hidden_size=hidden_size, **config)
@@ -53,7 +54,7 @@ class PointerDecisionHead(nn.Module):
         super().__init__()
         width = hidden_size if width is None else width
         if hidden_size < 1 or width < 1:
-            raise ValueError("hidden_size and width must be positive")
+            raise ConfigError("hidden_size and width must be positive")
         self.query = nn.Linear(hidden_size, width, bias=False)
         self.option = nn.Linear(hidden_size, width, bias=False)
         self.null = nn.Linear(hidden_size, 1) if abstain else None

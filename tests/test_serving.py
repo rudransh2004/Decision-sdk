@@ -10,6 +10,7 @@ import unittest
 from types import SimpleNamespace
 
 from futurix_decision.datasets import DecisionInput
+from futurix_decision.errors import InvalidOutputError
 from futurix_decision.inference.schemas import DecisionRequest
 from futurix_decision.vllm.logits_processor import probabilities_from_logprobs
 
@@ -31,7 +32,7 @@ class SchemaTests(unittest.TestCase):
     def test_restricted_logprob_normalization(self):
         result = probabilities_from_logprobs({12: -1.0, 31: -2.0}, [12, 31], temperature=2.0)
         self.assertAlmostEqual(result[0], 1 / (1 + math.exp(-0.5)), places=6)
-        with self.assertRaisesRegex(ValueError, "omitted"):
+        with self.assertRaisesRegex(InvalidOutputError, "omitted"):
             probabilities_from_logprobs({12: -1.0}, [12, 31])
 
 

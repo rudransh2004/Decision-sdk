@@ -7,17 +7,19 @@ from collections.abc import Sequence
 
 import torch
 
+from futurix_decision.errors import ConfigError
+
 
 def decision_token(slot: int) -> str:
     if slot < 0:
-        raise ValueError("slot must be non-negative")
+        raise ConfigError("slot must be non-negative")
     return f"<|decision_{slot:03d}|>"
 
 
 def assign_slots(options: Sequence[str], *, total_slots: int = 256, seed: int = 0) -> list[int]:
     """Map ordered candidates onto distinct, randomly selected decision slots."""
     if not 2 <= len(options) <= total_slots:
-        raise ValueError("number of options must be between 2 and total_slots")
+        raise ConfigError("number of options must be between 2 and total_slots")
     return random.Random(seed).sample(range(total_slots), len(options))
 
 

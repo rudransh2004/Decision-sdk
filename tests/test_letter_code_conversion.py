@@ -23,6 +23,7 @@ from futurix_decision import (
     evaluate,
     load_model,
 )
+from futurix_decision.errors import CheckpointError
 from futurix_decision.models.letter_code import answer_codes
 
 
@@ -421,7 +422,7 @@ class LetterCodeConversionTests(unittest.TestCase):
             )
             config.model_type = "mimo_v2"
             config.architectures = ["MiMoV2ForConditionalGeneration"]
-            with self.assertRaisesRegex(ValueError, "multimodal"):
+            with self.assertRaisesRegex(CheckpointError, "multimodal"):
                 load_model("XiaomiMiMo/MiMo-V2.6-Flash-RL", convert=True, strategy="letter_code")
         with self.assertRaisesRegex(ValueError, "known decision-model family"):
             load_model("perplexity-ai/pplx-decider-v1.1-27b", convert=True, strategy="letter_code")

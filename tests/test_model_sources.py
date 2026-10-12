@@ -11,6 +11,7 @@ from unittest.mock import patch
 from huggingface_hub.errors import EntryNotFoundError
 
 from futurix_decision import DecisionModel, load_model
+from futurix_decision.errors import CheckpointError
 from futurix_decision.models.sources import (
     checkpoint_source,
     infer_local_family,
@@ -90,12 +91,12 @@ class SourceTests(unittest.TestCase):
                 self.assertEqual(loaded.family, "clef")
                 self.assertIsNone(loaded.source_revision)
                 self.assertEqual(loaded.checkpoint, str(root))
-                with self.assertRaisesRegex(ValueError, "belongs to clef"):
+                with self.assertRaisesRegex(CheckpointError, "belongs to clef"):
                     load_model(root, family="pplx-decider", trust_remote_code=True)
                 with self.assertRaisesRegex(ValueError, "trust_remote_code=True"):
                     load_model(root)
             (root / "joint_head.safetensors").unlink()
-            with self.assertRaisesRegex(FileNotFoundError, "joint_head.safetensors"):
+            with self.assertRaisesRegex(CheckpointError, "joint_head.safetensors"):
                 load_model(root, trust_remote_code=True)
 
     def test_hub_clef_downloads_and_checks_missing_head_before_executing_code(self):
@@ -120,7 +121,7 @@ class SourceTests(unittest.TestCase):
                 download.assert_called_once_with("Cloudflare/clef-flash", revision=revision)
                 (root / "joint_head.safetensors").unlink()
                 with self.assertRaisesRegex(
-                    FileNotFoundError,
+                    CheckpointError,
                     r"Cloudflare/clef-flash.*joint_head.safetensors",
                 ):
                     load_model("clef-flash", revision=revision, trust_remote_code=True)
@@ -157,7 +158,7 @@ class SourceTests(unittest.TestCase):
                     }
                 ),
             )
-            with self.assertRaisesRegex(FileNotFoundError, "model-00001-of-00002.safetensors"):
+            with self.assertRaisesRegex(CheckpointError, "model-00001-of-00002.safetensors"):
                 load_model(root, trust_remote_code=True)
             put(
                 root,
@@ -168,7 +169,7 @@ class SourceTests(unittest.TestCase):
                     }
                 ),
             )
-            with self.assertRaisesRegex(ValueError, "inside its directory"):
+            with self.assertRaisesRegex(CheckpointError, "inside its directory"):
                 require_checkpoint_files(root, "pplx-decider")
             (root / "model.safetensors.index.json").unlink()
             put(root, "model.safetensors")
@@ -181,7 +182,7 @@ class SourceTests(unittest.TestCase):
                 ),
             ):
                 with self.assertRaisesRegex(
-                    FileNotFoundError,
+                    CheckpointError,
                     r"perplexity-ai/pplx-decider-v1.1-27b.*readout.safetensors",
                 ):
                     load_model(
@@ -204,7 +205,7 @@ class SourceTests(unittest.TestCase):
             ),
         ):
             with self.assertRaisesRegex(
-                FileNotFoundError,
+                CheckpointError,
                 r"jaredpalmer/kev-9b.*missing: head.pt",
             ):
                 load_model("kev", revision="c" * 40)
@@ -243,7 +244,7 @@ class SourceTests(unittest.TestCase):
             put(root, "adapter/adapter_config.json")
             put(root, "adapter/adapter_model.safetensors")
             put(root, "tokenizer/tokenizer.json")
-            with self.assertRaisesRegex(FileNotFoundError, "decision_embeddings.safetensors"):
+            with self.assertRaisesRegex(CheckpointError, "decision_embeddings.safetensors"):
                 load_model(root)
             put(root, "decision_embeddings.safetensors")
             with patch(
@@ -281,7 +282,7 @@ class SourceTests(unittest.TestCase):
                     put(variant, "model.safetensors")
                     put(variant, "tokenizer.json")
                     if family == "eikos":
-                        with self.assertRaisesRegex(FileNotFoundError, "calib.json"):
+                        with self.assertRaisesRegex(CheckpointError, "calib.json"):
                             load_model(variant)
                         put(variant, "calib.json")
                     marker_value = object()
@@ -302,18 +303,20 @@ class SourceTests(unittest.TestCase):
             tiny_checkpoint().save_pretrained(saved)
             self.assertIsInstance(load_model(saved), DecisionModel)
             (saved / "decision_config.json").unlink()
-            with self.assertRaisesRegex(FileNotFoundError, "decision_config.json"):
+            with self.assertRaisesRegex(CheckpointError, "decision_config.json"):
                 load_model(saved, family="futurix")
 
     def test_local_family_override_and_missing_laya_or_gliner_parts(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             put(root, "model.safetensors")
-            with self.assertRaisesRegex(ValueError, "cannot identify local decision checkpoint"):
+            with self.assertRaisesRegex(
+                CheckpointError, "cannot identify local decision checkpoint"
+            ):
                 load_model(root)
-            with self.assertRaisesRegex(FileNotFoundError, "rl_agent_config.json"):
+            with self.assertRaisesRegex(CheckpointError, "rl_agent_config.json"):
                 load_model(root, family="laya")
-            with self.assertRaisesRegex(FileNotFoundError, "encoder_config/config.json"):
+            with self.assertRaisesRegex(CheckpointError, "encoder_config/config.json"):
                 load_model(root, family="gliner")
 
     def test_semantic_router_local_packages_use_nested_head_and_backbone(self):
@@ -367,12 +370,12 @@ class SourceTests(unittest.TestCase):
                     self.assertEqual(infer_local_family(root), family)
                     require_checkpoint_files(root, family)
                     (root / "decision_head.safetensors").unlink()
-                    with self.assertRaisesRegex(FileNotFoundError, "decision_head.safetensors"):
+                    with self.assertRaisesRegex(CheckpointError, "decision_head.safetensors"):
                         require_checkpoint_files(root, family)
                     put(root, "decision_head.safetensors")
                     (root / "backbone/model-00001-of-00001.safetensors").unlink()
                     with self.assertRaisesRegex(
-                        FileNotFoundError,
+                        CheckpointError,
                         "backbone/model-00001-of-00001.safetensors",
                     ):
                         require_checkpoint_files(root, family)
@@ -387,7 +390,7 @@ class SourceTests(unittest.TestCase):
             )
             put(root, "model.safetensors")
             self.assertEqual(infer_local_family(root), "liquid-d1")
-            with self.assertRaisesRegex(FileNotFoundError, "modeling_d1.py"):
+            with self.assertRaisesRegex(CheckpointError, "modeling_d1.py"):
                 require_checkpoint_files(root, "liquid-d1")
             for filename in (
                 "modeling_d1.py",
@@ -404,7 +407,7 @@ class SourceTests(unittest.TestCase):
                 put(root, filename)
             require_checkpoint_files(root, "liquid-d1")
             (root / "tokenizer.json").unlink()
-            with self.assertRaisesRegex(FileNotFoundError, "tokenizer.json"):
+            with self.assertRaisesRegex(CheckpointError, "tokenizer.json"):
                 require_checkpoint_files(root, "liquid-d1")
 
     def test_new_hub_releases_reject_incomplete_snapshots_before_model_execution(self):
@@ -448,13 +451,13 @@ class SourceTests(unittest.TestCase):
                         ),
                     )
                     with self.assertRaisesRegex(
-                        FileNotFoundError,
+                        CheckpointError,
                         rf"{name}.*decision_head.safetensors",
                     ):
                         load_model(name, revision="a" * 40, trust_remote_code=True)
                     download.assert_called_with(name, revision="a" * 40)
             put(root, "config.json", '{"auto_map":{"AutoModel":"modeling_d1.D1Model"}}')
-            with self.assertRaisesRegex(FileNotFoundError, r"LiquidAI/d1-3B.*modeling_d1.py"):
+            with self.assertRaisesRegex(CheckpointError, r"LiquidAI/d1-3B.*modeling_d1.py"):
                 load_model("liquid-d1", revision="b" * 40, trust_remote_code=True)
 
     def test_supported_remote_letter_release_uses_its_native_importer(self):
@@ -477,7 +480,7 @@ class SourceTests(unittest.TestCase):
             self.assertEqual(load_model("example/typed-decisions"), "loaded")
         loader.assert_called_once_with("example/typed-decisions")
         with patch("futurix_decision.utils.config.load_decision_config", return_value={}):
-            with self.assertRaisesRegex(FileNotFoundError, "decision_config.json"):
+            with self.assertRaisesRegex(CheckpointError, "decision_config.json"):
                 load_model("example/typed-decisions", family="futurix")
 
     def test_generic_hub_conversion_routes_only_guarded_causal_architectures(self):
@@ -524,15 +527,15 @@ class SourceTests(unittest.TestCase):
                 train_backbone=True,
             )
             raw.architectures = ["BertForMaskedLM"]
-            with self.assertRaisesRegex(ValueError, "text causal LM"):
+            with self.assertRaisesRegex(CheckpointError, "text causal LM"):
                 load_model("example/encoder", convert=True)
             raw.architectures = ["LlamaForCausalLM"]
             raw.is_encoder_decoder = True
-            with self.assertRaisesRegex(ValueError, "text-only causal"):
+            with self.assertRaisesRegex(CheckpointError, "text-only causal"):
                 load_model("example/seq2seq", convert=True)
             raw.is_encoder_decoder = False
             raw.vision_config = object()
-            with self.assertRaisesRegex(ValueError, "multimodal"):
+            with self.assertRaisesRegex(CheckpointError, "multimodal"):
                 load_model("example/vision", convert=True)
             with self.assertRaisesRegex(ValueError, "40-character revision"):
                 load_model("example/custom", convert=True, trust_remote_code=True)
