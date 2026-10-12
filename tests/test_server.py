@@ -198,6 +198,33 @@ class MicroBatchingTests(unittest.TestCase):
         self.assertEqual(failed.status_code, 422)
         self.assertIn("max_sequence_length", failed.body)
 
+    def test_a_malformed_result_fails_its_request_and_the_server_keeps_serving(self):
+        from futurix_decision import DecisionResult
+
+        class Partial(Failing):
+            def batch_decide(self, examples, *, confidence_threshold=None):
+                return [
+                    DecisionResult(
+                        kind="choice",
+                        decision="a",
+                        confidence=1.0,
+                        probabilities={"a": 1.0},
+                        abstained=False,
+                        latency_ms=1.0,
+                    )
+                    for _ in examples
+                ]
+
+        app = app_for(Partial(None))
+
+        async def run():
+            async with async_client(app, max_retries=0) as client:
+                with self.assertRaises(InvalidOutputError):
+                    await client.choice(state="s", choices=["a", "b"], confidence_threshold=0.5)
+                return await client.choice(state="s", choices=["a", "b"])
+
+        self.assertEqual(asyncio.run(run()).decision, "a")
+
     def test_systemone_questions_share_one_batch(self):
         from fastapi.testclient import TestClient
 

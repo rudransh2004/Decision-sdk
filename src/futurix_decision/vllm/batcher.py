@@ -127,7 +127,10 @@ class MicroBatcher:
                 await self._run([item])
             return
         for item, result in zip(rows, results, strict=True):
-            item.resolve(result)
+            try:
+                item.resolve(result)
+            except KeyError as error:
+                item.fail(InvalidOutputError(f"backend result is missing option {error}"))
 
     def _batch_decide(self, examples: list[DecisionInput]) -> list[DecisionResult]:
         self.batches += 1
