@@ -1,0 +1,13 @@
+model:
+  name: ./decision-sft
+dataset: SargeDev/jev-distill-corpus-v3
+output: ./decision-calibrated
+training:
+  calibration:
+    enabled: true
+    method: full
+    epochs: 1
+    batch_size: 8
+    learning_rate: 0.00002
+    precision: bf16
+    brier_weight: 0.2

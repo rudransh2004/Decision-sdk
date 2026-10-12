@@ -1,0 +1,48 @@
+model:
+  name: Qwen/Qwen3-1.7B
+  decision_tokens: 256
+  max_sequence_length: 1024
+dataset: SargeDev/jev-distill-corpus-v3
+output: ./Futurix-Decision-1.7B
+training:
+  sft:
+    enabled: true
+    method: lora
+    epochs: 1
+    batch_size: 16
+    gradient_accumulation_steps: 2
+    learning_rate: 0.0001
+    precision: bf16
+    gradient_checkpointing: true
+    lora_rank: 16
+    lora_alpha: 32
+  calibration:
+    enabled: true
+    method: lora
+    epochs: 1
+    batch_size: 16
+    gradient_accumulation_steps: 2
+    learning_rate: 0.00002
+    precision: bf16
+    gradient_checkpointing: true
+    brier_weight: 0.2
+  rlcd:
+    enabled: true
+    method: lora
+    epochs: 1
+    batch_size: 16
+    gradient_accumulation_steps: 2
+    learning_rate: 0.00001
+    precision: bf16
+    gradient_checkpointing: true
+    group_size: 8
+    noise_sigma: 0.25
+    sft_weight: 0.2
+    kl_beta: 0.01
+rewards:
+  log: 1.0
+  spherical: 0.5
+  ranked: 1.0
+inference:
+  temperature_scaling: true
+  abstain_threshold: null

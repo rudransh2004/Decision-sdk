@@ -1,0 +1,56 @@
+model:
+  name: Qwen/Qwen3-1.7B
+  format: standard
+  revision: 70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+  prompt_format: bosun-v3
+  decision_tokens: 256
+  seed: 0
+  max_sequence_length: 8192
+dataset: SargeDev/jev-distill-corpus-v3
+checkpoint_dir: /home/ubuntu/futurix-runs/qwen-base-1.7b/checkpoints
+output: /home/ubuntu/futurix-runs/qwen-base-1.7b/export
+training:
+  sft:
+    enabled: true
+    method: lora
+    epochs: 1
+    batch_size: 16
+    gradient_accumulation_steps: 2
+    learning_rate: 0.0001
+    precision: bf16
+    gradient_checkpointing: true
+    lora_rank: 16
+    lora_alpha: 32
+    log_stdout: true
+    log_jsonl: /home/ubuntu/futurix-runs/qwen-base-1.7b/sft.jsonl
+  calibration:
+    enabled: true
+    method: lora
+    epochs: 1
+    batch_size: 16
+    gradient_accumulation_steps: 2
+    learning_rate: 0.00002
+    precision: bf16
+    gradient_checkpointing: true
+    brier_weight: 0.2
+    log_stdout: true
+    log_jsonl: /home/ubuntu/futurix-runs/qwen-base-1.7b/calibration.jsonl
+  rlcd:
+    enabled: true
+    method: lora
+    epochs: 1
+    batch_size: 16
+    gradient_accumulation_steps: 2
+    learning_rate: 0.00001
+    precision: bf16
+    gradient_checkpointing: true
+    group_size: 8
+    noise_sigma: 0.25
+    sft_weight: 0.2
+    kl_beta: 0.01
+    log_stdout: true
+    log_jsonl: /home/ubuntu/futurix-runs/qwen-base-1.7b/rlcd.jsonl
+rewards:
+  log: 1.0
+  spherical: 0.5
+  ranked: 1.0
