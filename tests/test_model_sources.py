@@ -4,7 +4,6 @@ import json
 import tempfile
 import types
 import unittest
-from importlib.metadata import version
 from pathlib import Path
 from unittest.mock import patch
 
@@ -215,10 +214,6 @@ class SourceTests(unittest.TestCase):
             ):
                 load_model("kev", revision="c" * 40)
 
-    @unittest.skipIf(
-        int(version("transformers").split(".")[0]) >= 5,
-        "tiny Bosun tokenizer fixture uses Transformers 4",
-    )
     def test_bosun_local_copy_preserves_decision_contract(self):
         base = bosun_tiny_model()
         package = types.SimpleNamespace(
@@ -299,10 +294,6 @@ class SourceTests(unittest.TestCase):
                         self.assertIs(load_model(variant), marker_value)
                     loader.assert_called_once_with(str(variant))
 
-    @unittest.skipIf(
-        int(version("transformers").split(".")[0]) >= 5,
-        "tiny Futurix tokenizer fixture uses Transformers 4",
-    )
     def test_local_futurix_export_checks_metadata_and_weights(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
