@@ -190,3 +190,40 @@ class DecisionModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenBudgetTests(unittest.TestCase):
+    def test_batch_decide_keeps_every_forward_within_the_token_budget(self):
+        model = tiny_checkpoint()
+        shapes = []
+        model.backbone.register_forward_hook(
+            lambda module, args, kwargs, output: shapes.append(tuple(kwargs["input_ids"].shape)),
+            with_kwargs=True,
+        )
+        rows = [
+            DecisionInput(
+                state="word " * (1 + i % 7), question="Next?", options=["approve", "reject", "hold"]
+            )
+            for i in range(10_000)
+        ]
+        budget = 2048
+        results = model.batch_decide(rows, max_batch_tokens=budget)
+        self.assertEqual(len(results), len(rows))
+        self.assertEqual(sum(rows for rows, _ in shapes), len(rows))
+        # Peak activation memory scales with the padded [rows, tokens] of one forward.
+        self.assertLessEqual(max(rows * tokens for rows, tokens in shapes), budget)
+        self.assertGreater(len(shapes), 1)
+        # Chunking does not change any row's answer (this backbone pads on the right).
+        sample = list(range(0, len(rows), 997))
+        for index in sample:
+            expected = model.decide(rows[index]).probabilities
+            for option, value in expected.items():
+                self.assertAlmostEqual(results[index].probabilities[option], value, places=5)
+
+    def test_batch_decide_without_a_budget_is_one_forward(self):
+        model = tiny_checkpoint()
+        calls = []
+        model.backbone.register_forward_hook(lambda *args: calls.append(1))
+        row = DecisionInput(state="s", question="q", options=["a", "b"])
+        model.batch_decide([row] * 5)
+        self.assertEqual(len(calls), 1)

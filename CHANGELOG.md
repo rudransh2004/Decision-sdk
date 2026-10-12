@@ -50,6 +50,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `status_code` and `body`), whose subclass is `InvalidOutputError`.
 - `VLLMEngine.prompt_tokens(example)`: the longest prompt an example sends to vLLM, in
   tokens, for every prompt format.
+- `DecisionModel.batch_decide(..., max_batch_tokens=...)` runs the rows in order through
+  chunks whose padded size (longest prompt times rows) stays within the budget, so peak
+  memory stays flat however many rows you pass. Without it, the call is one forward
+  pass as before. `max_batch_tokens` is not part of `DecisionBackend`: an HTTP client or
+  publisher runtime has no tokenizer to budget with. The batching helper,
+  `futurix_decision.models.batching.token_budget_batches`, is shared with `evaluate`.
 - The package ships a `py.typed` marker, so type checkers read its inline annotations.
 - The `dev` extra installs `fastapi`, `httpx`, `ruff`, `mypy`, and `types-PyYAML`.
   The serving tests now run under `pip install -e ".[dev]"` instead of skipping.
@@ -136,6 +142,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `export --revision` applies to every format; `standard` used to ignore it.
   - `serve --device` also moves a custom decision head, and `--device cuda` without
     CUDA raises `ConfigError` for `native` too.
+- `evaluate(..., max_batch_tokens=...)` on a `VLLMEngine` measures each row with
+  `VLLMEngine.prompt_tokens`. Decider, JPT, and Eikos exports used to be measured with
+  the generic Futurix prompt.
 - `evaluate` and `fit_temperature` take any `DecisionBackend`. `max_batch_tokens` in
   `evaluate` needs a `DecisionModel` or `VLLMEngine` (optionally inside `Calibrated`) and
   raises `ConfigError` for other backends.

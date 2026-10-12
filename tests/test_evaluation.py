@@ -60,18 +60,17 @@ class MetricTests(unittest.TestCase):
 class EvaluatorTrainerTests(unittest.TestCase):
     def test_vllm_decision_results_use_identical_metric_and_journal_path(self):
         from futurix_decision.vllm import VLLMEngine
-        from test_sft import example, tiny_model
+        from test_sft import example
 
         rows = [example([1.0, 0.0], "a"), example([0.0, 1.0], "b")]
         calls = []
 
         class FakeEngine(VLLMEngine):
             def __init__(self):
-                self.prompt_format = "futurix"
-                self.temperature = 1.0
-                self.seed = 0
-                self.decision_tokens = 16
-                self.tokenizer = tiny_model().tokenizer
+                pass
+
+            def prompt_tokens(self, example):
+                return 5
 
             def batch_decide(self, batch, *, confidence_threshold=None):
                 calls.append(len(batch))

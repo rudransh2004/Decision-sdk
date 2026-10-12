@@ -20,6 +20,7 @@ from futurix_decision.inference.schemas import (
     choice_input,
 )
 from futurix_decision.inference.system_one import system_one_answers, system_one_inputs
+from futurix_decision.models.batching import token_budget_batches
 from futurix_decision.models.decision_config import LOADABLE, DecisionModelConfig
 from futurix_decision.models.families.futurix import QWEN35
 from futurix_decision.models.protocol import DecisionShortcuts
@@ -287,9 +288,26 @@ class DecisionModel(DecisionShortcuts):
         return self._infer([example], [confidence_threshold])[0]
 
     def batch_decide(
-        self, examples: Sequence[DecisionInput], *, confidence_threshold: float | None = None
+        self,
+        examples: Sequence[DecisionInput],
+        *,
+        confidence_threshold: float | None = None,
+        max_batch_tokens: int | None = None,
     ) -> list[DecisionResult]:
-        return self._infer(examples, [confidence_threshold] * len(examples))
+        """Decide ``examples`` in one forward pass, or in token-budgeted chunks.
+
+        With ``max_batch_tokens``, rows go through the backbone in order, in
+        chunks whose padded size (longest prompt times rows) stays within the
+        budget, so peak memory no longer grows with ``len(examples)``.
+        """
+        if max_batch_tokens is None:
+            return self._infer(examples, [confidence_threshold] * len(examples))
+        results: list[DecisionResult] = []
+        for chunk in token_budget_batches(
+            examples, self.readout.prompt_tokens, max_batch_tokens=max_batch_tokens
+        ):
+            results.extend(self._infer(chunk, [confidence_threshold] * len(chunk)))
+        return results
 
     def system_one(
         self, state: State, questions: Mapping[str, Mapping[str, Any]]

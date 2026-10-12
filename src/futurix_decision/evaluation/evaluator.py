@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import nullcontext
 from itertools import islice
 from pathlib import Path
@@ -18,8 +18,7 @@ from futurix_decision.datasets.systemone import expand_systemone_row
 from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.metrics import DEFAULT_THRESHOLDS, compute_metrics
 from futurix_decision.models import Calibrated, DecisionBackend, DecisionBatch, DecisionModel
-from futurix_decision.models.bosun import format_bosun_prompt
-from futurix_decision.models.tokenizer import format_decision_prompt
+from futurix_decision.models.batching import token_budget_batches
 
 EvaluationSource = str | Path | Mapping[str, Any] | Iterable[DecisionExample | Mapping[str, Any]]
 
@@ -46,52 +45,20 @@ def example_batches(dataset: EvaluationSource, batch_size: int) -> Iterator[list
         yield batch
 
 
-def token_budget_batches(
-    model: DecisionBackend, dataset: EvaluationSource, batch_size: int, max_batch_tokens: int
-) -> Iterator[list[DecisionExample]]:
-    """Keep input order while avoiding padding seven short rows to one long row.
+def _prompt_length(model: DecisionBackend) -> Callable[[DecisionExample], int]:
+    """How many tokens a row's longest prompt takes on ``model``, for token-budget batching.
 
     Needs a tokenizer, so ``model`` must be a ``DecisionModel`` or ``VLLMEngine``,
     optionally wrapped in ``Calibrated``.
     """
     from futurix_decision.vllm.engine import VLLMEngine
 
-    if batch_size < 1 or max_batch_tokens < 1:
-        raise ConfigError("batch_size and max_batch_tokens must be positive")
     local = model.backend if isinstance(model, Calibrated) else model
-    if not isinstance(local, (DecisionModel, VLLMEngine)):
-        raise ConfigError("max_batch_tokens needs a local DecisionModel or VLLMEngine")
-    pending: list[DecisionExample] = []
-    longest = 0
-    for row in iter_examples(dataset):
-        if isinstance(local, DecisionModel):
-            length = local.readout.prompt_tokens(row)
-        else:
-            if local.prompt_format == "bosun-v3":
-                prompt, _ = format_bosun_prompt(
-                    row,
-                    local.tokenizer,
-                    decision_tokens=local.decision_tokens,
-                    seed=local.seed,
-                    prompt_schema=local.prompt_schema,
-                )
-            else:
-                prompt, _ = format_decision_prompt(
-                    row,
-                    decision_tokens=local.decision_tokens,
-                    seed=local.seed,
-                )
-            length = len(local.tokenizer.encode(prompt, add_special_tokens=True))
-        if pending and (
-            len(pending) >= batch_size
-            or max(longest, length) * (len(pending) + 1) > max_batch_tokens
-        ):
-            yield pending
-            pending, longest = [], 0
-        pending.append(row)
-        longest = max(longest, length)
-    if pending:
-        yield pending
+    if isinstance(local, DecisionModel):
+        return local.readout.prompt_tokens
+    if isinstance(local, VLLMEngine):
+        return local.prompt_tokens
+    raise ConfigError("max_batch_tokens needs a local DecisionModel or VLLMEngine")
 
 
 def _inference_batches(
@@ -219,7 +186,12 @@ def evaluate(
             model.decision_head.eval()
     journal = output.open("a", encoding="utf-8") if output is not None else nullcontext(None)
     batches = (
-        token_budget_batches(model, rows, batch_size, max_batch_tokens)
+        token_budget_batches(
+            rows,
+            _prompt_length(model),
+            max_batch_tokens=max_batch_tokens,
+            batch_size=batch_size,
+        )
         if max_batch_tokens is not None
         else example_batches(rows, batch_size)
     )
