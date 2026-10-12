@@ -118,7 +118,8 @@ def evaluate(
         raise ValueError("resuming evaluation requires predictions_output")
     if max_batch_tokens is not None and max_batch_tokens < 1:
         raise ValueError("max_batch_tokens must be positive")
-    predicted, targets = [], []
+    predicted: list[list[float]] = []
+    targets: list[list[float]] = []
     next_progress = progress_every
     groups: dict[str, dict[str, list[int]]] = {
         "by_kind": defaultdict(list),
@@ -128,8 +129,8 @@ def evaluate(
 
     def record(row: DecisionExample, p: torch.Tensor, y: torch.Tensor) -> None:
         index = len(predicted)
-        predicted.append(p)
-        targets.append(y)
+        predicted.append(p.tolist())
+        targets.append(y.tolist())
         groups["by_kind"][row.kind].append(index)
         if row.family:
             groups["by_family"][row.family].append(index)

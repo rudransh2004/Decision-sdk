@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
-
-import torch
 
 DEFAULT_THRESHOLDS = (0.50, 0.60, 0.70, 0.80, 0.90, 0.95, 0.99)
 
 
+def _mean(values: Sequence[float]) -> float:
+    return sum(values) / len(values)
+
+
 def compute_metrics(
-    probabilities: Sequence[torch.Tensor],
-    targets: Sequence[torch.Tensor],
+    probabilities: Sequence[Sequence[float]],
+    targets: Sequence[Sequence[float]],
     *,
     bins: int = 15,
     thresholds: Sequence[float] = DEFAULT_THRESHOLDS,
@@ -19,53 +22,57 @@ def compute_metrics(
     """Accuracy means expected correctness under soft targets (hard: 0/1)."""
     if not probabilities or len(probabilities) != len(targets) or bins < 1:
         raise ValueError("provide equally many nonempty probabilities and targets")
-    confidences, correctness, nll, brier = [], [], [], []
-    for p, y in zip(probabilities, targets):
-        p, y = p.float().flatten(), y.float().flatten()
-        if p.numel() != y.numel() or p.numel() < 2:
+    confidence, correct, nll, brier = [], [], [], []
+    for raw_p, raw_y in zip(probabilities, targets):
+        p, y = [float(v) for v in raw_p], [float(v) for v in raw_y]
+        if len(p) != len(y) or len(p) < 2:
             raise ValueError("probabilities and target dimensions must match")
-        if not torch.isfinite(p).all() or not torch.isfinite(y).all():
+        if not all(map(math.isfinite, p + y)):
             raise ValueError("distributions must be finite")
-        if (p < 0).any() or (y < 0).any():
+        if min(p) < 0 or min(y) < 0:
             raise ValueError("distributions must be non-negative")
-        if not torch.isclose(p.sum(), p.new_tensor(1.0), atol=1e-5) or not torch.isclose(
-            y.sum(), y.new_tensor(1.0), atol=1e-5
+        if not math.isclose(sum(p), 1.0, rel_tol=0, abs_tol=1e-5) or not math.isclose(
+            sum(y), 1.0, rel_tol=0, abs_tol=1e-5
         ):
             raise ValueError("distributions must sum to 1")
-        winner = int(p.argmax())
-        confidences.append(float(p[winner]))
-        correctness.append(float(y[winner]))
+        winner = max(range(len(p)), key=p.__getitem__)
+        confidence.append(p[winner])
+        correct.append(y[winner])
         # Match the stabilized log-score reward for underflowed probabilities.
-        nll.append(float(-(y[y > 0] * p[y > 0].clamp_min(1e-12).log()).sum()))
-        brier.append(float((p - y).square().sum()))
-    confidence = torch.tensor(confidences)
-    correct = torch.tensor(correctness)
+        nll.append(-sum(t * math.log(max(q, 1e-12)) for q, t in zip(p, y) if t > 0))
+        brier.append(sum((q - t) ** 2 for q, t in zip(p, y)))
+    count = len(confidence)
     gaps = []
     ece = 0.0
     for i in range(bins):
         left, right = i / bins, (i + 1) / bins
-        occupied = (confidence >= left) & (
-            confidence <= right if i == bins - 1 else confidence < right
-        )
-        if occupied.any():
-            gap = abs(float(confidence[occupied].mean() - correct[occupied].mean()))
+        occupied = [
+            j
+            for j, c in enumerate(confidence)
+            if c >= left and (c <= right if i == bins - 1 else c < right)
+        ]
+        if occupied:
+            gap = abs(
+                _mean([confidence[j] for j in occupied]) - _mean([correct[j] for j in occupied])
+            )
             gaps.append(gap)
-            ece += float(occupied.float().mean()) * gap
-    selective_accuracy, coverage = {}, {}
+            ece += len(occupied) / count * gap
+    selective_accuracy: dict[float, float | None] = {}
+    coverage: dict[float, float] = {}
     for threshold in thresholds:
         if not 0 <= threshold <= 1:
             raise ValueError("thresholds must be in [0, 1]")
-        kept = confidence >= threshold
-        coverage[float(threshold)] = float(kept.float().mean())
-        selective_accuracy[float(threshold)] = float(correct[kept].mean()) if kept.any() else None
+        kept = [y for c, y in zip(confidence, correct) if c >= threshold]
+        coverage[float(threshold)] = len(kept) / count
+        selective_accuracy[float(threshold)] = _mean(kept) if kept else None
     return {
-        "accuracy": float(correct.mean()),
-        "nll": sum(nll) / len(nll),
-        "brier": sum(brier) / len(brier),
+        "accuracy": _mean(correct),
+        "nll": _mean(nll),
+        "brier": _mean(brier),
         "ece": ece,
         "mce": max(gaps),
-        "mean_confidence": float(confidence.mean()),
+        "mean_confidence": _mean(confidence),
         "selective_accuracy": selective_accuracy,
         "coverage": coverage,
-        "count": len(nll),
+        "count": count,
     }

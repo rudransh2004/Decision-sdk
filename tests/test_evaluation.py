@@ -15,8 +15,8 @@ from futurix_decision.models import DecisionBatch
 
 class MetricTests(unittest.TestCase):
     def test_hard_and_soft_metrics_and_selective_accuracy(self):
-        p = [torch.tensor([0.8, 0.2]), torch.tensor([0.6, 0.4])]
-        y = [torch.tensor([1.0, 0.0]), torch.tensor([0.3, 0.7])]
+        p = [[0.8, 0.2], [0.6, 0.4]]
+        y = [[1.0, 0.0], [0.3, 0.7]]
         result = compute_metrics(p, y, bins=5)
         self.assertAlmostEqual(result["accuracy"], 0.65)
         expected_nll = (-math.log(0.8) - 0.3 * math.log(0.6) - 0.7 * math.log(0.4)) / 2

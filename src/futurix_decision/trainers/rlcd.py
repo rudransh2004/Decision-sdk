@@ -221,8 +221,8 @@ class RLCDTrainer(SFTTrainer):
         with torch.no_grad():
             p = torch.softmax(means.detach().masked_fill(~available, -1e9), dim=-1)
             metrics = compute_metrics(
-                [p[i, :length].cpu() for i, length in enumerate(lengths)],
-                [targets[i, :length].cpu() for i, length in enumerate(lengths)],
+                [p[i, :length].tolist() for i, length in enumerate(lengths)],
+                [targets[i, :length].tolist() for i, length in enumerate(lengths)],
             )
             self._step_metrics = {
                 "total_loss": float(loss.detach()),
