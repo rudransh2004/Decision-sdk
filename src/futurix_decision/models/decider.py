@@ -9,44 +9,41 @@ from __future__ import annotations
 
 import json
 import math
-import random
 import re
 import string
-import weakref
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
 from huggingface_hub import hf_hub_download
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import CheckpointError, ConfigError
-from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
-from futurix_decision.models.tokenizer import row_seed
+from futurix_decision.models.label_readout import (
+    LabelReadoutModel,
+    LabelRow,
+    cached_label_table,
+    hub_kwargs,
+    noul_description,
+    presented_order,
+    score_description,
+)
 
 FORMAT = "decider-v2.1"
 MAX_OPTIONS = 255
 MAX_SCORE_LEVELS = 10
 DEFAULT_TEMPERATURES = {"choice": 1.110, "noul": 1.560, "score": 1.287}
-_LABEL_CACHE: weakref.WeakKeyDictionary[Any, tuple[list[str], list[int]]] = (
-    weakref.WeakKeyDictionary()
-)
-
-
-@dataclass(frozen=True)
-class DeciderRow:
-    input_ids: list[int]
-    letter_ids: list[int]
+# The released prompt lists "no" before "yes", as the checkpoint was trained.
+NOUL_ORDER = ("false", "true")
 
 
 def letter_table(tokenizer: Any, width: int = MAX_OPTIONS) -> tuple[list[str], list[int]]:
     """Map labels to *existing* single-token vocabulary rows; never add tokens."""
-    cached = _LABEL_CACHE.get(tokenizer)
-    if cached is not None and len(cached[1]) >= width:
-        return cached[0][:width], cached[1][:width]
+    return cached_label_table(tokenizer, FORMAT, width, _build_letter_table)
+
+
+def _build_letter_table(tokenizer: Any, width: int) -> tuple[list[str], list[int]]:
     names: list[str] = []
     ids: list[int] = []
     candidates = list(string.ascii_uppercase) + [
@@ -66,7 +63,6 @@ def letter_table(tokenizer: Any, width: int = MAX_OPTIONS) -> tuple[list[str], l
         )
     if names[: min(width, 10)] != list("ABCDEFGHIJ")[: min(width, 10)]:
         raise CheckpointError("decider-v2.1's trained A-J option labels are unavailable")
-    _LABEL_CACHE[tokenizer] = names, ids
     return names, ids
 
 
@@ -96,18 +92,16 @@ def _option_text(example: DecisionInput, position: int) -> str:
         if example.options[position] not in ("true", "false"):
             raise ConfigError("decider-v2.1 noul requires literal true/false options")
         name = "yes" if example.options[position] == "true" else "no"
+        description = noul_description(example, position, None)
+    else:
+        name = (
+            example.candidate_labels[position]
+            if example.candidate_labels
+            else example.options[position]
+        )
         description = (
             example.candidate_descriptions[position] if example.candidate_descriptions else None
-        ) or (example.candidate_labels[position] if example.candidate_labels else None)
-        return f"{name}: {description}" if description else name
-    name = (
-        example.candidate_labels[position]
-        if example.candidate_labels
-        else example.options[position]
-    )
-    description = (
-        example.candidate_descriptions[position] if example.candidate_descriptions else None
-    )
+        )
     return f"{name}: {description}" if description else name
 
 
@@ -118,7 +112,7 @@ def prepare_decider_rows(
     decision_tokens: int = MAX_OPTIONS,
     max_state_tokens: int = 32768,
     option_order: Sequence[int] | None = None,
-) -> list[DeciderRow]:
+) -> list[LabelRow]:
     """Tokenize parts independently as the released decider.prompt.build does."""
     if len(example.options) > decision_tokens:
         raise ConfigError(f"decider-v2.1 supports at most {decision_tokens} choices")
@@ -131,24 +125,13 @@ def prepare_decider_rows(
     if example.kind == "score" and len(example.options) > MAX_SCORE_LEVELS:
         raise ConfigError("decider-v2.1 isolated score supports at most 10 levels")
     if option_order is None:
-        option_order = (
-            [example.options.index("false"), example.options.index("true")]
-            if example.kind == "noul" and set(example.options) == {"false", "true"}
-            else list(range(len(example.options)))
-        )
+        option_order = presented_order(example, NOUL_ORDER, FORMAT)
     if sorted(option_order) != list(range(len(example.options))):
         raise ConfigError("option_order must be a permutation of the original options")
     specs: list[tuple[str, list[str]]] = []
     if example.kind == "score":
-        for index, level in enumerate(example.options):
-            text = (
-                example.candidate_descriptions[index]
-                if example.candidate_descriptions and example.candidate_descriptions[index]
-                else example.candidate_labels[index]
-                if example.candidate_labels
-                else level
-            )
-            text = re.sub(r"^\s*-?\d+\s*:\s*", "", text)
+        for index in range(len(example.options)):
+            text = re.sub(r"^\s*-?\d+\s*:\s*", "", score_description(example, index))
             specs.append(
                 (
                     f"{example.question}\nProposed answer: {text}\nDoes the proposed answer fit?",
@@ -179,11 +162,11 @@ def prepare_decider_rows(
                 ids.append(token_ids[i])
                 ids += tokenizer.encode(f") {option}", add_special_tokens=False)
         ids += tokenizer.encode("\nAnswer: (", add_special_tokens=False)
-        rows.append(DeciderRow(ids, token_ids[: len(options)]))
+        rows.append(LabelRow(ids, token_ids[: len(options)]))
     return rows
 
 
-def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> dict[str, Any]:
+def _native_config(checkpoint: str | Path, **hf_kwargs: Any) -> dict[str, Any]:
     path = Path(checkpoint)
     filename = (
         path / "decider_config.json"
@@ -192,11 +175,7 @@ def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> dict[str, Any]:
             hf_hub_download(
                 repo_id=str(checkpoint),
                 filename="decider_config.json",
-                **{
-                    key: hub_kwargs[key]
-                    for key in ("revision", "token", "cache_dir", "local_files_only")
-                    if key in hub_kwargs
-                },
+                **hub_kwargs(hf_kwargs),
             )
         )
     )
@@ -214,8 +193,15 @@ def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> dict[str, Any]:
     return config
 
 
-class DeciderDecisionModel(DecisionModel):
+class DeciderDecisionModel(LabelReadoutModel):
     """Trainable SDK wrapper over Mapika's original letter head and prompt."""
+
+    release_format = FORMAT
+    family = FORMAT
+    # False first: the v2.1 checkpoint was trained on "(A) no / (B) yes".
+    noul_order = NOUL_ORDER
+    # Score levels are isolated yes/no rows, so only choice and noul are permuted.
+    seeded_kinds = frozenset({"choice", "noul"})
 
     def __init__(
         self,
@@ -225,12 +211,6 @@ class DeciderDecisionModel(DecisionModel):
         type_temperatures: Mapping[str, float] | None = None,
         **kwargs: Any,
     ) -> None:
-        if kwargs.get("prompt_format", FORMAT) != FORMAT:
-            raise ConfigError("decider-v2.1 wrapper requires its native prompt format")
-        if kwargs.get("head_type", "tokens") != "tokens":
-            raise ConfigError("decider-v2.1 uses its trained LM letter readout, not a new head")
-        kwargs["prompt_format"] = FORMAT
-        kwargs.setdefault("decision_tokens", MAX_OPTIONS)
         self.type_temperatures = dict(type_temperatures or DEFAULT_TEMPERATURES)
         if set(self.type_temperatures) != {"choice", "noul", "score"} or any(
             not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0
@@ -241,18 +221,22 @@ class DeciderDecisionModel(DecisionModel):
             )
         super().__init__(backbone, tokenizer, **kwargs)
 
-    def _register_decision_tokens(self) -> list[int]:
-        if self.tokenizer.pad_token is None:
-            if self.tokenizer.eos_token is None:
-                raise CheckpointError("decider-v2.1 tokenizer requires EOS or pad token")
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.padding_side = "left"
-        _, ids = letter_table(self.tokenizer, self.decision_tokens)
-        if max(ids) >= self.backbone.get_input_embeddings().num_embeddings:
-            raise CheckpointError(
-                "decider tokenizer has letter tokens outside the backbone vocabulary"
-            )
-        return ids
+    def _label_token_ids(self) -> list[int]:
+        return letter_table(self.tokenizer, self.decision_tokens)[1]
+
+    def _rows(self, example: DecisionInput, order: list[int]) -> list[LabelRow]:
+        return prepare_decider_rows(
+            example, self.tokenizer, decision_tokens=self.decision_tokens, option_order=order
+        )
+
+    def _presented_logits(
+        self, example: DecisionInput, selected: list[torch.Tensor]
+    ) -> torch.Tensor:
+        temperature = self.type_temperatures[example.kind]
+        if example.kind == "score":
+            # Each level's row reads (A) no / (B) yes; the level's logit is log P(yes).
+            return torch.stack([torch.log_softmax(row / temperature, dim=0)[1] for row in selected])
+        return selected[0] / temperature
 
     @classmethod
     def from_native(
@@ -271,97 +255,14 @@ class DeciderDecisionModel(DecisionModel):
             raise CheckpointError(
                 "only Mapika/decider-4b or a local copy of its v2.1 release is supported"
             )
-        tok_kwargs = {
-            key: hf_kwargs[key]
-            for key in ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
-            if key in hf_kwargs
-        }
-        tokenizer = AutoTokenizer.from_pretrained(str(checkpoint), **tok_kwargs)
-        backbone = AutoModelForCausalLM.from_pretrained(str(checkpoint), **hf_kwargs)
-        return cls(
-            backbone,
-            tokenizer,
+        return cls._load_release(
+            checkpoint,
+            hf_kwargs,
             decision_tokens=MAX_OPTIONS,
             max_sequence_length=max_sequence_length,
             seed=seed,
-            base_checkpoint=str(checkpoint),
-            base_model_revision=hf_kwargs.get("revision"),
-            source_checkpoint=str(checkpoint),
-            source_revision=hf_kwargs.get("revision"),
             type_temperatures=config["temperature_by_type"],
         )
-
-    def forward_decisions(
-        self, examples: Sequence[DecisionInput], *, assignment_seed: int | None = None
-    ) -> DecisionBatch:
-        if not examples:
-            raise ConfigError("examples must not be empty")
-        orders = []
-        groups = []
-        for example in examples:
-            order = (
-                [example.options.index("false"), example.options.index("true")]
-                if example.kind == "noul" and set(example.options) == {"false", "true"}
-                else list(range(len(example.options)))
-            )
-            if assignment_seed is not None and example.kind != "score":
-                seed = row_seed(
-                    self.seed,
-                    assignment_seed,
-                    example.kind,
-                    example.state,
-                    example.question,
-                    example.options,
-                )
-                random.Random(seed).shuffle(order)
-            orders.append(order)
-            groups.append(
-                prepare_decider_rows(
-                    example,
-                    self.tokenizer,
-                    decision_tokens=self.decision_tokens,
-                    option_order=order,
-                )
-            )
-        flat = [row for group in groups for row in group]
-        longest = max(len(row.input_ids) for row in flat)
-        if longest > self.max_sequence_length:
-            raise ConfigError(
-                f"prompt exceeds max_sequence_length={self.max_sequence_length}; "
-                "increase the limit instead of silently truncating candidates"
-            )
-        device = next(self.backbone.parameters()).device
-        pad_id = self.tokenizer.pad_token_id
-        ids = torch.full((len(flat), longest), pad_id, dtype=torch.long, device=device)
-        mask = torch.zeros_like(ids)
-        for index, row in enumerate(flat):
-            length = len(row.input_ids)
-            ids[index, -length:] = torch.tensor(row.input_ids, device=device)
-            mask[index, -length:] = 1
-        output = self.backbone(input_ids=ids, attention_mask=mask, logits_to_keep=1)
-        logits = output.logits[:, -1, :]
-        width = max(len(example.options) for example in examples)
-        results = logits.new_full((len(examples), width), float("-inf"))
-        cursor = 0
-        for index, (example, group) in enumerate(zip(examples, groups)):
-            temperature = self.type_temperatures[example.kind]
-            if example.kind == "score":
-                fits = []
-                for row in group:
-                    selected = logits[cursor].index_select(
-                        0, torch.tensor(row.letter_ids, device=device)
-                    )
-                    fits.append(torch.log_softmax(selected.float() / temperature, dim=0)[1])
-                    cursor += 1
-                results[index, : len(group)] = torch.stack(fits)
-            else:
-                row = group[0]
-                selected = logits[cursor].index_select(
-                    0, torch.tensor(row.letter_ids, device=device)
-                )
-                results[index, orders[index]] = selected.float() / temperature
-                cursor += 1
-        return DecisionBatch(results, [list(range(len(example.options))) for example in examples])
 
     def _save_decision_metadata(self, path: str | Path, *, adapter_base: str | None = None) -> None:
         super()._save_decision_metadata(path, adapter_base=adapter_base)

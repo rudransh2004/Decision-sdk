@@ -9,18 +9,24 @@ from __future__ import annotations
 
 import json
 import string
-import weakref
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import torch
 from huggingface_hub import hf_hub_download
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import CheckpointError, ConfigError
-from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
+from futurix_decision.models.label_readout import (
+    LabelReadoutModel,
+    LabelRow,
+    cached_label_table,
+    choice_description,
+    hub_kwargs,
+    noul_description,
+    presented_order,
+    score_description,
+)
 
 FORMAT = "eikos-letter-v1-semif"
 SOURCES = {"caiovicentino1/Eikos-4B": 100, "caiovicentino1/Eikos-27B": 160}
@@ -28,6 +34,8 @@ SYSTEM = (
     "Apply the supplied criterion to the supplied evidence. Choose exactly one listed option. "
     "Respond with only its uppercase letter, with no explanation or reasoning."
 )
+# The released prompt lists "true" before "false", as the checkpoint was trained.
+NOUL_ORDER = ("true", "false")
 _SPLIT = frozenset(
     (
         "BQ BZ CJ CQ CZ DQ DZ EJ EY FJ FQ FV FZ GJ GK GQ GZ HJ IY JF JG JH JL JN JQ JW JX JY JZ "
@@ -37,15 +45,13 @@ _SPLIT = frozenset(
         "ZB ZC ZD ZG ZJ ZK ZL ZM ZP ZQ ZS ZT ZU ZV"
     ).split()
 )
-_LABEL_CACHE: weakref.WeakKeyDictionary[Any, tuple[list[str], list[int]]] = (
-    weakref.WeakKeyDictionary()
-)
 
 
 def eikos_label_table(tokenizer: Any, width: int) -> tuple[list[str], list[int]]:
-    cached = _LABEL_CACHE.get(tokenizer)
-    if cached is not None and len(cached[1]) >= width:
-        return cached[0][:width], cached[1][:width]
+    return cached_label_table(tokenizer, FORMAT, width, _build_label_table)
+
+
+def _build_label_table(tokenizer: Any, width: int) -> tuple[list[str], list[int]]:
     labels = list(string.ascii_uppercase) + [
         a + b for a in string.ascii_uppercase for b in string.ascii_uppercase if a + b not in _SPLIT
     ]
@@ -56,7 +62,6 @@ def eikos_label_table(tokenizer: Any, width: int) -> tuple[list[str], list[int]]
     singles = [row[0] for row in ids]
     if len(set(singles)) != width:
         raise CheckpointError("Eikos tokenizer aliases distinct published option labels")
-    _LABEL_CACHE[tokenizer] = selected, singles
     return selected, singles
 
 
@@ -65,46 +70,26 @@ def prepare_eikos_row(
     tokenizer: Any,
     *,
     max_options: int,
+    order: Sequence[int] | None = None,
 ) -> tuple[list[int], list[int], list[int]]:
     if len(example.options) > max_options:
         raise ConfigError(f"Eikos one-pass readout supports at most {max_options} options")
-    order = (
-        [example.options.index("true"), example.options.index("false")]
-        if example.kind == "noul" and set(example.options) == {"false", "true"}
-        else list(range(len(example.options)))
-    )
-    if example.kind == "noul" and set(example.options) != {"false", "true"}:
-        raise ConfigError("Eikos noul requires literal true/false options")
+    if order is None:
+        order = presented_order(example, NOUL_ORDER, "Eikos")
+    if sorted(order) != list(range(len(example.options))):
+        raise ConfigError("Eikos option order must be a permutation")
     labels, ids = eikos_label_table(tokenizer, max_options)
     options = []
     for position, original in enumerate(order):
         name = example.options[original]
         if example.kind == "noul":
-            description = (
-                example.candidate_descriptions[original] if example.candidate_descriptions else None
-            ) or (
-                example.candidate_labels[original]
-                if example.candidate_labels
-                else "yes"
-                if name == "true"
-                else "no"
-            )
+            description = noul_description(example, original, "yes" if name == "true" else "no")
         elif example.kind == "score":
-            description = (
-                example.candidate_descriptions[original]
-                if example.candidate_descriptions and example.candidate_descriptions[original]
-                else example.candidate_labels[original]
-                if example.candidate_labels
-                else name
-            )
+            description = score_description(example, original)
             name = str(position)
         else:
-            parts = []
-            if example.candidate_labels:
-                parts.append(example.candidate_labels[original])
-            if example.candidate_descriptions and example.candidate_descriptions[original]:
-                parts.append(example.candidate_descriptions[original])
-            description = " — ".join(parts) if parts else name
+            joined = choice_description(example, original)
+            description = name if joined is None else joined
         options.append(
             {
                 "letter": labels[position],
@@ -125,16 +110,12 @@ def prepare_eikos_row(
         add_generation_prompt=True,
         enable_thinking=False,
     )
-    return tokenizer.encode(prompt, add_special_tokens=False), ids[: len(order)], order
+    return tokenizer.encode(prompt, add_special_tokens=False), ids[: len(order)], list(order)
 
 
-def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> int:
+def _native_config(checkpoint: str | Path, **hf_kwargs: Any) -> int:
     path = Path(checkpoint)
-    downloader = {
-        key: hub_kwargs[key]
-        for key in ("revision", "token", "cache_dir", "local_files_only")
-        if key in hub_kwargs
-    }
+    downloader = hub_kwargs(hf_kwargs)
     config_path = (
         path / "decision_config.json"
         if path.is_dir()
@@ -169,26 +150,23 @@ def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> int:
     return int(config["max_one_pass"])
 
 
-class EikosDecisionModel(DecisionModel):
-    def __init__(self, backbone: torch.nn.Module, tokenizer: Any, **kwargs: Any) -> None:
-        if (
-            kwargs.get("prompt_format", FORMAT) != FORMAT
-            or kwargs.get("head_type", "tokens") != "tokens"
-        ):
-            raise ConfigError("Eikos requires its SemIf prompt and existing letter readout")
-        kwargs["prompt_format"] = FORMAT
-        super().__init__(backbone, tokenizer, **kwargs)
+class EikosDecisionModel(LabelReadoutModel):
+    release_format = FORMAT
+    family = "Eikos"
+    # True first: the SemIf checkpoint was trained with "true" as option A.
+    noul_order = NOUL_ORDER
+    # The one-pass width comes from the release's decision_config.json.
+    default_width = None
+    seeded_kinds = frozenset()
 
-    def _register_decision_tokens(self) -> list[int]:
-        if self.tokenizer.pad_token is None:
-            if self.tokenizer.eos_token is None:
-                raise CheckpointError("Eikos tokenizer needs a pad or EOS token")
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.padding_side = "left"
-        _, ids = eikos_label_table(self.tokenizer, self.decision_tokens)
-        if max(ids) >= self.backbone.get_input_embeddings().num_embeddings:
-            raise CheckpointError("Eikos tokenizer label ID is outside the backbone vocabulary")
-        return ids
+    def _label_token_ids(self) -> list[int]:
+        return eikos_label_table(self.tokenizer, self.decision_tokens)[1]
+
+    def _rows(self, example: DecisionInput, order: list[int]) -> list[LabelRow]:
+        tokens, labels, _ = prepare_eikos_row(
+            example, self.tokenizer, max_options=self.decision_tokens, order=order
+        )
+        return [LabelRow(tokens, labels)]
 
     @classmethod
     def from_native(
@@ -203,54 +181,10 @@ class EikosDecisionModel(DecisionModel):
             raise CheckpointError(
                 "supported Eikos releases are caiovicentino1/Eikos-4B and Eikos-27B"
             )
-        width = _native_config(checkpoint, **hf_kwargs)
-        tokenizer_kwargs = {
-            key: hf_kwargs[key]
-            for key in ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
-            if key in hf_kwargs
-        }
-        tokenizer = AutoTokenizer.from_pretrained(str(checkpoint), **tokenizer_kwargs)
-        backbone = AutoModelForCausalLM.from_pretrained(str(checkpoint), **hf_kwargs)
-        return cls(
-            backbone,
-            tokenizer,
-            decision_tokens=width,
+        return cls._load_release(
+            checkpoint,
+            hf_kwargs,
+            decision_tokens=_native_config(checkpoint, **hf_kwargs),
             max_sequence_length=max_sequence_length,
             seed=seed,
-            base_checkpoint=str(checkpoint),
-            base_model_revision=hf_kwargs.get("revision"),
-            source_checkpoint=str(checkpoint),
-            source_revision=hf_kwargs.get("revision"),
         )
-
-    def forward_decisions(
-        self, examples: Sequence[DecisionInput], *, assignment_seed: int | None = None
-    ) -> DecisionBatch:
-        if not examples:
-            raise ConfigError("examples must not be empty")
-        prepared = [
-            prepare_eikos_row(e, self.tokenizer, max_options=self.decision_tokens) for e in examples
-        ]
-        longest = max(len(ids) for ids, _, _ in prepared)
-        if longest > self.max_sequence_length:
-            raise ConfigError("prompt exceeds max_sequence_length; increase the limit")
-        device = next(self.backbone.parameters()).device
-        ids = torch.full(
-            (len(prepared), longest),
-            self.tokenizer.pad_token_id,
-            dtype=torch.long,
-            device=device,
-        )
-        mask = torch.zeros_like(ids)
-        for index, (tokens, _, _) in enumerate(prepared):
-            ids[index, -len(tokens) :] = torch.tensor(tokens, device=device)
-            mask[index, -len(tokens) :] = 1
-        output = self.backbone(input_ids=ids, attention_mask=mask, logits_to_keep=1)
-        logits = output.logits[:, -1, :]
-        results = logits.new_full(
-            (len(examples), max(len(e.options) for e in examples)), float("-inf")
-        )
-        for index, (_, labels, order) in enumerate(prepared):
-            selected = logits[index].index_select(0, torch.tensor(labels, device=device))
-            results[index, order] = selected.float()
-        return DecisionBatch(results, [list(range(len(e.options))) for e in examples])

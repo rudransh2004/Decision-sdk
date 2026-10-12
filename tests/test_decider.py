@@ -173,7 +173,7 @@ class DeciderIntegrationTests(unittest.TestCase):
                 state="review", question="Choose", options=[f"one {i}" for i in range(30)]
             )
             prepared = prepare_decider_rows(row, model.tokenizer)
-            self.assertEqual(prepared[0].letter_ids, ids[:30])
+            self.assertEqual(prepared[0].label_ids, ids[:30])
             self.assertIn(ids[26], prepared[0].input_ids)
             self.assertEqual(
                 len(

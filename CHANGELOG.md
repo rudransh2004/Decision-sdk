@@ -116,6 +116,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MissingDependencyError` when torch is missing.
 - **Breaking:** `compute_metrics` takes sequences of floats and computes with `math`.
   One-dimensional tensors still work; call `.tolist()` on anything else.
+- **Breaking:** `prepare_decider_rows` returns `LabelRow`s
+  (`futurix_decision.models.label_readout`), and `DeciderRow.letter_ids` is now
+  `LabelRow.label_ids`. Decider, JPT, and Eikos models subclass `LabelReadoutModel`.
 - The package version comes from `futurix_decision.__version__` alone.
   The `futurix-decision serve` API reports that version instead of a hard-coded `0.1.0`.
 - Every install that includes transformers requires `transformers>=5.17,<6` (the base

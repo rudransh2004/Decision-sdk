@@ -26,12 +26,14 @@ from futurix_decision.inference.schemas import (
 )
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA, format_bosun_prompt
 from futurix_decision.models.decider import FORMAT as DECIDER_FORMAT
+from futurix_decision.models.decider import NOUL_ORDER as DECIDER_NOUL_ORDER
 from futurix_decision.models.decider import letter_table, prepare_decider_rows
 from futurix_decision.models.decision_head import decision_token
 from futurix_decision.models.eikos import FORMAT as EIKOS_FORMAT
 from futurix_decision.models.eikos import eikos_label_table, prepare_eikos_row
 from futurix_decision.models.jpt import FORMAT as JPT_FORMAT
 from futurix_decision.models.jpt import prepare_jpt_row
+from futurix_decision.models.label_readout import presented_order
 from futurix_decision.models.tokenizer import format_decision_prompt
 from futurix_decision.utils.config import load_decision_config
 from futurix_decision.vllm.logits_processor import probabilities_from_logprobs
@@ -131,12 +133,8 @@ class VLLMEngine:
                 rows = prepare_decider_rows(
                     example, self.tokenizer, decision_tokens=self.decision_tokens
                 )
-                prepared = [(row.input_ids, row.letter_ids) for row in rows]
-                orders.append(
-                    [example.options.index("false"), example.options.index("true")]
-                    if example.kind == "noul" and set(example.options) == {"false", "true"}
-                    else list(range(len(example.options)))
-                )
+                prepared = [(row.input_ids, row.label_ids) for row in rows]
+                orders.append(presented_order(example, DECIDER_NOUL_ORDER, DECIDER_FORMAT))
             elif self.prompt_format == JPT_FORMAT:
                 tokens, labels, order = prepare_jpt_row(
                     example, self.tokenizer, max_options=self.decision_tokens
