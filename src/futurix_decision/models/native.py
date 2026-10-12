@@ -47,10 +47,12 @@ class NativeCapabilities:
 
 
 def _publisher(family: str) -> PublisherAdapter:
-    if family not in set(PUBLISHER_CHECKPOINTS.values()):
+    try:
+        adapter = get_family(family)
+    except ConfigError:
+        adapter = None
+    if not isinstance(adapter, PublisherAdapter):
         raise ConfigError(f"unknown selected native family: {family}")
-    adapter = get_family(family)
-    assert isinstance(adapter, PublisherAdapter)
     return adapter
 
 
