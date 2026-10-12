@@ -63,6 +63,18 @@ def set_padding(tokenizer: Any, side: str, owner: str = "tokenizer") -> None:
     tokenizer.padding_side = side
 
 
+def with_position_ids(encoded: Mapping[str, torch.Tensor]) -> Encoded:
+    """``encoded`` plus position IDs that count from each row's first unpadded token.
+
+    Backbones number positions from the start of the padded row unless told
+    otherwise, so a left-padded row would shift by however many pad tokens
+    its longest batch neighbour adds. On absolute-position models that
+    changes the row's logits, making a decision depend on its batch.
+    """
+    positions = (encoded["attention_mask"].long().cumsum(dim=-1) - 1).clamp(min=0)
+    return {**encoded, "position_ids": positions}
+
+
 def add_tokens(model: DecisionModel, tokens: list[str], *, what: str) -> list[int]:
     """Add ``tokens`` as special tokens and return their IDs.
 
@@ -208,7 +220,7 @@ class PromptReadout(ReadoutStrategy):
                 "increase the limit instead of silently truncating candidates"
             )
         device = input_device(self.model.backbone)
-        return {key: value.to(device) for key, value in encoded.items()}
+        return {key: value.to(device) for key, value in with_position_ids(encoded).items()}
 
 
 class TokenReadout(PromptReadout):

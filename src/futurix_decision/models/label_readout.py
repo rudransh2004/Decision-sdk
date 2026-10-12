@@ -22,7 +22,12 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.decision_model import DecisionModel
-from futurix_decision.models.readouts import DecisionBatch, ReadoutStrategy, set_padding
+from futurix_decision.models.readouts import (
+    DecisionBatch,
+    ReadoutStrategy,
+    set_padding,
+    with_position_ids,
+)
 from futurix_decision.models.sources import tokenizer_kwargs
 from futurix_decision.models.tokenizer import row_seed
 
@@ -229,7 +234,8 @@ class LabelReadout(ReadoutStrategy):
         for index, tokens in enumerate(rows):
             ids[index, -len(tokens) :] = torch.tensor(tokens, device=device)
             mask[index, -len(tokens) :] = 1
-        output = backbone(input_ids=ids, attention_mask=mask, logits_to_keep=1)
+        inputs = with_position_ids({"input_ids": ids, "attention_mask": mask})
+        output = backbone(**inputs, logits_to_keep=1)
         return output.logits[:, -1, :]
 
     def forward(

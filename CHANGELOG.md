@@ -269,3 +269,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Every `zip` in the SDK is strict (ruff B905 is on). A length mismatch between rows
   and results, or between probabilities and targets, raises `ValueError` instead of
   silently dropping the extra items.
+- A left-padded row no longer scores differently depending on the rows batched with it.
+  Bosun, letter-code, Decider, JPT, and Eikos readouts left-pad, and backbones numbered
+  positions from the start of the padded row, so on absolute-position models (GPT-2
+  style) a short prompt batched with a long one shifted by the pad count. Because the
+  server micro-batches unrelated requests, the same request could get different
+  probabilities. Every readout now passes `position_ids` counted from each row's first
+  real token, so a batched row matches the same row decided alone, in inference and in
+  training. Single-row results and right-padded readouts (Futurix tokens, pointer heads)
+  are unchanged; rotary backbones (Llama, Qwen) were already unaffected.

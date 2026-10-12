@@ -59,6 +59,43 @@ def raw_checkpoint(path: Path) -> None:
     wrapped.save_pretrained(path)
 
 
+def qwen35_checkpoint(path: Path) -> None:
+    """A tiny Qwen3.5 multimodal checkpoint with one linear and one full attention layer."""
+    from transformers import (
+        Qwen3_5Config,
+        Qwen3_5ForConditionalGeneration,
+        Qwen3_5TextConfig,
+        Qwen3_5VisionConfig,
+    )
+
+    raw_checkpoint(path)
+    tokenizer = PreTrainedTokenizerFast.from_pretrained(path)
+    # Qwen3.5's tokenizer class otherwise adds an <|endoftext|> pad token past the vocabulary.
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.save_pretrained(path)
+    text = Qwen3_5TextConfig(
+        vocab_size=len(tokenizer),
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=8,
+        linear_key_head_dim=8,
+        linear_value_head_dim=8,
+        linear_num_key_heads=2,
+        linear_num_value_heads=4,
+        layer_types=["linear_attention", "full_attention"],
+        max_position_embeddings=512,
+    )
+    vision = Qwen3_5VisionConfig(
+        depth=1, hidden_size=32, intermediate_size=64, num_heads=4, out_hidden_size=32
+    )
+    Qwen3_5ForConditionalGeneration(
+        Qwen3_5Config(text_config=text, vision_config=vision)
+    ).save_pretrained(path)
+
+
 class LetterCodeConversionTests(unittest.TestCase):
     def test_raw_conversion_initializes_readout_from_lm_head_and_masks_codes(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -240,46 +277,10 @@ class LetterCodeConversionTests(unittest.TestCase):
         "Qwen3.5 architecture requires Transformers 5.17+",
     )
     def test_small_qwen_multimodal_text_noncausal_roundtrip(self):
-        from transformers import (
-            Qwen3_5Config,
-            Qwen3_5ForConditionalGeneration,
-            Qwen3_5TextConfig,
-            Qwen3_5VisionConfig,
-        )
-
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp) / "base"
             base.mkdir()
-            raw_checkpoint(base)
-            tokenizer = PreTrainedTokenizerFast.from_pretrained(base)
-            text = Qwen3_5TextConfig(
-                vocab_size=len(tokenizer),
-                hidden_size=32,
-                intermediate_size=64,
-                num_hidden_layers=2,
-                num_attention_heads=4,
-                num_key_value_heads=2,
-                head_dim=8,
-                linear_key_head_dim=8,
-                linear_value_head_dim=8,
-                linear_num_key_heads=2,
-                linear_num_value_heads=4,
-                layer_types=["linear_attention", "full_attention"],
-                max_position_embeddings=512,
-            )
-            vision = Qwen3_5VisionConfig(
-                depth=1,
-                hidden_size=32,
-                intermediate_size=64,
-                num_heads=4,
-                out_hidden_size=32,
-            )
-            Qwen3_5ForConditionalGeneration(
-                Qwen3_5Config(
-                    text_config=text,
-                    vision_config=vision,
-                )
-            ).save_pretrained(base)
+            qwen35_checkpoint(base)
             model = load_model(
                 base,
                 convert=True,
