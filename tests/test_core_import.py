@@ -69,6 +69,26 @@ SCRIPT = textwrap.dedent(
         else:
             raise AssertionError("load_model loaded a transformers checkpoint without torch")
 
+    # The HTTP client works against a stub server.
+    import httpx
+    from futurix_decision import DecisionClient
+
+    def serve(request):
+        assert request.url.path == "/v1/decision/noul", request.url
+        return httpx.Response(
+            200,
+            json={
+                "decision": True,
+                "confidence": 0.8,
+                "probabilities": {"false": 0.2, "true": 0.8},
+                "abstained": False,
+                "latency_ms": 1.0,
+            },
+        )
+
+    with DecisionClient(transport=httpx.MockTransport(serve)) as client:
+        assert client.noul(state="sky is blue").decision is True
+
     leaked = sorted(m for m in sys.modules if m.partition(".")[0] in BLOCKED)
     assert not leaked, leaked
     print("ok")

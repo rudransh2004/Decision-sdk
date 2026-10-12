@@ -9,13 +9,21 @@ __version__ = "0.1.0"
 from typing import TYPE_CHECKING
 
 from futurix_decision._lazy import lazy_exports
+from futurix_decision.client import AsyncDecisionClient, DecisionClient
 from futurix_decision.datasets import (
     DecisionExample,
     DecisionInput,
     load_decisions,
     load_open_decisions,
 )
-from futurix_decision.errors import FuturixError, MissingDependencyError
+from futurix_decision.errors import (
+    BackendError,
+    CheckpointError,
+    ConfigError,
+    FuturixError,
+    InvalidOutputError,
+    MissingDependencyError,
+)
 from futurix_decision.inference import DecisionResult
 
 if TYPE_CHECKING:
@@ -62,6 +70,12 @@ __getattr__ = lazy_exports(
 )
 
 __all__ = [
+    "AsyncDecisionClient",
+    "BackendError",
+    "CheckpointError",
+    "ConfigError",
+    "DecisionClient",
+    "InvalidOutputError",
     "DecisionExample",
     "DecisionInput",
     "DecisionModel",

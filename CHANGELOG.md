@@ -8,6 +8,14 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `DecisionClient` and `AsyncDecisionClient` (`futurix_decision.client`, no torch needed)
+  for the `futurix-decision serve` API: `decide`, `batch_decide`, `choice`, `noul`,
+  `score`, `health`, and `close`, usable as (async) context managers. Settings:
+  `base_url`, `api_key`, `timeout` (30 s), and `max_retries` (3). Connect errors and
+  HTTP 429/502/503/504 are retried with exponential backoff and jitter, honoring
+  `Retry-After` up to 60 s; other failures raise `BackendError`. The server has no
+  batch endpoint, so `batch_decide` sends one request per example: sequentially in
+  the sync client, at most `max_concurrency` (8) at a time in the async one.
 - A `torch` extra (`torch>=2.4`, `transformers>=5.17,<6`). Every model-family extra,
   `train`, `qlora`, `serve`, the vLLM extras, and `dev` include it.
 - `futurix_decision.errors`, exported from the top-level package: `FuturixError` is the
