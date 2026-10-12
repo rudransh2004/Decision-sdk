@@ -49,7 +49,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DecisionModel`, `NativeDecisionModel`, `VLLMEngine`, `DecisionClient`, and
   `Calibrated` implement it. `DecisionModel.close()` and `VLLMEngine.close()` do nothing.
 - `Calibrated(backend, temperature)` wraps any backend and rescales its probabilities to
-  `softmax(log p / T)`, then recomputes the decision, confidence, and abstention.
+  `softmax(log p / T)`, then recomputes the decision, confidence, and abstention. A
+  probability of 0 is read as the float32 floor `1e-45`
+  (`futurix_decision.models.calibrated.PROBABILITY_FLOOR`), as `fit_temperature` reads
+  it, so the temperature it fits has the same effect when applied.
 - `DecisionResult.kind` and `DecisionResult.from_probabilities(example, probabilities,
   latency_ms=..., confidence_threshold=...)`.
 - `DecisionClient` and `AsyncDecisionClient` (`futurix_decision.client`, no torch needed)
@@ -116,8 +119,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   returns and returns the temperature, relative to the backend's current output. It no
   longer sets `DecisionModel.temperature`. Migration: wrap with
   `Calibrated(backend, fit_temperature(backend, heldout))`, or persist into a checkpoint
-  with `model.config.temperature *= fit_temperature(model, heldout)`. `CalibrationTrainer` and
-  `DecisionTrainer` still store the fitted temperature on the model.
+  by setting `model.config.temperature = 1.0` and then assigning
+  `fit_temperature(model, heldout)` to it. `CalibrationTrainer` and `DecisionTrainer`
+  still store the fitted temperature on the model, fitted from temperature 1, so the
+  stored value stays in [0.05, 20].
 - **Breaking:** `load_model` has an explicit signature: `family`, `convert`,
   `strategy: Literal["pointer", "bosun", "letter_code"] | None`, `head_type`,
   `train_backbone`, `revision`, `device`, and `**family_kwargs`. It is typed to return

@@ -13,14 +13,32 @@ from futurix_decision.inference.schemas import (
 )
 from futurix_decision.models.protocol import DecisionBackend, DecisionShortcuts
 
+PROBABILITY_FLOOR = 1e-45
+"""The probability a returned 0 stands for: the smallest positive float32.
+
+An option's logit is finite, so a probability of 0 underflowed. Calibration
+and temperature fitting both read it as this floor.
+"""
+
+
+def log_probabilities(probabilities: Sequence[float]) -> list[float]:
+    """Return ``log p`` per option, reading a 0 as ``PROBABILITY_FLOOR``.
+
+    These are the option logits up to a constant shift, which is what
+    ``fit_temperature`` fits and ``scale_probabilities`` rescales.
+    """
+    return [math.log(max(p, PROBABILITY_FLOOR)) for p in probabilities]
+
 
 def scale_probabilities(probabilities: Sequence[float], temperature: float) -> list[float]:
-    """Return ``softmax(log p / T)``. A zero probability stays zero.
+    """Return ``softmax(log p / T)``, with ``log p`` from ``log_probabilities``.
 
     For ``p = softmax(logits)`` this equals ``softmax(logits / T)``: the
-    log-normalizer is a constant shift that the softmax removes.
+    log-normalizer is a constant shift that the softmax removes. A zero
+    probability is read as ``PROBABILITY_FLOOR``, so a temperature above 1
+    gives it a small share.
     """
-    scaled = [math.log(p) / temperature if p > 0 else -math.inf for p in probabilities]
+    scaled = [value / temperature for value in log_probabilities(probabilities)]
     peak = max(scaled)
     weights = [math.exp(value - peak) for value in scaled]
     total = sum(weights)

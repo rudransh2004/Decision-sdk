@@ -11,9 +11,8 @@ from torch.nn.utils.rnn import pad_sequence
 
 from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.evaluator import EvaluationSource, example_batches
+from futurix_decision.models.calibrated import log_probabilities
 from futurix_decision.models.protocol import DecisionBackend
-
-_FLOOR = 1e-45
 
 
 def fit_temperature_from_logits(
@@ -68,16 +67,16 @@ def fit_temperature(
 
     Works for every backend: ``softmax(log p / T)`` equals ``softmax(logits / T)``,
     so fitting on returned probabilities matches fitting on logits. The result
-    is relative to the model's current output. Apply it with
-    ``Calibrated(model, T)``, or persist it in a ``DecisionModel`` checkpoint
-    with ``model.config.temperature *= T`` before ``save_pretrained``.
+    lies in [0.05, 20] and is relative to the model's current output. Apply it
+    with ``Calibrated(model, T)``. To store it in a ``DecisionModel``
+    checkpoint, set ``model.config.temperature = 1.0`` first, then assign the
+    result to it before ``save_pretrained``, as ``CalibrationTrainer`` does.
     """
     logits, targets = [], []
     for examples in example_batches(calibration_dataset, batch_size):
         results = model.batch_decide(examples)
         for row, result in zip(examples, results, strict=True):
             probabilities = [result.probabilities[option] for option in row.options]
-            # A probability that underflowed to 0 gets the float32 floor, not -inf.
-            logits.append(torch.tensor([math.log(max(p, _FLOOR)) for p in probabilities]))
+            logits.append(torch.tensor(log_probabilities(probabilities)))
             targets.append(torch.tensor(row.target_distribution(), dtype=torch.float32))
     return fit_temperature_from_logits(logits, targets)

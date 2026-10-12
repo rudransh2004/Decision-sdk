@@ -256,6 +256,28 @@ class CalibrationTests(unittest.TestCase):
         expected = fit_temperature_from_logits(logits, targets)
         self.assertAlmostEqual(fit_temperature(model, data), expected, places=4)
 
+    def test_calibration_applies_the_zero_probabilities_the_fit_assumed(self):
+        from futurix_decision.models.protocol import DecisionShortcuts
+
+        class Certain(DecisionShortcuts):
+            """Puts all mass on the first option; the second underflowed to 0."""
+
+            def decide(self, example, *, confidence_threshold=None):
+                return DecisionResult.from_probabilities(example, [1.0, 0.0], latency_ms=0.0)
+
+            def batch_decide(self, examples, *, confidence_threshold=None):
+                return [self.decide(example) for example in examples]
+
+            def close(self):
+                pass
+
+        temperature = fit_temperature(Certain(), rows())
+        self.assertGreater(temperature, 1.0)
+        plain = evaluate(Certain(), rows())
+        calibrated = evaluate(Calibrated(Certain(), temperature), rows())
+        # The fit softened the zero; calibrating with its temperature must too.
+        self.assertLess(calibrated["nll"], plain["nll"])
+
     def test_load_fit_and_evaluate_a_local_model(self):
         with tempfile.TemporaryDirectory() as temp:
             tiny_model().save_pretrained(temp)

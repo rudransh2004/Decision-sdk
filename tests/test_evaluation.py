@@ -137,6 +137,22 @@ class EvaluatorTrainerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "identity differs"):
                 evaluate(model, rows, predictions_output=journal, run_id="different", resume=True)
 
+    def test_calibration_trainer_stores_a_temperature_within_bounds(self):
+        from futurix_decision.trainers.calibration import CalibrationConfig, CalibrationTrainer
+        from test_sft import example, tiny_model
+
+        # Training on hard targets makes the model confident; uniform held-out targets
+        # then push the fitted temperature up to its cap of 20.
+        hard = [example("approve", state) for state in "abcd"]
+        uniform = [example([0.5, 0.5], state) for state in "abcd"]
+        for start in (0.5, 1.7):
+            with self.subTest(start=start):
+                model = tiny_model()
+                model.config.temperature = start
+                config = CalibrationConfig(batch_size=4, epochs=5, learning_rate=0.05)
+                CalibrationTrainer(model, config=config).train(hard, calibration_dataset=uniform)
+                self.assertAlmostEqual(model.config.temperature, 20.0, places=3)
+
     def test_batched_evaluation_and_calibration_save(self):
         from futurix_decision import DecisionModel
         from futurix_decision.trainers.calibration import CalibrationConfig, CalibrationTrainer

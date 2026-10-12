@@ -350,10 +350,12 @@ configurable Brier loss. `fit_temperature` then minimizes soft-label NLL on a
 different calibration split. `fit_temperature(backend, heldout)` works on any
 backend, local or remote, because it fits on the returned probabilities:
 `softmax(log p / T)` equals `softmax(logits / T)`. The result is relative to
-the backend's current output.
+the backend's current output, and lies in [0.05, 20].
 
-Apply it with `Calibrated(backend, T)`, or store it in a `DecisionModel`
-checkpoint with `model.config.temperature *= T` before `save_pretrained`.
+Apply it with `Calibrated(backend, T)`. To store it in a `DecisionModel`
+checkpoint, set `model.config.temperature = 1.0`, fit, and assign the result to
+`model.config.temperature` before `save_pretrained`; `CalibrationTrainer` does
+this for you.
 `evaluate` reports accuracy (expected correctness for soft targets), NLL,
 Brier, 15-bin ECE and MCE, mean confidence, and selective accuracy and
 coverage at 0.50 to 0.99. It computes the metrics from batched masked decision
