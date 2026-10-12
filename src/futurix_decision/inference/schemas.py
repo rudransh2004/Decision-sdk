@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from futurix_decision.datasets.schema import DecisionInput, DecisionKind, State
-from futurix_decision.errors import ConfigError
+from futurix_decision.errors import ConfigError, InvalidOutputError
 
 Decision = bool | int | str | None
 
@@ -42,6 +42,8 @@ client retries ``backend`` but raises ``InvalidOutputError`` for
 ``invalid_output`` at once, because the same request would fail again.
 """
 INVALID_OUTPUT = "invalid_output"
+# How far above 1 a probability may round before it counts as invalid output.
+_PROBABILITY_TOLERANCE = 1e-6
 
 
 class DecisionResult(BaseModel):
@@ -86,20 +88,24 @@ class DecisionResult(BaseModel):
         latency_ms: float,
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        """Build the result for ``example`` from probabilities in option order."""
+        """Build the result for ``example`` from probabilities in option order.
+
+        Raises ``InvalidOutputError`` if a probability is not a finite number
+        in [0, 1], since a NaN would otherwise slip past abstention.
+        """
         if len(probabilities) != len(example.options):
             raise ConfigError("probabilities must align with the example's options")
-        winner = max(range(len(probabilities)), key=probabilities.__getitem__)
-        confidence = float(probabilities[winner])
+        values = [float(value) for value in probabilities]
+        if not all(0.0 <= value <= 1.0 + _PROBABILITY_TOLERANCE for value in values):
+            raise InvalidOutputError(f"probabilities must be finite and in [0, 1]: {values}")
+        winner = max(range(len(values)), key=values.__getitem__)
+        confidence = values[winner]
         abstained = confidence_threshold is not None and confidence < confidence_threshold
         return cls(
             kind=example.kind,
             decision=None if abstained else typed_decision(example.kind, example.options[winner]),
             confidence=confidence,
-            probabilities={
-                option: float(value)
-                for option, value in zip(example.options, probabilities, strict=True)
-            },
+            probabilities=dict(zip(example.options, values, strict=True)),
             abstained=abstained,
             latency_ms=latency_ms,
         )

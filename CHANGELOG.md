@@ -287,6 +287,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `DecisionResult.from_probabilities` raises `InvalidOutputError` for a NaN, infinite,
+  negative, or above-1 probability. A NaN used to skip abstention, so the server
+  returned HTTP 200 with a null confidence; it now returns a 502 `invalid_output`.
 - A pointer head with `learn_abstain=True` no longer fails every forward with "decision
   head must return one logit per supplied option". `forward_decisions` returns the
   abstain logit after the widest row's options, sets `DecisionBatch.null_slot`, and

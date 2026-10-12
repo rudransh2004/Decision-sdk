@@ -162,6 +162,27 @@ class DecisionTypeTests(unittest.TestCase):
         self.assertEqual(result.kind, "noul")
         self.assertEqual(result.probabilities, {"c000": 0.8, "c001": 0.2})
 
+    def test_result_rejects_probabilities_outside_zero_to_one(self):
+        row = DecisionInput(kind="noul", state="s", question="q", options=["false", "true"])
+        for probabilities in (
+            [math.nan, 0.5],
+            [0.5, math.nan],
+            [math.inf, 0.0],
+            [-0.2, 1.2],
+            [0.0, 1.5],
+        ):
+            for threshold in (None, 0.95):
+                with (
+                    self.subTest(probabilities=probabilities, threshold=threshold),
+                    self.assertRaises(InvalidOutputError),
+                ):
+                    DecisionResult.from_probabilities(
+                        row, probabilities, latency_ms=0.0, confidence_threshold=threshold
+                    )
+        self.assertEqual(
+            DecisionResult.from_probabilities(row, [0.0, 1.0], latency_ms=0.0).decision, True
+        )
+
     def test_result_rejects_a_decision_of_the_wrong_type(self):
         common = {"confidence": 0.9, "probabilities": {}, "latency_ms": 1.0}
         for kind, decision in (("noul", "true"), ("score", True), ("score", "3"), ("choice", 1)):
