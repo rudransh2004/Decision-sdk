@@ -6,6 +6,18 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+0.1 had no users to keep compatible with, so the code that existed only for 0.1
+checkpoints and APIs is gone.
+
+### Removed
+
+- **Breaking:** loading a `decision_config.json` that names the pre-release `pplx`
+  readout no longer raises a `CheckpointError` with migration steps; it fails validation
+  like any unknown readout.
+- **Breaking:** a saved checkpoint without `learn_abstain` no longer has it locked to
+  `false`; the field is unset, as any other missing field is.
+- The `tests/fixtures/legacy-0.1` checkpoints and the tests that reloaded them.
+
 ## [0.2.0] — 2026-10-12
 
 0.2 splits the SDK into a torch-free core and optional runtimes, gives results one typed

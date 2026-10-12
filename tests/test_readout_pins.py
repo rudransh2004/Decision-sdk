@@ -3,11 +3,8 @@
 The expected values were recorded before ``DecisionModel`` was split into
 readout strategies. A change to a prompt, a slot assignment, token
 registration, row initialization, or a head forward changes these numbers.
-The legacy fixtures under ``tests/fixtures/legacy-0.1`` hold the
-``decision_config.json`` (and head weights) that the pre-split code saved.
 """
 
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,16 +12,13 @@ from pathlib import Path
 import torch
 
 from futurix_decision import DecisionInput, DecisionModel, load_model
-from futurix_decision.models.custom_head import HEAD_WEIGHTS, PointerDecisionHead
+from futurix_decision.models.custom_head import PointerDecisionHead
 from test_bosun import bosun_tiny_model
 from test_custom_head import make_model
 from test_decision_model import tiny_checkpoint
 from test_letter_code_conversion import raw_checkpoint
-from test_letter_readout import build as build_letter_family
-from test_letter_readout import readouts as letter_readouts
 
 INF = float("-inf")
-FIXTURES = Path(__file__).parent / "fixtures" / "legacy-0.1"
 INPUTS = [
     DecisionInput(
         state={"ticket": "refund"},
@@ -162,44 +156,6 @@ class PointerHeadTests(unittest.TestCase):
         self.assertEqual(tuple(logits.shape), (1, 4))
         self.assertEqual(logits[0, 2].item(), INF)
         self.assertTrue(torch.isfinite(logits[0, [0, 1, 3]]).all())
-
-
-class LegacyCheckpointTests(unittest.TestCase):
-    """Checkpoints whose decision metadata the pre-split code wrote still load the same."""
-
-    def reload(self, model, case: str, root: Path):
-        path = root / case
-        model.backbone.save_pretrained(path)
-        model.tokenizer.save_pretrained(path)
-        for item in (FIXTURES / case).iterdir():
-            shutil.copy(item, path / item.name)
-        return DecisionModel.from_pretrained(path)
-
-    def test_futurix_readouts_reload_from_legacy_metadata(self):
-        for name in ("tokens", "bosun", "pointer-marker", "pointer-span", "letter-code"):
-            with self.subTest(readout=name), tempfile.TemporaryDirectory() as temp:
-                model = BUILDERS[name](Path(temp))
-                restored = self.reload(model, name, Path(temp))
-                self.assertIs(type(restored), DecisionModel)
-                assert_readouts(readouts(restored), PINS[name], name)
-
-    def test_decider_reloads_with_its_type_temperatures(self):
-        with tempfile.TemporaryDirectory() as temp:
-            model = build_letter_family("decider", Path(temp))
-            expected = letter_readouts(model)
-            restored = self.reload(model, "decider", Path(temp))
-            self.assertEqual(type(restored).__name__, "DeciderDecisionModel")
-            actual = letter_readouts(restored)
-        for seed, rows in expected[0].items():
-            torch.testing.assert_close(torch.tensor(actual[0][seed]), torch.tensor(rows))
-        for row, values in zip(actual[1], expected[1], strict=True):
-            torch.testing.assert_close(torch.tensor(row), torch.tensor(values))
-
-    def test_fixtures_hold_metadata_and_head_weights_only(self):
-        # The fixtures carry metadata and head weights only; the tiny backbones
-        # come from the seeded builders above.
-        files = {item.name for case in FIXTURES.iterdir() for item in case.iterdir()}
-        self.assertLessEqual(files, {"decision_config.json", HEAD_WEIGHTS})
 
 
 # Recorded values. Change them only for an intended contract change.

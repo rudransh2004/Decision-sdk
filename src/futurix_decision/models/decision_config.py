@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any
 
-from futurix_decision.errors import CheckpointError, ConfigError
+from futurix_decision.errors import ConfigError
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA
 
 # Settings a saved checkpoint fixes: its trained weights depend on them.
@@ -118,19 +118,12 @@ class DecisionModelConfig:
         the checkpoint fixes (``_LOCKED``) must match the saved one.
         ``provenance`` replaces the saved weight-origin fields.
         """
-        if saved.get("head_type") == "pplx" or saved.get("head_prompt_version") == "pplx-v1":
-            raise CheckpointError(
-                "this checkpoint uses the pre-release readout name 'pplx'; in its "
-                "decision_config.json set head_type to 'letter_code' and "
-                "head_prompt_version to 'letter-code-v1'"
-            )
         values: dict[str, Any] = {}
         for name in (item.name for item in fields(cls)):
             if name in _PROVENANCE:
                 values[name] = provenance.get(name)
                 continue
-            # A Futurix checkpoint saved before learn_abstain existed did not abstain.
-            stored = saved.get(name, False if name == "learn_abstain" and saved else None)
+            stored = saved.get(name)
             wanted = requested.get(name)
             if name in _LOCKED and None not in (stored, wanted) and wanted != stored:
                 raise ConfigError(f"cannot override the saved checkpoint's {name}")

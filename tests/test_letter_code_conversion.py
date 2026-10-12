@@ -23,7 +23,7 @@ from futurix_decision import (
     evaluate,
     load_model,
 )
-from futurix_decision.errors import CheckpointError, ConfigError
+from futurix_decision.errors import CheckpointError
 from futurix_decision.models.letter_code import answer_codes
 from test_model_sources import Loaded
 
@@ -148,30 +148,6 @@ class LetterCodeConversionTests(unittest.TestCase):
                             after.probabilities[option],
                             places=6,
                         )
-
-    def test_pplx_names_are_rejected_with_a_migration_hint(self):
-        with tempfile.TemporaryDirectory() as temp:
-            base = Path(temp) / "base"
-            base.mkdir()
-            raw_checkpoint(base)
-            with self.assertRaisesRegex(ConfigError, "strategy must be"):
-                load_model(base, convert=True, strategy="pplx")
-            model = load_model(
-                base,
-                convert=True,
-                strategy="letter_code",
-                decision_tokens=8,
-                max_sequence_length=512,
-            )
-            exported = Path(temp) / "legacy"
-            model.save_pretrained(exported)
-            metadata_path = exported / "decision_config.json"
-            metadata = json.loads(metadata_path.read_text())
-            metadata["head_type"] = "pplx"
-            metadata["head_prompt_version"] = "pplx-v1"
-            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-            with self.assertRaisesRegex(CheckpointError, "set head_type to 'letter_code'"):
-                load_model(exported)
 
     @unittest.skipUnless(importlib.util.find_spec("accelerate"), "train extra not installed")
     def test_sft_then_rlcd_trains_and_exports_reloadable_readout(self):
