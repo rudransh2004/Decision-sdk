@@ -3,17 +3,56 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Iterable, Mapping
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from futurix_decision.datasets.schema import DecisionInput
+from futurix_decision.datasets.schema import DecisionExample, DecisionInput
 from futurix_decision.errors import ConfigError, InvalidOutputError, MissingDependencyError
-from futurix_decision.models.families.publisher import PublisherAdapter, PublisherRuntime
+from futurix_decision.models.families.publisher import (
+    NativeExport,
+    PublisherAdapter,
+    PublisherRuntime,
+)
 from futurix_decision.models.sources import CheckpointFiles
+
+if TYPE_CHECKING:
+    from futurix_decision.models.native import NativeDecisionModel
 
 
 def _text(state: Any) -> str:
     return state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)
+
+
+def _record(row: DecisionExample, *, target_policy: str) -> dict[str, Any]:
+    """One hard-label classification task, as ``gliner2``'s trainer reads it."""
+    if row.images:
+        raise ConfigError("GLiNER's encoder cannot train on image decisions")
+    target = row.target_distribution()
+    if target_policy not in ("error", "argmax"):
+        raise ConfigError("target_policy must be 'error' or 'argmax'")
+    if max(target) < 1 - 1e-7 and target_policy != "argmax":
+        raise ConfigError(
+            "GLiNER's native classifier only accepts hard labels; use "
+            "target_policy='argmax' to explicitly discard soft probabilities"
+        )
+    winner = row.options[max(range(len(target)), key=target.__getitem__)]
+    labels = (
+        dict(zip(row.options, row.candidate_descriptions, strict=True))
+        if row.candidate_descriptions
+        else None
+    )
+    task: dict[str, Any] = {
+        "task": row.question_id or "decision",
+        "labels": row.options,
+        "true_label": [winner],
+        "prompt": row.question,
+    }
+    if labels:
+        task["label_descriptions"] = {
+            name: description for name, description in labels.items() if description
+        }
+    return {"input": _text(row.state), "output": {"classifications": [task]}}
 
 
 class GlinerRuntime(PublisherRuntime):
@@ -125,3 +164,47 @@ class GlinerAdapter(PublisherAdapter):
     def files(self, files: CheckpointFiles) -> None:
         files.require("config.json", "encoder_config/config.json")
         files.one_of("model.safetensors", "pytorch_model.bin")
+
+    def train(
+        self,
+        model: NativeDecisionModel,
+        rows: Iterable[DecisionExample],
+        *,
+        data: Path,
+        output: Path,
+        config: Any | None,
+        **kwargs: Any,
+    ) -> NativeExport:
+        """Run ``gliner2``'s ``ExtractorTrainer``; it exports a release under ``final``."""
+        from futurix_decision.trainers.native import NativeSFTConfig, write_rows
+
+        target_policy = kwargs.pop("target_policy", "error")
+        if kwargs:
+            raise TypeError(f"unsupported GLiNER training options: {sorted(kwargs)}")
+        count = write_rows(data, (_record(row, target_policy=target_policy) for row in rows))
+        try:
+            from gliner2 import AutoExtractor
+            from gliner2.training.trainer import ExtractorTrainer, TrainingConfig
+        except ImportError as exc:
+            raise MissingDependencyError(
+                "install futurix-decision[gliner-train] to train GLiNER"
+            ) from exc
+        if config is None:
+            config = TrainingConfig(output_dir=str(output))
+        elif isinstance(config, NativeSFTConfig):
+            if not config.train_backbone:
+                raise ConfigError("GLiNER's native trainer does not expose readout-only training")
+            config = TrainingConfig(
+                output_dir=str(output),
+                num_epochs=config.epochs,
+                batch_size=config.batch_size,
+                encoder_lr=config.learning_rate,
+                task_lr=config.learning_rate,
+                weight_decay=config.weight_decay,
+                num_workers=0,
+            )
+        elif Path(config.output_dir) != output:
+            raise ConfigError("GLiNER config.output_dir must equal output_dir")
+        extractor = AutoExtractor.from_pretrained(model.checkpoint)
+        report = ExtractorTrainer(extractor, config).train(train_data=str(data))
+        return NativeExport(count, report, output / "final")

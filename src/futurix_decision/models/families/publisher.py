@@ -8,9 +8,9 @@ those methods, so this module imports without torch.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import httpx
 
@@ -22,7 +22,7 @@ from futurix_decision.models.protocol import DecisionBackend
 from futurix_decision.models.sources import CheckpointFiles, checkpoint_source, read_checkpoint_json
 
 if TYPE_CHECKING:
-    from futurix_decision.datasets.schema import DecisionInput
+    from futurix_decision.datasets.schema import DecisionExample, DecisionInput
     from futurix_decision.models.native import NativeDecisionModel
 
 # Hub ID -> publisher runtime. Laya and GLiNER share the "encoder" row of the
@@ -84,6 +84,14 @@ class PublisherRuntime:
         return None
 
 
+class NativeExport(NamedTuple):
+    """What a publisher trainer reports: rows trained, its own report, and the export path."""
+
+    items: int
+    report: Any
+    path: Path
+
+
 class PublisherAdapter(FamilyAdapter):
     """One publisher runtime. Subclasses set ``name``, ``extra``, and ``readout``.
 
@@ -95,7 +103,7 @@ class PublisherAdapter(FamilyAdapter):
     """How the release reads out a decision; ``NativeCapabilities.native_readout``."""
     runtime_type: type[PublisherRuntime] = PublisherRuntime
     trainable = False
-    """Whether ``train`` exports a reloadable native checkpoint."""
+    """Whether ``train`` is implemented."""
     images = False
     """Whether the publisher's decision path accepts images."""
     max_options: int | None = None
@@ -238,6 +246,24 @@ class PublisherAdapter(FamilyAdapter):
         if not isinstance(model, NativeDecisionModel) or model.family != self.name:
             raise ConfigError(f"{self.name} fine-tuning needs a {self.name} NativeDecisionModel")
         return model.finetune(dataset, output_dir, **kwargs)
+
+    def train(
+        self,
+        model: NativeDecisionModel,
+        rows: Iterable[DecisionExample],
+        *,
+        data: Path,
+        output: Path,
+        config: Any | None,
+        **kwargs: Any,
+    ) -> NativeExport:
+        """Run the publisher's trainer on ``rows`` and export a reloadable checkpoint.
+
+        ``data`` is a scratch file path for training records; ``output`` is the
+        empty directory to export into. ``finetune_native`` calls this, then
+        writes the manifest into ``NativeExport.path`` and reloads it.
+        """
+        raise NotImplementedError(f"{self.name} has no verified native training/export path")
 
 
 def pinned_remote(

@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from futurix_decision.datasets.schema import DecisionInput
+from futurix_decision.datasets.schema import DecisionExample, DecisionInput
 from futurix_decision.datasets.systemone import native_question, option_keys
 from futurix_decision.errors import ConfigError, InvalidOutputError, MissingDependencyError
 from futurix_decision.models.families.publisher import (
     BatchAnswers,
+    NativeExport,
     PublisherAdapter,
     PublisherRuntime,
 )
 from futurix_decision.models.sources import CheckpointFiles
+
+if TYPE_CHECKING:
+    from futurix_decision.models.native import NativeDecisionModel
 
 
 def _answer(example: DecisionInput, values: Sequence[float]) -> dict[str, Any]:
@@ -117,3 +122,70 @@ class PplxAdapter(PublisherAdapter):
         files.require("config.json", "decision_config.json", "readout.safetensors")
         files.tokenizer()
         files.weights()
+
+    def train(
+        self,
+        model: NativeDecisionModel,
+        rows: Iterable[DecisionExample],
+        *,
+        data: Path,
+        output: Path,
+        config: Any | None,
+        **kwargs: Any,
+    ) -> NativeExport:
+        """Fit the readout (and backbone, unless frozen) on soft targets; ``save`` the release."""
+        import torch
+        import torch.nn.functional as functional
+
+        from futurix_decision.trainers.native import NativeSFTConfig, sft_rows
+
+        examples = sft_rows(self.name, rows, config, kwargs)
+        settings = config or NativeSFTConfig()
+        native = model.runtime
+        native.requires_grad_(True)
+        if not settings.train_backbone:
+            native.backbone.requires_grad_(False)
+        native.train(True)
+        optimizer = torch.optim.AdamW(
+            (p for p in native.parameters() if p.requires_grad),
+            lr=settings.learning_rate,
+            weight_decay=settings.weight_decay,
+        )
+        losses: list[float] = []
+        for _epoch in range(settings.epochs):
+            for offset in range(0, len(examples), settings.batch_size):
+                batch_rows = examples[offset : offset + settings.batch_size]
+                if any(len(row.options) > 255 for row in batch_rows):
+                    raise ConfigError("PPLX native readout supports at most 255 options")
+                records = [
+                    {
+                        "state": row.state,
+                        "question": native_question(row),
+                        **({"images": row.images} if row.images else {}),
+                    }
+                    for row in batch_rows
+                ]
+                logits = native(native.prepare(records))
+                if logits.shape[0] != len(batch_rows):
+                    raise InvalidOutputError("PPLX returned the wrong batch size")
+                terms = []
+                for prediction, row in zip(logits, batch_rows, strict=True):
+                    if prediction.shape[0] < len(row.options):
+                        raise InvalidOutputError("PPLX returned fewer logits than decision options")
+                    target = torch.tensor(
+                        row.target_distribution(), device=prediction.device, dtype=torch.float32
+                    )
+                    terms.append(
+                        -(
+                            target
+                            * functional.log_softmax(prediction[: len(row.options)].float(), dim=-1)
+                        ).sum()
+                    )
+                loss = torch.stack(terms).mean()
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
+                losses.append(float(loss.detach()))
+        native.eval()
+        native.save(output)
+        return NativeExport(len(examples), {"train_items": len(examples), "losses": losses}, output)

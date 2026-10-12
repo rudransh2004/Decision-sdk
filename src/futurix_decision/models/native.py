@@ -170,7 +170,8 @@ class NativeDecisionModel:
         adapter = _publisher(family)
         self.max_retries = max_retries
         self._owns_runtime = owns_runtime
-        self._adapter = adapter
+        self.adapter = adapter
+        """The family adapter that loaded this model and runs its training."""
         self.checkpoint, self.family, self.runtime, self.backend = (
             checkpoint,
             family,
@@ -259,12 +260,12 @@ class NativeDecisionModel:
         )
 
     def _images(self, images: Sequence[Any]) -> list[Any]:
-        if not self._adapter.images:
+        if not self.adapter.images:
             raise ConfigError(f"{self.family} does not expose an image decision path here")
         return self._publisher.prepare_images(images)
 
     def _predict(self, example: DecisionInput) -> Mapping[str, Any]:
-        limit = self._adapter.max_options
+        limit = self.adapter.max_options
         if limit is not None and len(example.options) > limit:
             raise ConfigError(f"{self.family} native readout supports at most {limit} options")
         payload: dict[str, Any] = {
@@ -389,7 +390,7 @@ class NativeDecisionModel:
                 f"{self.checkpoint} has no verified native training/export adapter; "
                 "its inference-only runtime cannot safely preserve a fine-tuned decision head"
             )
-        if self._adapter.remote_code:
+        if self.adapter.remote_code:
             pinned_remote(
                 self.source_revision,
                 True,

@@ -167,7 +167,7 @@ class NativeTrainingTests(unittest.TestCase):
                 (output / "adapter_config.json").write_text("{}")
                 (output / "adapter_model.safetensors").write_bytes(b"native adapter")
 
-            with patch("futurix_decision.trainers.native.subprocess.run", side_effect=run):
+            with patch("futurix_decision.models.families.kev.subprocess.run", side_effect=run):
                 model = NativeDecisionModel.from_runtime(
                     "jaredpalmer/kev-9b", "kev", (object(), object())
                 )

@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from futurix_decision.datasets.schema import DecisionInput
+from futurix_decision.datasets.schema import DecisionExample, DecisionInput
 from futurix_decision.datasets.systemone import native_question
 from futurix_decision.errors import ConfigError, InvalidOutputError, MissingDependencyError
 from futurix_decision.models.families.publisher import (
     BatchAnswers,
+    NativeExport,
     PublisherAdapter,
     PublisherRuntime,
 )
 from futurix_decision.models.sources import CheckpointFiles
+
+if TYPE_CHECKING:
+    from futurix_decision.models.native import NativeDecisionModel
 
 
 class LayaRuntime(PublisherRuntime):
@@ -70,3 +75,51 @@ class LayaAdapter(PublisherAdapter):
 
     def files(self, files: CheckpointFiles) -> None:
         files.require("rl_agent_config.json", "model.safetensors")
+
+    def train(
+        self,
+        model: NativeDecisionModel,
+        rows: Iterable[DecisionExample],
+        *,
+        data: Path,
+        output: Path,
+        config: Any | None,
+        **kwargs: Any,
+    ) -> NativeExport:
+        """Run ``laya.train.finetune`` on grouped System One records."""
+        from futurix_decision.trainers.native import (
+            NativeSFTConfig,
+            grouped_records,
+            text_only,
+            write_rows,
+        )
+
+        if kwargs.keys() - {"device"}:
+            raise TypeError(
+                f"unsupported Laya training options: {sorted(kwargs.keys() - {'device'})}"
+            )
+        count = write_rows(data, grouped_records(text_only(rows, "Laya")))
+        try:
+            from laya.train import finetune
+        except ImportError as exc:
+            raise MissingDependencyError("install futurix-decision[laya] to train Laya") from exc
+        if isinstance(config, NativeSFTConfig):
+            from laya.train import TrainConfig
+
+            config = TrainConfig(
+                epochs=config.epochs,
+                micro_batch=config.batch_size,
+                grad_accum=1,
+                encoder_lr=config.learning_rate,
+                head_lr=config.learning_rate,
+                weight_decay=config.weight_decay,
+                freeze_encoder=not config.train_backbone,
+            )
+        report = finetune(
+            str(data),
+            model.checkpoint,
+            str(output),
+            config=config,
+            device=kwargs.get("device", "auto"),
+        )
+        return NativeExport(count, report, output)
