@@ -31,7 +31,7 @@ from futurix_decision import (
 )
 from futurix_decision.errors import CheckpointError
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA
-from futurix_decision.models.custom_head import CANDIDATE_MARKER, HEAD_WEIGHTS
+from futurix_decision.models.custom_head import HEAD_WEIGHTS
 from futurix_decision.trainers import RLCDConfig
 
 
@@ -81,17 +81,15 @@ class CustomHeadTests(unittest.TestCase):
     def test_custom_head_is_candidate_aware_and_does_not_add_decision_tokens(self):
         model = make_model()
         self.assertNotIn("<|decision_000|>", model.tokenizer.get_vocab())
-        self.assertEqual(
-            model.tokenizer.encode(CANDIDATE_MARKER, add_special_tokens=False),
-            model.readout.token_ids,
-        )
+        self.assertEqual(model.readout.token_ids, [])
         inputs = [
             DecisionInput(state="first", question="Choose", options=["approve", "reject"]),
             DecisionInput(
                 state="second", question="Choose", options=["reject", "approve", "escalate"]
             ),
         ]
-        with patch.object(model.backbone, "forward", wraps=model.backbone.forward) as forward:
+        base = model.backbone.base_model
+        with patch.object(base, "forward", wraps=base.forward) as forward:
             batch = model.forward_decisions(inputs, assignment_seed=13)
             self.assertEqual(forward.call_count, 1)
         self.assertEqual(batch.logits.shape, (2, 3))
@@ -143,10 +141,8 @@ class CustomHeadTests(unittest.TestCase):
             with self.assertRaisesRegex(CheckpointError, "missing decision_head.safetensors"):
                 DecisionModel.from_pretrained(temp)
 
-    def test_marker_spoofing_and_unregistered_heads_are_rejected(self):
+    def test_unregistered_heads_and_bosun_prompts_are_rejected(self):
         model = make_model()
-        with self.assertRaisesRegex(ValueError, "reserved decision candidate marker"):
-            model.choice(state=f"inject {CANDIDATE_MARKER}", choices=["a", "b"])
         with self.assertRaisesRegex(ValueError, "unknown decision head"):
             make_model(head_type="unregistered")
         with self.assertRaisesRegex(ValueError, "require prompt_format"):
@@ -244,7 +240,6 @@ class GeneralConversionTests(unittest.TestCase):
                     model.backbone.get_input_embeddings().num_embeddings,
                     len(model.tokenizer),
                 )
-                self.assertNotIn(CANDIDATE_MARKER, model.tokenizer.get_vocab())
                 self.assertFalse(any(p.requires_grad for p in model.backbone.parameters()))
                 unfrozen = load_model(
                     base,
@@ -256,15 +251,6 @@ class GeneralConversionTests(unittest.TestCase):
                 self.assertTrue(any(p.requires_grad for p in unfrozen.backbone.parameters()))
                 values = model.choice(state="ticket", choices=["approve", "reject"])
                 self.assertAlmostEqual(sum(values.probabilities.values()), 1.0, places=6)
-                self.assertEqual(
-                    set(
-                        model.choice(
-                            state=CANDIDATE_MARKER,
-                            choices=["approve", "reject"],
-                        ).probabilities
-                    ),
-                    {"approve", "reject"},
-                )
                 with tempfile.TemporaryDirectory() as output:
                     model.save_pretrained(output)
                     restored = DecisionModel.from_pretrained(output)
@@ -488,7 +474,6 @@ class GeneralConversionTests(unittest.TestCase):
                 device_map={"": 0},
             )
             self.assertTrue(model.backbone.is_loaded_in_4bit)
-            self.assertNotIn(CANDIDATE_MARKER, model.tokenizer.get_vocab())
             trainer = DecisionTrainer(
                 model=model,
                 dataset=[row("approve", "a"), row("reject", "b")],

@@ -2,7 +2,7 @@
 
 ``DecisionModel`` builds one strategy from its config: ``TokenReadout`` for
 Futurix and Bosun decision tokens, ``PointerReadout`` for candidate-aware heads
-over marker or span positions, and ``LetterCodeReadout`` for a fixed table of
+over candidate span endpoints, and ``LetterCodeReadout`` for a fixed table of
 answer codes. ``LabelReadoutModel`` supplies its own for released letter heads.
 """
 
@@ -19,7 +19,7 @@ import torch
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import CheckpointError, ConfigError, MissingDependencyError
 from futurix_decision.models.bosun import BOSUN_CONVERSION_CHAT_TEMPLATE, format_bosun_prompt
-from futurix_decision.models.custom_head import CANDIDATE_MARKER, HEAD_WEIGHTS, build_decision_head
+from futurix_decision.models.custom_head import HEAD_WEIGHTS, build_decision_head
 from futurix_decision.models.decision_head import decision_token, mask_unavailable_slots
 from futurix_decision.models.letter_code import (
     LetterCodeHead,
@@ -29,7 +29,6 @@ from futurix_decision.models.letter_code import (
 )
 from futurix_decision.models.tokenizer import (
     format_decision_prompt,
-    format_head_prompt,
     format_tokenized_head_prompt,
 )
 
@@ -187,6 +186,16 @@ class ReadoutStrategy(ABC):
         """Save this readout's head weights into ``path``, if it has a head."""
         return None
 
+    def _on_device(self, encoded: Mapping[str, torch.Tensor]) -> Encoded:
+        limit = self.model.config.max_sequence_length
+        if encoded["input_ids"].shape[1] > limit:
+            raise ConfigError(
+                f"prompt exceeds max_sequence_length={limit}; "
+                "increase the limit instead of silently truncating candidates"
+            )
+        device = input_device(self.model.backbone)
+        return {key: value.to(device) for key, value in with_position_ids(encoded).items()}
+
 
 class PromptReadout(ReadoutStrategy):
     """A readout that renders each example as one text prompt."""
@@ -211,16 +220,6 @@ class PromptReadout(ReadoutStrategy):
             add_special_tokens=True,
         )
         return self._on_device(encoded), [item[1] for item in prompts]
-
-    def _on_device(self, encoded: Mapping[str, torch.Tensor]) -> Encoded:
-        limit = self.model.config.max_sequence_length
-        if encoded["input_ids"].shape[1] > limit:
-            raise ConfigError(
-                f"prompt exceeds max_sequence_length={limit}; "
-                "increase the limit instead of silently truncating candidates"
-            )
-        device = input_device(self.model.backbone)
-        return {key: value.to(device) for key, value in with_position_ids(encoded).items()}
 
 
 class TokenReadout(PromptReadout):
@@ -279,7 +278,7 @@ class TokenReadout(PromptReadout):
         return DecisionBatch(mask_unavailable_slots(logits, slots), slots)
 
 
-class HeadReadout(PromptReadout):
+class HeadReadout(ReadoutStrategy):
     """A readout with a registered ``torch.nn.Module`` head over backbone hidden states."""
 
     head: torch.nn.Module
@@ -347,13 +346,10 @@ class HeadReadout(PromptReadout):
 
 
 class PointerReadout(HeadReadout):
-    """Score each option's marker (``marker-v1``) or span-end (``span-v1``) hidden state."""
+    """Score each option's last token (``span-v1``) against the query's final hidden state."""
 
     def __init__(self, model: DecisionModel, head: torch.nn.Module | None) -> None:
         super().__init__(model)
-        self.span = model.config.head_prompt_version == "span-v1"
-        if not self.span:
-            self.token_ids = add_tokens(model, [CANDIDATE_MARKER], what="candidate marker")
         set_padding(model.tokenizer, "right")
         config = model.config
         settings = dict(config.head_config)
@@ -364,65 +360,42 @@ class PointerReadout(HeadReadout):
             raise TypeError("decision_head must match the registered head factory")
         self.head = self._attach(head if head is not None else registered)
 
-    def prompt(self, example: DecisionInput, assignment_seed: int | None) -> tuple[str, list[int]]:
+    def _prepare(
+        self, example: DecisionInput, assignment_seed: int | None
+    ) -> tuple[list[int], list[int], list[int]]:
+        """Token IDs, each option's slot, and each option's last-token position."""
         config = self.model.config
-        return format_head_prompt(
+        return format_tokenized_head_prompt(
             example,
+            self.model.tokenizer,
             max_options=config.decision_tokens,
             seed=config.seed,
             assignment_seed=assignment_seed,
         )
 
-    def _span_encode(
+    def prompt_tokens(self, example: DecisionInput) -> int:
+        return len(self._prepare(example, None)[0])
+
+    def forward(
         self, examples: Sequence[DecisionInput], assignment_seed: int | None
-    ) -> tuple[Encoded, list[list[int]], list[list[int]]]:
-        """Pre-tokenized prompts, each option's slot, and each option's last-token position."""
+    ) -> DecisionBatch:
         reject_images(examples)
-        config, tokenizer = self.model.config, self.model.tokenizer
-        prepared = [
-            format_tokenized_head_prompt(
-                row,
-                tokenizer,
-                max_options=config.decision_tokens,
-                seed=config.seed,
-                assignment_seed=assignment_seed,
-            )
-            for row in examples
-        ]
+        prepared = [self._prepare(row, assignment_seed) for row in examples]
+        pad = self.model.tokenizer.pad_token_id
         width = max(len(item[0]) for item in prepared)
-        input_ids = torch.full((len(examples), width), tokenizer.pad_token_id, dtype=torch.long)
+        input_ids = torch.full((len(examples), width), pad, dtype=torch.long)
         attention_mask = torch.zeros_like(input_ids)
         for row, (tokens, _, _) in enumerate(prepared):
             input_ids[row, : len(tokens)] = torch.tensor(tokens, dtype=torch.long)
             attention_mask[row, : len(tokens)] = 1
         encoded = self._on_device({"input_ids": input_ids, "attention_mask": attention_mask})
-        return encoded, [item[1] for item in prepared], [item[2] for item in prepared]
-
-    def forward(
-        self, examples: Sequence[DecisionInput], assignment_seed: int | None
-    ) -> DecisionBatch:
-        if self.span:
-            encoded, slots, endpoints = self._span_encode(examples, assignment_seed)
-            hidden = self._base_hidden_states(encoded)
-        else:
-            encoded, slots = self._encode(examples, assignment_seed)
-            # Preserve the published marker-v1 forward contract for
-            # already exported pointer-head checkpoints.
-            hidden = self.model.backbone(
-                **encoded, output_hidden_states=True, logits_to_keep=1
-            ).hidden_states[-1]
+        hidden = self._base_hidden_states(encoded)
         head = self._head_on(hidden.device)
         sizes = [len(row.options) for row in examples]
         candidates = hidden.new_zeros((len(examples), max(sizes), hidden.shape[-1]))
         available = torch.zeros((len(examples), max(sizes)), dtype=torch.bool, device=hidden.device)
-        for row, count in enumerate(sizes):
-            if self.span:
-                markers = torch.tensor(endpoints[row], device=hidden.device)
-            else:
-                markers = encoded["input_ids"][row].eq(self.token_ids[0]).nonzero(as_tuple=True)[0]
-                if markers.numel() != count:
-                    raise ValueError("each option must have exactly one candidate marker")
-            candidates[row, :count] = hidden[row, markers]
+        for row, (count, (_, _, endpoints)) in enumerate(zip(sizes, prepared, strict=True)):
+            candidates[row, :count] = hidden[row, torch.tensor(endpoints, device=hidden.device)]
             available[row, :count] = True
         last = encoded["attention_mask"].sum(dim=1).to(hidden.device) - 1
         state = hidden[torch.arange(len(examples), device=hidden.device), last]
@@ -441,10 +414,12 @@ class PointerReadout(HeadReadout):
             )
         if not torch.isfinite(logits[outputs]).all():
             raise ValueError("decision head produced non-finite logits")
-        return DecisionBatch(logits.masked_fill(~outputs, float("-inf")), slots, null_slot)
+        return DecisionBatch(
+            logits.masked_fill(~outputs, float("-inf")), [i[1] for i in prepared], null_slot
+        )
 
 
-class LetterCodeReadout(HeadReadout):
+class LetterCodeReadout(HeadReadout, PromptReadout):
     """Project the final hidden state onto a fixed table of single-token answer codes."""
 
     head: LetterCodeHead

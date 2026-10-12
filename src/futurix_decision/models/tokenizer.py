@@ -9,7 +9,6 @@ from typing import Any
 
 from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import ConfigError
-from futurix_decision.models.custom_head import CANDIDATE_MARKER
 from futurix_decision.models.decision_head import assign_slots, decision_token
 
 
@@ -52,16 +51,12 @@ def _candidate_order(
     max_options: int,
     seed: int,
     assignment_seed: int | None,
-    *,
-    reject_marker: bool = True,
 ) -> tuple[str, str, list[str], list[int], list[int]]:
     if not 2 <= len(example.options) <= max_options:
         raise ConfigError("number of options must be between 2 and max_options")
     state = json.dumps(example.state, ensure_ascii=False, sort_keys=True)
     question = json.dumps(example.question, ensure_ascii=False)
     choices = [json.dumps(option, ensure_ascii=False) for option in example.options]
-    if reject_marker and any(CANDIDATE_MARKER in text for text in (state, question, *choices)):
-        raise ConfigError("input contains the reserved decision candidate marker")
     order = list(range(len(choices)))
     random.Random(
         row_seed(seed, assignment_seed, example.kind, state, question, example.options)
@@ -70,22 +65,6 @@ def _candidate_order(
     for position, original_index in enumerate(order):
         positions[original_index] = position
     return state, question, choices, order, positions
-
-
-def format_head_prompt(
-    example: DecisionInput,
-    *,
-    max_options: int = 256,
-    seed: int = 0,
-    assignment_seed: int | None = None,
-) -> tuple[str, list[int]]:
-    """Legacy marker contract; retained for previously exported pointer heads."""
-    state, question, choices, order, positions = _candidate_order(
-        example, max_options, seed, assignment_seed
-    )
-    candidates = "\n".join(f"{choices[index]} {CANDIDATE_MARKER}" for index in order)
-    prompt = f"State: {state}\nQuestion: {question}\nCandidates:\n{candidates}\nDecision:"
-    return prompt, positions
 
 
 def format_tokenized_head_prompt(
@@ -106,7 +85,6 @@ def format_tokenized_head_prompt(
         max_options,
         seed,
         assignment_seed,
-        reject_marker=False,
     )
     ids = tokenizer.encode(
         f"State: {state}\nQuestion: {question}\nCandidates:\n",

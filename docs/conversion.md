@@ -256,8 +256,7 @@ The pointer head reads hidden states at a question's final position and at
 each candidate endpoint; it scores a variable number of options in a single
 prefill. New `convert=True` checkpoints record tokenized candidate endpoints
 without adding vocabulary rows, so 4-bit bases need no embedding resize.
-Previously exported marker-based pointer heads continue to use their original
-prompt version when reloaded. For this path, `decision_tokens` means the configured
+For this path, `decision_tokens` means the configured
 maximum options per question (2–256 under the SDK's current input schema);
 custom heads do not use or reserve Bosun's 256 vocabulary slots.
 Training shuffles candidate presentation,

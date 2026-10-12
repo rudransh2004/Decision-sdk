@@ -18,7 +18,6 @@ from futurix_decision.models.letter_code import LetterCodeHead
 
 HeadFactory = Callable[..., nn.Module]
 _HEADS: dict[str, HeadFactory] = {}
-CANDIDATE_MARKER = "<|decision_candidate|>"
 HEAD_WEIGHTS = "decision_head.safetensors"
 
 

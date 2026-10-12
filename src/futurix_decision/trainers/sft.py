@@ -155,7 +155,7 @@ class SFTTrainer:
         if method == "qlora" and not quantized:
             raise ConfigError(
                 "QLoRA requires a 4-bit checkpoint loaded with BitsAndBytesConfig; "
-                "marker-based heads must be prepared before quantizing the base"
+                "decision-token rows must be added before quantizing the base"
             )
         device_map = getattr(backbone, "hf_device_map", None)
         if device_map:

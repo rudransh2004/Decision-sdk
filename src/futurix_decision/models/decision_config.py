@@ -24,6 +24,9 @@ _LOCKED = frozenset(
         "multimodal_loader",
     }
 )
+# The prompt contract each readout records; every other (custom) head reads span endpoints.
+# Token readouts keep "marker-v1", the value their saved checkpoints already carry.
+_PROMPT_VERSIONS = {"tokens": "marker-v1", "letter_code": "letter-code-v1"}
 # Where the weights came from. ``from_pretrained`` derives these from the checkpoint.
 _PROVENANCE = ("base_checkpoint", "source_checkpoint", "source_revision", "base_model_revision")
 
@@ -34,9 +37,11 @@ class DecisionModelConfig:
 
     ``head_type`` picks the readout: ``"tokens"`` scores added decision-token
     rows, ``"letter_code"`` a fixed answer-code table, and any other registered
-    head name (``"pointer"`` by default) a candidate-aware head over marker or
-    span positions. ``temperature`` and ``max_sequence_length`` may change after
-    loading; changing the other fields of a live model is unsupported.
+    head name (``"pointer"`` by default) a candidate-aware head over candidate
+    span endpoints. ``head_prompt_version`` follows from ``head_type`` and is
+    recorded so a checkpoint names its prompt contract. ``temperature`` and
+    ``max_sequence_length`` may change after loading; changing the other
+    fields of a live model is unsupported.
     """
 
     decision_tokens: int = 256
@@ -47,7 +52,7 @@ class DecisionModelConfig:
     prompt_schema: str = BOSUN_PROMPT_SCHEMA
     head_type: str = "tokens"
     head_config: dict[str, Any] = field(default_factory=dict)
-    head_prompt_version: str = "marker-v1"
+    head_prompt_version: str = ""
     train_backbone: bool = True
     bosun_template_fallback: bool = False
     learn_abstain: bool = False
@@ -77,14 +82,12 @@ class DecisionModelConfig:
             )
         if tokens and self.head_config:
             raise ConfigError("token readout does not take a custom decision head")
-        if self.head_prompt_version not in ("marker-v1", "span-v1", "letter-code-v1"):
-            raise ConfigError("unsupported candidate prompt version")
-        if tokens and self.head_prompt_version != "marker-v1":
-            raise ConfigError("candidate prompt versions require a custom decision head")
-        if (self.head_type == "letter_code") != (self.head_prompt_version == "letter-code-v1"):
+        expected = _PROMPT_VERSIONS.get(self.head_type, "span-v1")
+        if not self.head_prompt_version:
+            self.head_prompt_version = expected
+        elif self.head_prompt_version != expected:
             raise ConfigError(
-                "letter-code readouts require head_type='letter_code' "
-                "and head_prompt_version='letter-code-v1'"
+                f"head_type={self.head_type!r} requires head_prompt_version={expected!r}"
             )
         if self.head_type == "letter_code" and self.decision_tokens > 255:
             raise ConfigError("letter-code readout supports at most 255 options")

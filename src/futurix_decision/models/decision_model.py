@@ -62,8 +62,9 @@ class DecisionModel(DecisionShortcuts):
         **settings: Any,
     ) -> None:
         if config is None:
-            config = DecisionModelConfig(**self._defaults())
-        config = replace(config, **settings)
+            config = DecisionModelConfig(**{**self._defaults(), **settings})
+        elif settings:
+            config = replace(config, **settings)
         if not self._reads(config.prompt_format):
             raise ConfigError(
                 f"{type(self).__name__} cannot read prompt_format={config.prompt_format!r}; "

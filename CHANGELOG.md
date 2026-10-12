@@ -17,6 +17,14 @@ checkpoints and APIs is gone.
 - **Breaking:** a saved checkpoint without `learn_abstain` no longer has it locked to
   `false`; the field is unset, as any other missing field is.
 - The `tests/fixtures/legacy-0.1` checkpoints and the tests that reloaded them.
+- **Breaking:** the `marker-v1` pointer-head contract: the `<|decision_candidate|>`
+  vocabulary token, `futurix_decision.models.custom_head.CANDIDATE_MARKER`, and
+  `futurix_decision.models.tokenizer.format_head_prompt`. Every pointer or registered
+  custom head now reads candidate span endpoints (`span-v1`), including heads started with
+  `DecisionModel(..., head_type="pointer")`, `DecisionModel.from_pretrained(...,
+  head_type=...)`, and Qwen3.5 `convert=True`, which used to add the marker token.
+  `head_prompt_version` defaults from `head_type`, and a value that does not match it
+  raises `ConfigError`. Checkpoints with `marker-v1` pointer heads no longer load.
 
 ## [0.2.0] — 2026-10-12
 
