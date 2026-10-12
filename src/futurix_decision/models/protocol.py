@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from futurix_decision.datasets.schema import DecisionInput, State
-from futurix_decision.inference.schemas import DecisionResult
+from futurix_decision.inference.schemas import (
+    DecisionResult,
+    choice_input,
+    noul_input,
+    score_input,
+)
 
 
 @runtime_checkable
@@ -56,6 +62,50 @@ class DecisionBackend(Protocol):
     def close(self) -> None:
         """Release connections the backend opened; a no-op for in-process models."""
         ...
+
+
+class DecisionShortcuts(ABC):
+    """``choice``, ``noul``, and ``score`` as one-example ``decide`` calls."""
+
+    @abstractmethod
+    def decide(
+        self, example: DecisionInput, *, confidence_threshold: float | None = None
+    ) -> DecisionResult: ...
+
+    def choice(
+        self,
+        *,
+        state: State,
+        choices: Sequence[str],
+        question: str = "Which option should be selected?",
+        confidence_threshold: float | None = None,
+    ) -> DecisionResult:
+        return self.decide(
+            choice_input(state, choices, question), confidence_threshold=confidence_threshold
+        )
+
+    def noul(
+        self,
+        *,
+        state: State,
+        question: str = "Is this true?",
+        confidence_threshold: float | None = None,
+    ) -> DecisionResult:
+        return self.decide(noul_input(state, question), confidence_threshold=confidence_threshold)
+
+    def score(
+        self,
+        *,
+        state: State,
+        question: str = "What score should be assigned?",
+        min_score: int = 0,
+        max_score: int = 5,
+        confidence_threshold: float | None = None,
+    ) -> DecisionResult:
+        return self.decide(
+            score_input(state, question, min_score, max_score),
+            confidence_threshold=confidence_threshold,
+        )
 
 
 if TYPE_CHECKING:

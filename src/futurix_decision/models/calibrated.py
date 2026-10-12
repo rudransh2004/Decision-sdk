@@ -5,16 +5,13 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 
-from futurix_decision.datasets.schema import DecisionInput, State
+from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import ConfigError
 from futurix_decision.inference.schemas import (
     DecisionResult,
     check_confidence_threshold,
-    choice_input,
-    noul_input,
-    score_input,
 )
-from futurix_decision.models.protocol import DecisionBackend
+from futurix_decision.models.protocol import DecisionBackend, DecisionShortcuts
 
 
 def scale_probabilities(probabilities: Sequence[float], temperature: float) -> list[float]:
@@ -30,7 +27,7 @@ def scale_probabilities(probabilities: Sequence[float], temperature: float) -> l
     return [weight / total for weight in weights]
 
 
-class Calibrated:
+class Calibrated(DecisionShortcuts):
     """A ``DecisionBackend`` whose probabilities are rescaled by ``temperature``.
 
     Each result's probabilities become ``softmax(log p / temperature)`` over
@@ -80,41 +77,6 @@ class Calibrated:
             self._calibrate(example, result, confidence_threshold)
             for example, result in zip(examples, results, strict=True)
         ]
-
-    def choice(
-        self,
-        *,
-        state: State,
-        choices: Sequence[str],
-        question: str = "Which option should be selected?",
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        return self.decide(
-            choice_input(state, choices, question), confidence_threshold=confidence_threshold
-        )
-
-    def noul(
-        self,
-        *,
-        state: State,
-        question: str = "Is this true?",
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        return self.decide(noul_input(state, question), confidence_threshold=confidence_threshold)
-
-    def score(
-        self,
-        *,
-        state: State,
-        question: str = "What score should be assigned?",
-        min_score: int = 0,
-        max_score: int = 5,
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        return self.decide(
-            score_input(state, question, min_score, max_score),
-            confidence_threshold=confidence_threshold,
-        )
 
     def close(self) -> None:
         """Close the wrapped backend."""

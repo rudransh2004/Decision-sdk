@@ -18,13 +18,12 @@ from futurix_decision.inference.schemas import (
     DecisionResult,
     check_confidence_threshold,
     choice_input,
-    noul_input,
-    score_input,
 )
 from futurix_decision.inference.system_one import system_one_answers, system_one_inputs
 from futurix_decision.models.decision_config import LOADABLE, DecisionModelConfig
 from futurix_decision.models.families import reject_native_checkpoint
 from futurix_decision.models.families.futurix import QWEN35
+from futurix_decision.models.protocol import DecisionShortcuts
 from futurix_decision.models.readouts import (
     DecisionBatch,
     LetterCodeReadout,
@@ -39,7 +38,7 @@ from futurix_decision.utils.config import load_decision_config
 DECISION_CONFIG = "decision_config.json"
 
 
-class DecisionModel:
+class DecisionModel(DecisionShortcuts):
     """Wrap a decoder-only LM with a decision readout chosen by ``DecisionModelConfig``.
 
     ``DecisionModel(backbone, tokenizer, config)`` takes a config; keyword
@@ -344,39 +343,6 @@ class DecisionModel:
                 zip(examples, batch.slots, thresholds, strict=True)
             )
         ]
-
-    def choice(
-        self,
-        *,
-        state: State,
-        choices: Sequence[str],
-        question: str = "Which option should be selected?",
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        example = choice_input(state, choices, question)
-        return self._infer([example], [confidence_threshold])[0]
-
-    def noul(
-        self,
-        *,
-        state: State,
-        question: str = "Is this true?",
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        example = noul_input(state, question)
-        return self._infer([example], [confidence_threshold])[0]
-
-    def score(
-        self,
-        *,
-        state: State,
-        question: str = "What score should be assigned?",
-        min_score: int = 0,
-        max_score: int = 5,
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        example = score_input(state, question, min_score, max_score)
-        return self._infer([example], [confidence_threshold])[0]
 
     def close(self) -> None:
         """Do nothing: an in-process model holds no connections. Part of ``DecisionBackend``."""

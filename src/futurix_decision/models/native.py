@@ -18,15 +18,12 @@ from typing import Any
 import httpx
 
 from futurix_decision.client._transport import DEFAULT_MAX_RETRIES
-from futurix_decision.datasets.schema import DecisionInput, State
+from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.datasets.systemone import native_question
 from futurix_decision.errors import CheckpointError, ConfigError, InvalidOutputError
 from futurix_decision.inference.schemas import (
     DecisionResult,
     check_confidence_threshold,
-    choice_input,
-    noul_input,
-    score_input,
 )
 from futurix_decision.models.families.http import HttpRuntime
 from futurix_decision.models.families.publisher import (
@@ -34,6 +31,7 @@ from futurix_decision.models.families.publisher import (
     PublisherAdapter,
     pinned_remote,
 )
+from futurix_decision.models.protocol import DecisionShortcuts
 from futurix_decision.models.registry import get_family
 from futurix_decision.models.sources import ALIASES, checkpoint_source, infer_local_family
 
@@ -125,7 +123,7 @@ def _result(
     )
 
 
-class NativeDecisionModel:
+class NativeDecisionModel(DecisionShortcuts):
     """One `decide`/`choice`/`noul`/`score` API over distinct publisher runtimes.
 
     `runtime` is public for advanced access to native hooks, heads, or processors.
@@ -322,41 +320,6 @@ class NativeDecisionModel:
             _result(row, answer, latency, confidence_threshold)
             for row, (answer, latency) in zip(examples, batched, strict=True)
         ]
-
-    def choice(
-        self,
-        *,
-        state: State,
-        choices: Sequence[str],
-        question: str = "Which option should be selected?",
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        return self.decide(
-            choice_input(state, choices, question), confidence_threshold=confidence_threshold
-        )
-
-    def noul(
-        self,
-        *,
-        state: State,
-        question: str = "Is this true?",
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        return self.decide(noul_input(state, question), confidence_threshold=confidence_threshold)
-
-    def score(
-        self,
-        *,
-        state: State,
-        question: str = "What score should be assigned?",
-        min_score: int = 0,
-        max_score: int = 5,
-        confidence_threshold: float | None = None,
-    ) -> DecisionResult:
-        return self.decide(
-            score_input(state, question, min_score, max_score),
-            confidence_threshold=confidence_threshold,
-        )
 
     def finetune(
         self, dataset: Any, output_dir: str | Path, *, config: Any | None = None, **kwargs: Any
