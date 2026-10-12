@@ -545,7 +545,7 @@ class SourceTests(unittest.TestCase):
 
     def test_qwen_multimodal_conversion_accepts_explicit_bosun_strategy(self):
         with (
-            patch("futurix_decision.models.native.require_transformers"),
+            patch("futurix_decision.models.loader.require_transformers"),
             patch.object(
                 DecisionModel,
                 "from_pretrained",

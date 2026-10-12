@@ -9,7 +9,8 @@ from futurix_decision.models.registry import get_family, register_family
 if TYPE_CHECKING:
     from futurix_decision.models.custom_head import PointerDecisionHead, register_decision_head
     from futurix_decision.models.decision_model import DecisionBatch, DecisionModel
-    from futurix_decision.models.native import NativeCapabilities, NativeDecisionModel, load_model
+    from futurix_decision.models.loader import load_model
+    from futurix_decision.models.native import NativeCapabilities, NativeDecisionModel
 
 __getattr__ = lazy_exports(
     __name__,
@@ -20,7 +21,7 @@ __getattr__ = lazy_exports(
         "DecisionModel": "futurix_decision.models.decision_model",
         "NativeCapabilities": "futurix_decision.models.native",
         "NativeDecisionModel": "futurix_decision.models.native",
-        "load_model": "futurix_decision.models.native",
+        "load_model": "futurix_decision.models.loader",
     },
 )
 

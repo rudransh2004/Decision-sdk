@@ -9,6 +9,25 @@ from typing import Any
 from futurix_decision.errors import CheckpointError
 from futurix_decision.models.families import FAMILIES
 
+# Short names that ``load_model`` and ``NativeDecisionModel`` accept for Hub IDs.
+ALIASES = {
+    "bosun-0.6b": "Hanno-Labs/bosun-v3.1-0.6b",
+    "bosun-1.7b": "Hanno-Labs/bosun-v3.1-1.7b",
+    "kev": "jaredpalmer/kev-9b",
+    "laya": "convaiinnovations/laya",
+    "laya-multilingual": "convaiinnovations/laya-multilingual",
+    "gliner": "fastino/GLiNER2.5-Decide",
+    "clef": "Cloudflare/clef",
+    "clef-flash": "Cloudflare/clef-flash",
+    "pplx-decider": "perplexity-ai/pplx-decider-v1.1-27b",
+    "openjev": "openjev/openjev",
+    "openjev-flash": "openjev/OpenJev-Flash-9B",
+    "nox": "vllm-sr/Decision-2.0-Nox-4B",
+    "lux": "vllm-sr/Decision-2.0-Lux-9B",
+    "liquid-d1": "LiquidAI/d1-3B",
+    "qwen3.5-9b": "Qwen/Qwen3.5-9B",
+}
+
 
 def checkpoint_source(checkpoint: str | Path) -> tuple[str, bool]:
     """Keep Hub IDs as IDs, but never send an explicit missing disk path to the Hub."""
