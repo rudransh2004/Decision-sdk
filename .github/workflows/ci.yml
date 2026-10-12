@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      UV_TORCH_BACKEND: cpu  # CUDA wheels are large and unused here
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          activate-environment: true
+      - run: uv pip install -e ".[dev,serve]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      UV_TORCH_BACKEND: cpu  # CUDA wheels are large and unused here
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          activate-environment: true
+      - run: uv pip install -e ".[dev,serve]"
+      - run: python -m pytest -q
+
+  # One job per extra: install it alone and import what it provides. This
+  # catches pin conflicts between an extra and the base dependencies.
+  extras:
+    runs-on: ubuntu-latest
+    env:
+      UV_TORCH_BACKEND: cpu  # CUDA wheels are large and unused here
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - extra: datasets
+            imports: datasets
+          - extra: train
+            imports: accelerate, peft, safetensors, futurix_decision.trainers
+          - extra: bosun
+            imports: accelerate, peft, futurix_decision.models.bosun
+          - extra: decider
+            imports: accelerate, peft, futurix_decision.models.decider
+          - extra: jpt
+            imports: accelerate, peft, futurix_decision.models.jpt
+          - extra: eikos
+            imports: accelerate, peft, futurix_decision.models.eikos
+          - extra: native-http
+            imports: httpx, futurix_decision.models.native
+          - extra: laya
+            imports: laya
+          - extra: gliner
+            imports: gliner2.classification
+          - extra: gliner-train
+            imports: gliner2.training.trainer
+          - extra: kev-native
+            imports: peft, datasets, futurix_decision.models.native
+          - extra: clef
+            imports: accelerate, torchvision, PIL, futurix_decision.models.native
+          - extra: pplx-decider
+            imports: safetensors, futurix_decision.models.native
+          - extra: nox-lux
+            imports: safetensors, futurix_decision.models.native
+          - extra: liquid-d1
+            imports: torchvision, PIL, futurix_decision.models.native
+          - extra: qwen3.5
+            imports: accelerate, peft, futurix_decision.models
+          - extra: qlora
+            imports: accelerate, peft, safetensors
+          - extra: serve
+            imports: fastapi, uvicorn, futurix_decision.vllm.api
+          - extra: wandb
+            imports: wandb, futurix_decision.utils.logging
+    name: extras (${{ matrix.extra }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          activate-environment: true
+      - run: uv pip install ".[${{ matrix.extra }}]"
+      - run: python -c "import futurix_decision, ${{ matrix.imports }}"
+
+  # vLLM does not build on CPU runners, so these extras only prove that their
+  # pins resolve for Linux with CUDA torch.
+  extras-vllm:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extra: [vllm, decider-vllm, jpt-vllm, eikos-vllm]
+    name: extras (${{ matrix.extra }}, resolve only)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv pip compile pyproject.toml --extra ${{ matrix.extra }}
+          --python-version 3.12 --python-platform x86_64-manylinux_2_28
