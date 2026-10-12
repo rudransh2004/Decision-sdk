@@ -60,9 +60,67 @@ uv pip compile pyproject.toml --extra decider-vllm --python-platform x86_64-many
 
 ## Add a model family
 
-This section will be written after the family adapter refactor (Phase 6 of
-`docs/plans/sdk-0.2.md`). That refactor gives each family one adapter file and one
-registry line.
+Each family is a `FamilyAdapter` (`src/futurix_decision/models/families/base.py`).
+`load_model` and the CLI find adapters by name in the registry
+(`src/futurix_decision/models/registry.py`). To add a family:
+
+1. Create `src/futurix_decision/models/families/<family>.py` with a `FamilyAdapter`
+   subclass. Import torch and the publisher's packages inside methods, not at module
+   level, so `import futurix_decision` stays torch-free.
+2. Add one instance of it to the list at the end of `registry.py`.
+3. Add tests, and a row for the family in the family table
+   (`src/futurix_decision/models/families/__init__.py`) and the README matrix.
+
+The adapter sets three attributes and implements `load`:
+
+```python
+class FamilyAdapter(ABC):
+    name: str  # family= in load_model, --model-format in the CLI
+    checkpoints: tuple[str, ...]  # Hub IDs load_model recognizes by name
+    extra: str | None  # pip extra that installs the family
+
+    def load(self, checkpoint: str, *, device: str | None = None, **kwargs) -> DecisionBackend: ...
+    def requires(self, path: Path) -> None: ...  # optional
+    def finetune(self, model, dataset, output_dir, **kwargs) -> DecisionBackend: ...  # optional
+    def training_kwargs(self, section, *, method: str) -> dict: ...  # optional
+```
+
+- `load` returns any `DecisionBackend`. It receives the `load_model` keyword arguments,
+  or the options of the CLI command. Raise `ConfigError` for options the family does
+  not support.
+- `requires` raises `CheckpointError` when a local directory lacks a file `load` needs.
+  `load_model` calls it before `load`. Today the built-in adapters delegate to
+  `require_checkpoint_files` in `models/sources.py`.
+- `finetune` trains in the family's own format and returns the reloaded backend.
+  Implement it only when the family has its own trainer; the others train through
+  `DecisionTrainer`, which needs `load` to return a `DecisionModel`.
+- `training_kwargs` turns the `model:` section of a `futurix-decision train` config into
+  `load` options. The default accepts a section that sets no family options.
+
+`load_model` still identifies local checkpoints through `infer_local_family` in
+`models/sources.py`. A family without a recognizable file layout loads with
+`family=` passed explicitly.
+
+Code outside the SDK can register a family at runtime:
+
+```python
+from futurix_decision import FamilyAdapter, load_model, register_family
+
+
+class AcmeAdapter(FamilyAdapter):
+    name = "acme"
+    checkpoints = ("acme/decider-1",)
+
+    def load(self, checkpoint, *, device=None, **kwargs):
+        return AcmeBackend(checkpoint, device=device, **kwargs)
+
+
+register_family(AcmeAdapter())
+model = load_model("acme/decider-1")
+```
+
+After `register_family`, `futurix-decision evaluate --model-format acme` also loads it,
+when the CLI runs in the same process (for example through `futurix_decision.cli.main`).
 
 ## Changelog
 
