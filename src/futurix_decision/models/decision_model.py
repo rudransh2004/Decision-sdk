@@ -16,7 +16,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from futurix_decision.datasets.schema import DecisionInput, State
 from futurix_decision.inference.schemas import DecisionResult
 from futurix_decision.models.bosun import (
-    BOSUN_CONVERSION_CHAT_TEMPLATE, BOSUN_PROMPT_SCHEMA, format_bosun_prompt,
+    BOSUN_CONVERSION_CHAT_TEMPLATE,
+    BOSUN_PROMPT_SCHEMA,
+    format_bosun_prompt,
 )
 from futurix_decision.models.custom_head import (
     CANDIDATE_MARKER,
@@ -26,11 +28,16 @@ from futurix_decision.models.custom_head import (
 from futurix_decision.models.decision_head import decision_token, mask_unavailable_slots
 from futurix_decision.models.families import reject_native_checkpoint
 from futurix_decision.models.letter_code import (
-    LetterCodeHead, answer_codes, enable_qwen_noncausal_attention, format_letter_code_prompt,
+    LetterCodeHead,
+    answer_codes,
+    enable_qwen_noncausal_attention,
+    format_letter_code_prompt,
 )
 from futurix_decision.models.sources import checkpoint_source, require_checkpoint_files
 from futurix_decision.models.tokenizer import (
-    format_decision_prompt, format_head_prompt, format_tokenized_head_prompt,
+    format_decision_prompt,
+    format_head_prompt,
+    format_tokenized_head_prompt,
 )
 from futurix_decision.utils.config import load_decision_config
 

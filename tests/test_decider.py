@@ -19,7 +19,9 @@ from transformers import GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
 from futurix_decision import DecisionInput, DecisionModel, DecisionTrainer, SFTConfig
 from futurix_decision.datasets.schema import DecisionExample
 from futurix_decision.models.decider import (
-    DeciderDecisionModel, letter_table, prepare_decider_rows,
+    DeciderDecisionModel,
+    letter_table,
+    prepare_decider_rows,
 )
 from futurix_decision.models.families import FAMILIES
 from futurix_decision.vllm.engine import VLLMEngine

@@ -1,6 +1,6 @@
+import copy
 import importlib.util
 import math
-import copy
 import unittest
 from unittest.mock import patch
 
@@ -12,13 +12,13 @@ from futurix_decision.rewards import (
     RankedProbabilityScore,
     SphericalScore,
 )
+from futurix_decision.trainers.losses import decision_sft_loss
 from futurix_decision.trainers.rlcd import (
     RLCDConfig,
     RLCDTrainer,
     group_advantages,
     rlcd_policy_loss,
 )
-from futurix_decision.trainers.losses import decision_sft_loss
 
 
 class ScoringTests(unittest.TestCase):

@@ -7,7 +7,6 @@ import sys
 import tempfile
 import time
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 
 from futurix_decision.datasets import DecisionInput
@@ -39,6 +38,7 @@ class APITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from fastapi.testclient import TestClient
+
         from futurix_decision.vllm.api import create_app
         from test_sft import tiny_model
 
@@ -99,6 +99,7 @@ class APITests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("FUTURIX_TEST_SERVER") == "1", "opt-in HTTP server smoke test")
     def test_cli_server_over_http(self):
         import httpx
+
         from test_sft import tiny_model
 
         with tempfile.TemporaryDirectory() as temp:

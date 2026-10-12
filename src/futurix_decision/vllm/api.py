@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from futurix_decision import __version__
 from futurix_decision.datasets import DecisionInput
 from futurix_decision.inference.schemas import DecisionRequest, DecisionResponse
 
@@ -74,7 +75,7 @@ def _compat_input(
 
 
 def create_app(engine: Any) -> FastAPI:
-    app = FastAPI(title="Futurix Decision API", version="0.1.0")
+    app = FastAPI(title="Futurix Decision API", version=__version__)
     lock = threading.Lock()
     counters: dict[str, int] = defaultdict(int)
     latency: dict[str, float] = defaultdict(float)

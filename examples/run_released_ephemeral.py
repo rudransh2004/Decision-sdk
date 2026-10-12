@@ -15,7 +15,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 MIN_FREE_GIB = {"clef-flash": 50, "clef": 112, "pplx-decider": 112}
 
 

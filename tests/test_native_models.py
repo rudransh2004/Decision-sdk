@@ -1,15 +1,12 @@
 import json
-import tempfile
 import types
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 
 from futurix_decision import DecisionInput, NativeDecisionModel, load_model
 from futurix_decision.models.native import _question
-
 
 CHOICE = DecisionInput(
     state={"ticket": "duplicate charge"}, question="Which team?",
@@ -62,7 +59,7 @@ class NativeInferenceTests(unittest.TestCase):
             {"probabilities": {"billing": 0.3, "technical": 0.3}},
         ):
             class Agent:
-                def predict(self, _state, _questions):
+                def predict(self, _state, _questions, values=values):
                     return {"answers": {"decision": {"type": "choice", **values}}}
             with self.subTest(values=values), self.assertRaises(ValueError):
                 NativeDecisionModel.from_runtime(

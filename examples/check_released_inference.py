@@ -44,9 +44,9 @@ RELEASES = tuple(EXTRAS) + EARLIER + tuple(RAW_CONVERSIONS)
 
 def _check_release(name: str, device: str, base_url: str | None, precision: str) -> None:
     import torch
+    from test_released_decisions import MODELS, REVISIONS, show_inference
 
     from futurix_decision import DecisionModel, load_model
-    from test_released_decisions import MODELS, REVISIONS, show_inference
 
     dtype = torch.float32 if precision == "fp32" else torch.bfloat16
     if name in EXTRAS:

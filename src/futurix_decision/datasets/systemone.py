@@ -7,8 +7,8 @@ target can be a hard option key, a boolean, or an aligned probability map/list.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
 import json
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 

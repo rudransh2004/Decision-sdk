@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import nullcontext
 from itertools import islice
 from pathlib import Path
-import sys
 from typing import Any
 
 import torch
@@ -155,9 +155,9 @@ def evaluate(
                     position = stream.tell() - len(line)
                     try:
                         saved = json.loads(line)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
+                    except (json.JSONDecodeError, UnicodeDecodeError) as error:
                         if stream.read(1):
-                            raise ValueError("evaluation journal has a corrupt nonfinal row")
+                            raise ValueError("evaluation journal has a corrupt nonfinal row") from error
                         # An interrupted append can leave only the last row
                         # incomplete. Keep every preceding complete response.
                         stream.truncate(position)

@@ -15,7 +15,12 @@ from torch.distributions import Normal
 from futurix_decision.datasets import DecisionExample
 from futurix_decision.evaluation.metrics import compute_metrics
 from futurix_decision.models import DecisionBatch, DecisionModel
-from futurix_decision.rewards import LogScore, ProperScoringRule, RankedProbabilityScore, SphericalScore
+from futurix_decision.rewards import (
+    LogScore,
+    ProperScoringRule,
+    RankedProbabilityScore,
+    SphericalScore,
+)
 from futurix_decision.trainers.losses import decision_sft_loss
 from futurix_decision.trainers.sft import DatasetSource, SFTConfig, SFTTrainer
 

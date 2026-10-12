@@ -1,11 +1,22 @@
 """Futurix Decision SDK."""
 
-from futurix_decision.datasets import DecisionExample, DecisionInput, load_decisions, load_open_decisions
+__version__ = "0.1.0"
+
+from futurix_decision.datasets import (
+    DecisionExample,
+    DecisionInput,
+    load_decisions,
+    load_open_decisions,
+)
 from futurix_decision.evaluation import evaluate, fit_temperature
 from futurix_decision.inference import DecisionResult
 from futurix_decision.models import (
-    DecisionModel, NativeCapabilities, NativeDecisionModel, PointerDecisionHead,
-    load_model, register_decision_head,
+    DecisionModel,
+    NativeCapabilities,
+    NativeDecisionModel,
+    PointerDecisionHead,
+    load_model,
+    register_decision_head,
 )
 from futurix_decision.trainers import (
     CalibrationConfig,
@@ -17,8 +28,6 @@ from futurix_decision.trainers import (
     SFTConfig,
     SFTTrainer,
 )
-
-__version__ = "0.1.0"
 
 __all__ = [
     "DecisionExample",

@@ -23,7 +23,9 @@ from futurix_decision.datasets.schema import DecisionInput, State
 from futurix_decision.inference.schemas import DecisionResult
 from futurix_decision.models.families import identify_family, reject_native_checkpoint
 from futurix_decision.models.sources import (
-    checkpoint_source, infer_local_family, read_checkpoint_json,
+    checkpoint_source,
+    infer_local_family,
+    read_checkpoint_json,
     require_checkpoint_files,
 )
 

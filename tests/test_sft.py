@@ -21,8 +21,8 @@ from transformers import (
 from futurix_decision import DecisionModel, DecisionTrainer, SFTConfig, SFTTrainer
 from futurix_decision.datasets import DecisionExample
 from futurix_decision.models import DecisionBatch
-from futurix_decision.trainers.sft import _representative_rows
 from futurix_decision.trainers import decision_sft_loss, hard_cross_entropy, soft_cross_entropy
+from futurix_decision.trainers.sft import _representative_rows
 
 
 def tiny_model() -> DecisionModel:
@@ -168,7 +168,8 @@ class SFTTrainingTests(unittest.TestCase):
             self.assertAlmostEqual(result.confidence, other.confidence, places=5)
 
     def test_reiterable_stream_and_one_shot_rejection(self):
-        source = lambda: (example("approve", str(i)) for i in range(3))
+        def source():
+            return (example("approve", str(i)) for i in range(3))
 
         class Repeatable:
             def __iter__(self):

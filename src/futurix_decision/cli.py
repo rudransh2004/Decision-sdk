@@ -6,9 +6,9 @@ import argparse
 import json
 import os
 import shutil
-from itertools import islice
 from dataclasses import replace
 from datetime import datetime, timezone
+from itertools import islice
 from pathlib import Path
 from typing import Any
 

@@ -55,6 +55,7 @@ class NativeCLITests(unittest.TestCase):
 class NativeServingTests(unittest.TestCase):
     def test_native_systemone_keeps_question_contract(self):
         from fastapi.testclient import TestClient
+
         from futurix_decision.vllm.api import create_app
 
         class Agent:

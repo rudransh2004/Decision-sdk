@@ -16,7 +16,12 @@ from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
 
 from futurix_decision import (
-    DecisionInput, DecisionTrainer, RLCDConfig, SFTConfig, evaluate, load_model,
+    DecisionInput,
+    DecisionTrainer,
+    RLCDConfig,
+    SFTConfig,
+    evaluate,
+    load_model,
 )
 from futurix_decision.models.letter_code import answer_codes
 
@@ -190,8 +195,10 @@ class LetterCodeConversionTests(unittest.TestCase):
     )
     def test_small_qwen_multimodal_text_noncausal_roundtrip(self):
         from transformers import (
-            Qwen3_5Config, Qwen3_5ForConditionalGeneration,
-            Qwen3_5TextConfig, Qwen3_5VisionConfig,
+            Qwen3_5Config,
+            Qwen3_5ForConditionalGeneration,
+            Qwen3_5TextConfig,
+            Qwen3_5VisionConfig,
         )
 
         with tempfile.TemporaryDirectory() as temp:

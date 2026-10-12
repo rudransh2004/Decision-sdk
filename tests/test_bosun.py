@@ -1,5 +1,5 @@
-import json
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -184,6 +184,7 @@ class BosunContractTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("peft"), "PEFT not installed")
     def test_continuation_preserves_rows_and_trains_untied_output(self):
         from peft import LoraConfig, TaskType, get_peft_model
+
         from test_sft import tiny_untied_model
 
         base = tiny_untied_model()

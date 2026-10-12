@@ -10,7 +10,6 @@ from futurix_decision.evaluation.evaluator import iter_examples
 from futurix_decision.trainers.sft import _canonical_rows
 from test_sft import tiny_model
 
-
 GROUP = {
     "id": "ticket-7",
     "state": [{"role": "user", "content": "Invoice expired"}],

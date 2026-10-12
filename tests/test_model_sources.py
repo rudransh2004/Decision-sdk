@@ -12,7 +12,9 @@ from huggingface_hub.errors import EntryNotFoundError
 
 from futurix_decision import DecisionModel, load_model
 from futurix_decision.models.sources import (
-    checkpoint_source, infer_local_family, require_checkpoint_files,
+    checkpoint_source,
+    infer_local_family,
+    require_checkpoint_files,
 )
 from test_bosun import bosun_tiny_model
 from test_decision_model import tiny_checkpoint

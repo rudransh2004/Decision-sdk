@@ -13,7 +13,10 @@ from unittest.mock import patch
 import torch
 from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import (
-    GPT2Config, GPT2LMHeadModel, LlamaConfig, LlamaForCausalLM,
+    GPT2Config,
+    GPT2LMHeadModel,
+    LlamaConfig,
+    LlamaForCausalLM,
     PreTrainedTokenizerFast,
 )
 
@@ -26,8 +29,8 @@ from futurix_decision import (
     load_model,
     register_decision_head,
 )
-from futurix_decision.models.custom_head import CANDIDATE_MARKER, HEAD_WEIGHTS
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA
+from futurix_decision.models.custom_head import CANDIDATE_MARKER, HEAD_WEIGHTS
 from futurix_decision.trainers import RLCDConfig
 
 

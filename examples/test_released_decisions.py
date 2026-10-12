@@ -14,7 +14,11 @@ from pathlib import Path
 import torch
 
 from futurix_decision import (
-    DecisionTrainer, NativeSFTConfig, SFTConfig, load_decisions, load_model,
+    DecisionTrainer,
+    NativeSFTConfig,
+    SFTConfig,
+    load_decisions,
+    load_model,
 )
 
 MODELS = {

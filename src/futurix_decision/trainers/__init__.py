@@ -5,9 +5,9 @@ from futurix_decision.trainers.losses import (
     hard_cross_entropy,
     soft_cross_entropy,
 )
-from futurix_decision.trainers.sft import SFTConfig, SFTTrainer
-from futurix_decision.trainers.rlcd import RLCDConfig, RLCDTrainer
 from futurix_decision.trainers.native import NativeSFTConfig
+from futurix_decision.trainers.rlcd import RLCDConfig, RLCDTrainer
+from futurix_decision.trainers.sft import SFTConfig, SFTTrainer
 
 __all__ = [
     "DecisionTrainer",
