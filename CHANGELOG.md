@@ -72,6 +72,20 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ConfigError`. Migration: drop `head_type` and `train_backbone` where a release
   rejects them, and narrow the result with `isinstance` before calling
   family-specific methods such as `NativeDecisionModel.finetune`.
+- **Breaking:** each publisher runtime (Kev, Laya, GLiNER, Clef, PPLX Decider, OpenJev,
+  Nox, Lux, Liquid d1) is its own `PublisherAdapter` subclass in
+  `futurix_decision.models.families`, which loads, checks, runs, and fine-tunes it;
+  `NativeDecisionModel` no longer branches on the family and gains an `adapter`
+  attribute. `models.sources.require_checkpoint_files` is gone: each adapter's
+  `requires(path)` checks its own files. Private helpers moved and became public:
+  `native_question` and `option_keys` in `futurix_decision.datasets.systemone`, and
+  `require_transformers` in `futurix_decision._lazy`. `load_model` lives in
+  `futurix_decision.models.loader`. Migration: call `get_family(name).requires(path)`
+  instead of `require_checkpoint_files(path, name)`; import `load_model` from
+  `futurix_decision` or `futurix_decision.models`.
+- A local publisher or Bosun checkpoint has its files checked once per `load_model`
+  call instead of two or three times. `DecisionModel.from_bosun` gains
+  `check_files=True`.
 - `load_model(..., convert=True)` on any known decision-model family raises one
   `ConfigError` that names the family. Bosun, Decider, JPT, Eikos, and Futurix
   checkpoints used to raise per-family messages.

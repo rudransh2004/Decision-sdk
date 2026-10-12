@@ -89,13 +89,23 @@ class FamilyAdapter(ABC):
   or the options of the CLI command. Raise `ConfigError` for options the family does
   not support.
 - `requires` raises `CheckpointError` when a local directory lacks a file `load` needs.
-  `load_model` calls it before `load`. Today the built-in adapters delegate to
-  `require_checkpoint_files` in `models/sources.py`.
+  `load_model` calls it before `load`, so `load` need not check again. Build it with
+  `CheckpointFiles` from `models/sources.py`: `require`, `one_of`, `tokenizer`, and
+  `weights` collect the missing files, and `check` raises one error naming them all.
 - `finetune` trains in the family's own format and returns the reloaded backend.
   Implement it only when the family has its own trainer; the others train through
   `DecisionTrainer`, which needs `load` to return a `DecisionModel`.
 - `training_kwargs` turns the `model:` section of a `futurix-decision train` config into
   `load` options. The default accepts a section that sets no family options.
+
+A family that runs a publisher's own code subclasses `PublisherAdapter`
+(`models/families/publisher.py`) instead; `kev.py` and `laya.py` are short examples.
+It sets `readout` and the capability attributes (`images`, `max_options`,
+`remote_code`, `transformers`, `trainable`), implements `open` to load the publisher's
+model object and `files` to list its checkpoint files, and pairs with a
+`PublisherRuntime` subclass that answers System One payloads. `NativeDecisionModel`
+enforces the capabilities and validates the answers. A trainable family implements
+`train`; `finetune_native` writes the manifest and reloads the export.
 
 `load_model` still identifies local checkpoints through `infer_local_family` in
 `models/sources.py`. A family without a recognizable file layout loads with
