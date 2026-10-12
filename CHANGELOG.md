@@ -168,7 +168,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     value (255 for Decider and JPT, not allowed for Eikos) instead of being ignored.
   - `train` with Bosun and QLoRA raises `ConfigError` before loading the model, instead
     of in the trainer.
-  - `export --revision` applies to every format; `standard` used to ignore it.
+  - `export --revision` and `serve --revision` apply to every format; `export` ignored it
+    for `standard` and `serve` for everything but `native`. `serve --backend vllm
+    --revision` raises `ConfigError`, as `evaluate` does.
   - `serve --device` also moves a custom decision head, and `--device cuda` without
     CUDA raises `ConfigError` for `native` too.
 - `evaluate(..., max_batch_tokens=...)` on a `VLLMEngine` measures each row with

@@ -424,6 +424,10 @@ def _serve(args: argparse.Namespace) -> None:
 
     if args.backend == "vllm":
         _require_vllm_checkpoint(args.model_format)
+        if args.revision:
+            raise ConfigError(
+                "--revision is for PyTorch upstream loading; export a pinned model for vLLM"
+            )
         from futurix_decision.vllm import VLLMEngine
 
         engine = VLLMEngine(args.model)
@@ -447,7 +451,8 @@ def _serve(args: argparse.Namespace) -> None:
                 device=device,
             )
         else:
-            engine = _load(args.model_format, args.model, device=device)
+            revision = {"revision": args.revision} if args.revision else {}
+            engine = _load(args.model_format, args.model, **revision, device=device)
     api_key = args.api_key or os.environ.get("FUTURIX_API_KEY") or None
     host = args.host or ("0.0.0.0" if api_key else "127.0.0.1")
     if api_key is None and host not in ("127.0.0.1", "localhost", "::1"):

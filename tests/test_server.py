@@ -322,6 +322,28 @@ class ServeCommandTests(unittest.TestCase):
         response = http.post("/v1/decision/choice", json=CHOICE, headers=authorized)
         self.assertEqual(response.status_code, 200)
 
+    def test_revision_pins_every_model_format(self):
+        from futurix_decision.cli import main
+
+        for model_format in ("standard", "bosun", "native"):
+            with (
+                self.subTest(model_format=model_format),
+                patch("futurix_decision.cli.load_model") as load,
+                patch("uvicorn.run"),
+            ):
+                main(
+                    ["serve", "--model", "acme/model", "--device", "cpu"]
+                    + ["--model-format", model_format, "--revision", "a" * 40]
+                )
+                self.assertEqual(load.call_args.kwargs["revision"], "a" * 40)
+
+    def test_vllm_refuses_a_revision_it_cannot_pin(self):
+        from futurix_decision.cli import main
+
+        with patch("uvicorn.run") as run, self.assertRaises(ConfigError):
+            main(["serve", "--model", "acme/model", "--backend", "vllm", "--revision", "a" * 40])
+        run.assert_not_called()
+
     def test_flags_set_the_key_host_and_batching(self):
         app, host = self.serve(
             "--api-key", "flag", "--host", "10.0.0.5", "--batch-window-ms", "2", "--max-batch", "8"
