@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Sequence
+from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +39,155 @@ from futurix_decision.models.label_readout import presented_order
 from futurix_decision.models.tokenizer import format_decision_prompt
 from futurix_decision.utils.config import load_decision_config
 from futurix_decision.vllm.logits_processor import probabilities_from_logprobs
+
+
+@dataclass(frozen=True)
+class _Prepared:
+    """One example's vLLM prompts and how to read their logprobs back."""
+
+    rows: list[tuple[list[int], list[int]]]
+    """Each prompt's token IDs and the label token IDs to read, in presented order."""
+    order: list[int] | None = None
+    """Original option index at each presented position; ``None`` when already original."""
+
+
+def _logprob(value: Any) -> float:
+    return float(getattr(value, "logprob", value))
+
+
+def _restore_order(probabilities: list[float], order: list[int] | None) -> list[float]:
+    if order is None:
+        return probabilities
+    ordered = [0.0] * len(probabilities)
+    for position, original in enumerate(order):
+        ordered[original] = probabilities[position]
+    return ordered
+
+
+class _PromptFormat(ABC):
+    """How one ``prompt_format`` builds vLLM prompts and turns logprobs into probabilities."""
+
+    def __init__(self, engine: VLLMEngine) -> None:
+        self.engine = engine
+
+    @abstractmethod
+    def prepare(self, example: DecisionInput) -> _Prepared: ...
+
+    def probabilities(
+        self, example: DecisionInput, prepared: _Prepared, logprobs: list[Mapping[int, Any]]
+    ) -> list[float]:
+        """Option-order probabilities from each prompt's first-step logprobs."""
+        (labels,) = [labels for _, labels in prepared.rows]
+        probabilities = probabilities_from_logprobs(
+            logprobs[0], labels, temperature=self.temperature(example)
+        )
+        return _restore_order(probabilities, prepared.order)
+
+    def temperature(self, example: DecisionInput) -> float:
+        return self.engine.temperature
+
+
+class _TokenFormat(_PromptFormat):
+    """Futurix and Bosun v3: added decision-token rows, listed in candidate order."""
+
+    def __init__(self, engine: VLLMEngine) -> None:
+        super().__init__(engine)
+        tokenizer = engine.tokenizer
+        self.token_ids = [
+            tokenizer.convert_tokens_to_ids(decision_token(i))
+            for i in range(engine.decision_tokens)
+        ]
+        if any(
+            tokenizer.encode(decision_token(i), add_special_tokens=False) != [token_id]
+            for i, token_id in enumerate(self.token_ids)
+        ):
+            raise CheckpointError("checkpoint is missing single-token decision slots")
+
+    def prepare(self, example: DecisionInput) -> _Prepared:
+        engine = self.engine
+        if engine.prompt_format == "bosun-v3":
+            prompt, slots = format_bosun_prompt(
+                example,
+                engine.tokenizer,
+                decision_tokens=engine.decision_tokens,
+                seed=engine.seed,
+                prompt_schema=engine.prompt_schema,
+            )
+        else:
+            prompt, slots = format_decision_prompt(
+                example, decision_tokens=engine.decision_tokens, seed=engine.seed
+            )
+        ids = engine.tokenizer.encode(prompt, add_special_tokens=True)
+        return _Prepared([(ids, [self.token_ids[slot] for slot in slots])])
+
+
+class _LabelFormat(_PromptFormat):
+    """JPT and Eikos: one prompt whose existing label tokens list the options."""
+
+    def __init__(self, engine: VLLMEngine) -> None:
+        super().__init__(engine)
+        if engine.prompt_format == EIKOS_FORMAT:
+            eikos_label_table(engine.tokenizer, engine.decision_tokens)  # Fails early if absent.
+
+    def prepare(self, example: DecisionInput) -> _Prepared:
+        engine = self.engine
+        prepare = prepare_jpt_row if engine.prompt_format == JPT_FORMAT else prepare_eikos_row
+        tokens, labels, order = prepare(
+            example, engine.tokenizer, max_options=engine.decision_tokens
+        )
+        return _Prepared([(tokens, labels)], order)
+
+
+class _DeciderFormat(_PromptFormat):
+    """Decider v2.1: per-kind temperatures, and one yes/no prompt per score level."""
+
+    def __init__(self, engine: VLLMEngine, metadata: Mapping[str, Any]) -> None:
+        super().__init__(engine)
+        if "type_temperatures" not in metadata:
+            raise CheckpointError("decider-v2.1 export is missing type-specific calibration")
+        self.type_temperatures = metadata["type_temperatures"]
+        if set(self.type_temperatures) != {"choice", "noul", "score"} or any(
+            not isinstance(value, (float, int)) or not math.isfinite(value) or value <= 0
+            for value in self.type_temperatures.values()
+        ):
+            raise CheckpointError("decider-v2.1 export has invalid type-specific calibration")
+        letter_table(engine.tokenizer, engine.decision_tokens)  # Fails early if absent.
+
+    def prepare(self, example: DecisionInput) -> _Prepared:
+        rows = prepare_decider_rows(
+            example, self.engine.tokenizer, decision_tokens=self.engine.decision_tokens
+        )
+        order = (
+            None
+            if example.kind == "score"
+            else presented_order(example, DECIDER_NOUL_ORDER, DECIDER_FORMAT)
+        )
+        return _Prepared([(row.input_ids, row.label_ids) for row in rows], order)
+
+    def temperature(self, example: DecisionInput) -> float:
+        if example.kind == "score":
+            return float(self.type_temperatures["score"])
+        return float(self.type_temperatures[example.kind]) * self.engine.temperature
+
+    def probabilities(
+        self, example: DecisionInput, prepared: _Prepared, logprobs: list[Mapping[int, Any]]
+    ) -> list[float]:
+        if example.kind != "score":
+            return super().probabilities(example, prepared, logprobs)
+        # Each level's prompt asks whether that level fits; label 1 is "yes".
+        temperature = self.temperature(example)
+        fits = []
+        for (_, labels), step in zip(prepared.rows, logprobs, strict=True):
+            probabilities_from_logprobs(step, labels, temperature=temperature)  # Validates.
+            scores = [_logprob(step[token_id]) / temperature for token_id in labels]
+            peak = max(scores)
+            fits.append(
+                scores[1] - peak - math.log(sum(math.exp(value - peak) for value in scores))
+            )
+        highest = max(fits)
+        weights = [math.exp((value - highest) / self.engine.temperature) for value in fits]
+        total = sum(weights)
+        return [weight / total for weight in weights]
 
 
 class VLLMEngine:
@@ -76,30 +227,13 @@ class VLLMEngine:
         ):
             raise CheckpointError("invalid decision token count or calibration temperature")
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(str(checkpoint))
+        self._format: _PromptFormat
         if self.prompt_format == DECIDER_FORMAT:
-            if "type_temperatures" not in metadata:
-                raise CheckpointError("decider-v2.1 export is missing type-specific calibration")
-            self.type_temperatures = metadata["type_temperatures"]
-            if set(self.type_temperatures) != {"choice", "noul", "score"} or any(
-                not isinstance(value, (float, int)) or not math.isfinite(value) or value <= 0
-                for value in self.type_temperatures.values()
-            ):
-                raise CheckpointError("decider-v2.1 export has invalid type-specific calibration")
-            _, self._token_ids = letter_table(self.tokenizer, self.decision_tokens)
-        elif self.prompt_format == JPT_FORMAT:
-            self._token_ids = []
-        elif self.prompt_format == EIKOS_FORMAT:
-            _, self._token_ids = eikos_label_table(self.tokenizer, self.decision_tokens)
+            self._format = _DeciderFormat(self, metadata)
+        elif self.prompt_format in (JPT_FORMAT, EIKOS_FORMAT):
+            self._format = _LabelFormat(self)
         else:
-            self._token_ids = [
-                self.tokenizer.convert_tokens_to_ids(decision_token(i))
-                for i in range(self.decision_tokens)
-            ]
-            if any(
-                self.tokenizer.encode(decision_token(i), add_special_tokens=False) != [token_id]
-                for i, token_id in enumerate(self._token_ids)
-            ):
-                raise CheckpointError("checkpoint is missing single-token decision slots")
+            self._format = _TokenFormat(self)
         if llm is None:
             try:
                 from vllm import LLM
@@ -115,6 +249,10 @@ class VLLMEngine:
             llm = LLM(model=str(checkpoint), **vllm_kwargs)
         self.llm = llm
 
+    def prompt_tokens(self, example: DecisionInput) -> int:
+        """The longest prompt ``example`` sends to vLLM, in tokens."""
+        return max(len(ids) for ids, _ in self._format.prepare(example).rows)
+
     def batch_decide(
         self, examples: Sequence[DecisionInput], *, confidence_threshold: float | None = None
     ) -> list[DecisionResult]:
@@ -127,121 +265,37 @@ class VLLMEngine:
             raise MissingDependencyError(
                 "vLLM serving requires pip install futurix-decision[vllm]"
             ) from exc
-        prompts, params, slots_list, group_sizes, orders = [], [], [], [], []
-        for example in examples:
-            if self.prompt_format == DECIDER_FORMAT:
-                rows = prepare_decider_rows(
-                    example, self.tokenizer, decision_tokens=self.decision_tokens
+        prepared = [self._format.prepare(example) for example in examples]
+        prompts, params = [], []
+        for ids, labels in (row for item in prepared for row in item.rows):
+            if len(ids) > self.max_sequence_length:
+                raise ConfigError("prompt exceeds max_sequence_length")
+            prompts.append({"prompt_token_ids": ids})
+            params.append(
+                SamplingParams(
+                    max_tokens=1,
+                    temperature=0.0,
+                    detokenize=False,
+                    ignore_eos=True,
+                    logprobs=len(labels),  # After allowed-token masking.
+                    allowed_token_ids=labels,
                 )
-                prepared = [(row.input_ids, row.label_ids) for row in rows]
-                orders.append(presented_order(example, DECIDER_NOUL_ORDER, DECIDER_FORMAT))
-            elif self.prompt_format == JPT_FORMAT:
-                tokens, labels, order = prepare_jpt_row(
-                    example, self.tokenizer, max_options=self.decision_tokens
-                )
-                prepared = [(tokens, labels)]
-                orders.append(order)
-            elif self.prompt_format == EIKOS_FORMAT:
-                tokens, labels, order = prepare_eikos_row(
-                    example, self.tokenizer, max_options=self.decision_tokens
-                )
-                prepared = [(tokens, labels)]
-                orders.append(order)
-            else:
-                if self.prompt_format == "bosun-v3":
-                    prompt, slots = format_bosun_prompt(
-                        example,
-                        self.tokenizer,
-                        decision_tokens=self.decision_tokens,
-                        seed=self.seed,
-                        prompt_schema=self.prompt_schema,
-                    )
-                else:
-                    prompt, slots = format_decision_prompt(
-                        example, decision_tokens=self.decision_tokens, seed=self.seed
-                    )
-                prepared = [
-                    (
-                        self.tokenizer.encode(prompt, add_special_tokens=True),
-                        [self._token_ids[slot] for slot in slots],
-                    )
-                ]
-                orders.append(list(range(len(example.options))))
-            group_sizes.append(len(prepared))
-            for ids, selected_ids in prepared:
-                if len(ids) > self.max_sequence_length:
-                    raise ConfigError("prompt exceeds max_sequence_length")
-                prompts.append({"prompt_token_ids": ids})
-                params.append(
-                    SamplingParams(
-                        max_tokens=1,
-                        temperature=0.0,
-                        detokenize=False,
-                        ignore_eos=True,
-                        logprobs=len(selected_ids),  # After allowed-token masking.
-                        allowed_token_ids=selected_ids,
-                    )
-                )
-                slots_list.append(selected_ids)
+            )
         started = time.perf_counter()
         output = self.llm.generate(prompts, params, use_tqdm=False)
         # Report the batch's wall time per row, as every backend does.
         latency_ms = (time.perf_counter() - started) * 1000 / len(examples)
         if len(output) != len(prompts):
             raise InvalidOutputError("vLLM returned a different number of outputs")
+        # Outputs come back in prompt order; each example takes its own prompts' outputs.
+        steps = iter(output)
         results = []
-        cursor = 0
-        for row, count in zip(examples, group_sizes, strict=True):
-            row_probabilities = []
-            score_log_fits = []
-            for selected_ids, generated in zip(
-                slots_list[cursor : cursor + count], output[cursor : cursor + count], strict=True
-            ):
-                token_logprobs = generated.outputs[0].logprobs
-                if not token_logprobs:
-                    raise InvalidOutputError("vLLM returned no decision logprobs")
-                temp = (
-                    self.type_temperatures[row.kind]
-                    * (self.temperature if row.kind != "score" else 1.0)
-                    if self.prompt_format == DECIDER_FORMAT
-                    else self.temperature
-                )
-                row_probabilities.append(
-                    probabilities_from_logprobs(token_logprobs[0], selected_ids, temperature=temp)
-                )
-                if self.prompt_format == DECIDER_FORMAT and row.kind == "score":
-                    scores = [
-                        float(
-                            getattr(
-                                token_logprobs[0][token_id], "logprob", token_logprobs[0][token_id]
-                            )
-                        )
-                        / temp
-                        for token_id in selected_ids
-                    ]
-                    peak = max(scores)
-                    score_log_fits.append(
-                        scores[1] - peak - math.log(sum(math.exp(value - peak) for value in scores))
-                    )
-            cursor += count
-            if self.prompt_format == DECIDER_FORMAT and row.kind == "score":
-                highest = max(score_log_fits)
-                fits = [math.exp((value - highest) / self.temperature) for value in score_log_fits]
-                total = sum(fits)
-                probabilities = [fit / total for fit in fits]
-            else:
-                probabilities = row_probabilities[0]
-            if self.prompt_format in (JPT_FORMAT, EIKOS_FORMAT) or (
-                self.prompt_format == DECIDER_FORMAT and row.kind != "score"
-            ):
-                ordered = [0.0] * len(probabilities)
-                for position, original in enumerate(orders[len(results)]):
-                    ordered[original] = probabilities[position]
-                probabilities = ordered
+        for example, item in zip(examples, prepared, strict=True):
+            logprobs = [_first_step(next(steps)) for _ in item.rows]
             results.append(
                 DecisionResult.from_probabilities(
-                    row,
-                    probabilities,
+                    example,
+                    self._format.probabilities(example, item, logprobs),
                     latency_ms=latency_ms,
                     confidence_threshold=confidence_threshold,
                 )
@@ -290,3 +344,10 @@ class VLLMEngine:
 
     def close(self) -> None:
         """Do nothing; part of ``DecisionBackend``. Delete the engine to free GPU memory."""
+
+
+def _first_step(generated: Any) -> Mapping[int, Any]:
+    token_logprobs = generated.outputs[0].logprobs
+    if not token_logprobs:
+        raise InvalidOutputError("vLLM returned no decision logprobs")
+    return token_logprobs[0]

@@ -48,6 +48,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   base class of `ConfigError` (also a `ValueError`), `CheckpointError`,
   `MissingDependencyError` (also an `ImportError`), and `BackendError` (with
   `status_code` and `body`), whose subclass is `InvalidOutputError`.
+- `VLLMEngine.prompt_tokens(example)`: the longest prompt an example sends to vLLM, in
+  tokens, for every prompt format.
 - The package ships a `py.typed` marker, so type checkers read its inline annotations.
 - The `dev` extra installs `fastapi`, `httpx`, `ruff`, `mypy`, and `types-PyYAML`.
   The serving tests now run under `pip install -e ".[dev]"` instead of skipping.
