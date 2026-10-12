@@ -2,13 +2,30 @@
 
 from __future__ import annotations
 
-from futurix_decision.models.families.publisher import PublisherAdapter
+from collections.abc import Sequence
+from typing import Any
+
+from futurix_decision.models.families.publisher import (
+    PublisherAdapter,
+    PublisherRuntime,
+    load_images,
+)
 from futurix_decision.models.sources import CheckpointFiles
+
+
+class LiquidRuntime(PublisherRuntime):
+    def prepare_images(self, images: Sequence[Any]) -> list[Any]:
+        return load_images(images)
 
 
 class LiquidAdapter(PublisherAdapter):
     name = "liquid-d1"
     extra = "liquid-d1"
+    readout = "verbalizer"
+    runtime_type = LiquidRuntime
+    images = True
+    remote_code = True
+    transformers = (5, 14)
 
     def files(self, files: CheckpointFiles) -> None:
         files.require(

@@ -6,8 +6,8 @@ from unittest.mock import patch
 import httpx
 
 from futurix_decision import DecisionInput, NativeDecisionModel, load_model
+from futurix_decision.datasets.systemone import native_question
 from futurix_decision.errors import BackendError, InvalidOutputError
-from futurix_decision.models.native import _question
 
 CHOICE = DecisionInput(
     state={"ticket": "duplicate charge"},
@@ -266,7 +266,7 @@ class NativeInferenceTests(unittest.TestCase):
                 self.assertEqual(list(publisher.questions), ["route"])
 
     def test_native_question_does_not_reorder_choices(self):
-        request = _question(CHOICE)
+        request = native_question(CHOICE)
         self.assertEqual(list(request["criteria"]), CHOICE.options)
         with self.assertRaisesRegex(ValueError, "explicit false/true"):
             NativeDecisionModel.from_runtime(
@@ -293,7 +293,7 @@ class NativeInferenceTests(unittest.TestCase):
         vision = Vision()
         row = CHOICE.model_copy(update={"images": ["./screenshot.png"]})
         with patch(
-            "futurix_decision.models.native._images_for_native", return_value=["loaded image"]
+            "futurix_decision.models.families.liquid.load_images", return_value=["loaded image"]
         ):
             self.assertEqual(
                 NativeDecisionModel.from_runtime("LiquidAI/d1-3B", "liquid-d1", vision)

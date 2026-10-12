@@ -1,16 +1,20 @@
-"""Flatten labeled System One JSONL records without dropping question provenance.
+"""Convert between System One questions and canonical decisions.
 
 The public System One wire format groups typed questions by ID under a single
 state. A dataset adds a `targets` mapping keyed by those question IDs. Each
 target can be a hard option key, a boolean, or an aligned probability map/list.
+``expand_systemone_row`` flattens such a record without dropping question
+provenance; ``native_question`` turns one decision back into a question.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
+from futurix_decision.datasets.schema import DecisionInput
 from futurix_decision.errors import ConfigError
 
 
@@ -108,3 +112,80 @@ def expand_systemone_row(row: Mapping[str, Any], *, index: int) -> Iterator[dict
             "target": target,
             **{key: row[key] for key in ("domain", "family", "source") if key in row},
         }
+
+
+def native_question(example: DecisionInput) -> dict[str, Any]:
+    """The System One question a publisher runtime reads for one canonical decision.
+
+    Keeps ``example.native_question`` when it agrees with the canonical options,
+    so a row read from System One JSONL round-trips unchanged.
+    """
+    if example.native_question is not None:
+        question = copy.deepcopy(example.native_question)
+        criteria = question.get("criteria")
+        if question.get("type", "choice") != example.kind:
+            raise ConfigError("native question type differs from its canonical decision")
+        if example.kind == "choice" and isinstance(criteria, Mapping):
+            if list(criteria) != example.options:
+                raise ConfigError("native choice criteria order differs from canonical options")
+            return question
+        if example.kind == "score" and isinstance(criteria, list):
+            if len(criteria) != len(example.options):
+                raise ConfigError("native score criteria count differs from canonical options")
+            return question
+        if example.kind == "noul" and (
+            criteria is None
+            or (isinstance(criteria, Mapping) and not (set(criteria) - {"false", "true"}))
+        ):
+            if set(example.options) != {"false", "true"}:
+                raise ConfigError("native noul readouts require explicit false/true candidate IDs")
+            return question
+    if example.kind == "noul":
+        if set(example.options) != {"false", "true"}:
+            raise ConfigError("native noul readouts require explicit false/true candidate IDs")
+        criteria = (
+            {
+                key: example.candidate_descriptions[example.options.index(key)]
+                for key in ("false", "true")
+            }
+            if example.candidate_descriptions
+            else None
+        )
+    elif example.kind == "score":
+        if example.preserve_order or any(
+            int(option) != index + int(example.options[0])
+            for index, option in enumerate(example.options)
+        ):
+            raise ConfigError("native score readouts need consecutive, ordered integer levels")
+        criteria = [
+            (example.candidate_descriptions[i] or example.candidate_labels[i])
+            if example.candidate_descriptions and example.candidate_labels
+            else (example.candidate_descriptions[i] if example.candidate_descriptions else option)
+            for i, option in enumerate(example.options)
+        ]
+    else:
+        criteria = {}
+        for i, name in enumerate(example.options):
+            label = example.candidate_labels[i] if example.candidate_labels else name
+            description = (
+                example.candidate_descriptions[i] if example.candidate_descriptions else ""
+            )
+            criteria[name] = (
+                f"{label}: {description}"
+                if description and label != name
+                else (description or (label if label != name else None))
+            )
+    return {
+        "type": example.kind,
+        "instructions": example.question,
+        **({"criteria": criteria} if criteria is not None else {}),
+    }
+
+
+def option_keys(example: DecisionInput) -> list[str]:
+    """The answer keys a publisher uses for ``example``'s options, in canonical order."""
+    if example.kind == "noul":
+        return ["false", "true"]
+    if example.kind == "score":
+        return [str(i) for i in range(len(example.options))]
+    return list(example.options)

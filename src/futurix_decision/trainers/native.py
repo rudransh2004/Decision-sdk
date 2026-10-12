@@ -14,13 +14,15 @@ from pathlib import Path
 from typing import Any
 
 from futurix_decision.datasets.schema import DecisionExample
+from futurix_decision.datasets.systemone import native_question, option_keys
 from futurix_decision.errors import (
     CheckpointError,
     ConfigError,
     InvalidOutputError,
     MissingDependencyError,
 )
-from futurix_decision.models.native import NativeDecisionModel, _images_for_native, _question
+from futurix_decision.models.families.publisher import load_images
+from futurix_decision.models.native import NativeDecisionModel
 from futurix_decision.trainers.sft import DatasetSource, _canonical_rows
 
 
@@ -58,14 +60,6 @@ def _write_manifest(path: Path, model: NativeDecisionModel) -> None:
     )
 
 
-def _option_keys(row: DecisionExample) -> list[str]:
-    if row.kind == "noul":
-        return ["false", "true"]
-    if row.kind == "score":
-        return [str(i) for i in range(len(row.options))]
-    return row.options
-
-
 def _grouped_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]]:
     """Restore multi-question records when the examples share a grouped state."""
     current: dict[str, Any] | None = None
@@ -83,9 +77,9 @@ def _grouped_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]
         question_id = row.question_id or "decision"
         if question_id in current["questions"]:
             raise ConfigError(f"group {group!r} repeats question ID {question_id!r}")
-        current["questions"][question_id] = _question(row)
+        current["questions"][question_id] = native_question(row)
         current["gold"][question_id] = {
-            "probabilities": dict(zip(_option_keys(row), row.target_distribution(), strict=True))
+            "probabilities": dict(zip(option_keys(row), row.target_distribution(), strict=True))
         }
     if current is not None:
         yield current
@@ -190,7 +184,7 @@ def _train_pplx(
             records = [
                 {
                     "state": row.state,
-                    "question": _question(row),
+                    "question": native_question(row),
                     **({"images": row.images} if row.images else {}),
                 }
                 for row in examples
@@ -260,10 +254,8 @@ def _train_clef(
                     {
                         "id": row.id,
                         "state": row.state,
-                        "questions": {"decision": _question(row)},
-                        **(
-                            {"images": _images_for_native(row.images, "clef")} if row.images else {}
-                        ),
+                        "questions": {"decision": native_question(row)},
+                        **({"images": load_images(row.images)} if row.images else {}),
                     },
                     processor=processor,
                 )
@@ -281,7 +273,7 @@ def _train_clef(
                     raise InvalidOutputError("Clef returned a different option count")
                 # The native encoder may sort choice IDs. Align targets to the
                 # option IDs actually encoded instead of assuming user order.
-                keys = _option_keys(row)
+                keys = option_keys(row)
                 distribution = row.target_distribution()
                 target = torch.tensor(
                     [

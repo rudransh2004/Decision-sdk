@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from futurix_decision._lazy import require_transformers
 from futurix_decision.errors import CheckpointError
 from futurix_decision.models.families.base import FamilyAdapter
 from futurix_decision.models.sources import CheckpointFiles, read_checkpoint_json
@@ -54,9 +55,7 @@ class FuturixAdapter(FamilyAdapter):
         files.tokenizer()
         files.check(self.name)
         if metadata.get("source_checkpoint") in QWEN35:
-            from futurix_decision.models.native import _requires_transformers
-
-            _requires_transformers("qwen3.5", (5, 17))
+            require_transformers("qwen3.5", (5, 17))
 
     def training_kwargs(self, section: Mapping[str, Any], *, method: str) -> dict[str, Any]:
         kwargs = {

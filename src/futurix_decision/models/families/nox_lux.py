@@ -13,6 +13,9 @@ class NoxLuxAdapter(PublisherAdapter):
     """``name`` is ``"nox"`` or ``"lux"``; both read the ``vllm-sr-decision`` package format."""
 
     extra = "nox-lux"
+    readout = "candidate-head"
+    remote_code = True
+    transformers = (5, 17)
 
     def __init__(self, name: str) -> None:
         self.name = name

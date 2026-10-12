@@ -86,7 +86,7 @@ class SourceTests(unittest.TestCase):
             clef_copy(root)
             with (
                 patch("huggingface_hub.snapshot_download", side_effect=AssertionError("Hub used")),
-                patch("futurix_decision.models.native._requires_transformers"),
+                patch("futurix_decision.models.families.publisher.require_transformers"),
             ):
                 loaded = load_model(root, trust_remote_code=True)
                 self.assertEqual(loaded.family, "clef")
@@ -107,7 +107,7 @@ class SourceTests(unittest.TestCase):
             revision = "a" * 40
             with (
                 patch("huggingface_hub.snapshot_download", return_value=str(root)) as download,
-                patch("futurix_decision.models.native._requires_transformers"),
+                patch("futurix_decision.models.families.publisher.require_transformers"),
                 patch(
                     "huggingface_hub.hf_hub_download",
                     side_effect=lambda repo, filename, **kwargs: cached_file(root, filename),
@@ -143,7 +143,7 @@ class SourceTests(unittest.TestCase):
                 "sys.modules",
                 {"autojev": package, "autojev.model": module},
             ),
-            patch("futurix_decision.models.native._requires_transformers"),
+            patch("futurix_decision.models.families.publisher.require_transformers"),
         ):
             root = Path(temp)
             pplx_copy(root)
@@ -414,7 +414,7 @@ class SourceTests(unittest.TestCase):
     def test_new_hub_releases_reject_incomplete_snapshots_before_model_execution(self):
         with (
             tempfile.TemporaryDirectory() as temp,
-            patch("futurix_decision.models.native._requires_transformers"),
+            patch("futurix_decision.models.families.publisher.require_transformers"),
             patch("huggingface_hub.snapshot_download", return_value=temp) as download,
             patch(
                 "transformers.AutoModel.from_pretrained",
@@ -545,7 +545,7 @@ class SourceTests(unittest.TestCase):
 
     def test_qwen_multimodal_conversion_accepts_explicit_bosun_strategy(self):
         with (
-            patch("futurix_decision.models.native._requires_transformers"),
+            patch("futurix_decision.models.native.require_transformers"),
             patch.object(
                 DecisionModel,
                 "from_pretrained",

@@ -1,4 +1,4 @@
-"""Lazy package exports, so the core imports without torch."""
+"""Lazy package exports and optional-dependency checks, so the core imports without torch."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import importlib
 import sys
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from futurix_decision.errors import MissingDependencyError
@@ -25,6 +26,20 @@ def torch_required(feature: str) -> Iterator[None]:
         raise MissingDependencyError(
             f"{feature} needs {error.name}: install futurix-decision[torch]"
         ) from error
+
+
+def require_transformers(extra: str, minimum: tuple[int, int]) -> None:
+    """Raise ``MissingDependencyError`` unless Transformers is at least ``minimum``."""
+    try:
+        release = version("transformers").split(".")
+        installed = (int(release[0]), int(release[1]))
+    except (PackageNotFoundError, ValueError, IndexError):
+        installed = (0, 0)
+    if installed < minimum:
+        raise MissingDependencyError(
+            f"{extra} needs Transformers {minimum[0]}.{minimum[1]}+; "
+            f"install futurix-decision[{extra}] in a compatible environment"
+        )
 
 
 def lazy_exports(package: str, exports: Mapping[str, str]) -> Callable[[str], Any]:

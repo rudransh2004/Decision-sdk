@@ -223,7 +223,7 @@ class NativeTrainingTests(unittest.TestCase):
                 }
             ]
             with tempfile.TemporaryDirectory() as temp:
-                with patch("futurix_decision.models.native._requires_transformers"):
+                with patch("futurix_decision.models.families.publisher.require_transformers"):
                     tuned = model.finetune(
                         training_rows,
                         Path(temp) / "pplx-out",

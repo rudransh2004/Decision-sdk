@@ -115,9 +115,9 @@ class DatasetInterchangeTests(unittest.TestCase):
         self.assertEqual(example.native_question, native)
         self.assertEqual(example.options, ["billing", "support"])
         self.assertEqual(example.candidate_descriptions[0], '{"sla": 2, "team": "Finance"}')
-        from futurix_decision.models.native import _question
+        from futurix_decision.datasets.systemone import native_question
 
-        self.assertEqual(_question(example), native)
+        self.assertEqual(native_question(example), native)
 
     def test_image_references_survive_for_supported_native_models(self):
         row = {**GROUP, "images": ["./invoice.png"]}

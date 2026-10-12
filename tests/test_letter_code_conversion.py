@@ -386,7 +386,7 @@ class LetterCodeConversionTests(unittest.TestCase):
                 "transformers.AutoConfig.from_pretrained",
                 return_value=config,
             ),
-            patch("futurix_decision.models.native._requires_transformers"),
+            patch("futurix_decision.models.native.require_transformers"),
             patch(
                 "futurix_decision.models.decision_model.DecisionModel.from_pretrained",
                 return_value="prepared",
