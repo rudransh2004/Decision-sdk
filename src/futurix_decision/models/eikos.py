@@ -157,7 +157,9 @@ class EikosDecisionModel(LabelReadoutModel):
     noul_order = NOUL_ORDER
     # The one-pass width comes from the release's decision_config.json.
     default_width = None
-    seeded_kinds = frozenset()
+    # Score levels are named by presented position ("0", "1", ...), so shuffling
+    # them would relabel the scale. Choice and noul options carry their own names.
+    seeded_kinds = frozenset({"choice", "noul"})
 
     def _label_token_ids(self) -> list[int]:
         return eikos_label_table(self.tokenizer, self.decision_tokens)[1]

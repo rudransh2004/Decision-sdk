@@ -119,6 +119,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Breaking:** `prepare_decider_rows` returns `LabelRow`s
   (`futurix_decision.models.label_readout`), and `DeciderRow.letter_ids` is now
   `LabelRow.label_ids`. Decider, JPT, and Eikos models subclass `LabelReadoutModel`.
+- Eikos fine-tuning permutes choice and noul options per row under the trainer's
+  `assignment_seed`, as Decider does. It used to ignore the seed and always train on the
+  presented order. Score levels stay in order, because Eikos names them by position.
+  Inference is unchanged.
 - The package version comes from `futurix_decision.__version__` alone.
   The `futurix-decision serve` API reports that version instead of a hard-coded `0.1.0`.
 - Every install that includes transformers requires `transformers>=5.17,<6` (the base
