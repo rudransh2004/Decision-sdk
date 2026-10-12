@@ -45,6 +45,30 @@ jobs:
       - run: uv pip install -e ".[dev,serve]"
       - run: python -m pytest -q
 
+  # The base install without extras: no torch, no transformers.
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          activate-environment: true
+      - run: uv pip install . pytest
+      - name: Check that torch is absent
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import sys
+
+          for name in ("torch", "transformers"):
+              assert importlib.util.find_spec(name) is None, f"{name} is installed"
+          import futurix_decision
+          from futurix_decision import DecisionInput, DecisionResult, load_decisions
+          assert "torch" not in sys.modules
+          PY
+      - run: python -m pytest -q tests/test_core_import.py -k without_torch
+
   # One job per extra: install it alone and import what it provides. This
   # catches pin conflicts between an extra and the base dependencies.
   extras:
@@ -67,8 +91,8 @@ jobs:
             imports: accelerate, peft, futurix_decision.models.jpt
           - extra: eikos
             imports: accelerate, peft, futurix_decision.models.eikos
-          - extra: native-http
-            imports: httpx, futurix_decision.models.native
+          - extra: torch
+            imports: torch, transformers, futurix_decision.models.decision_model
           - extra: laya
             imports: laya
           - extra: gliner
