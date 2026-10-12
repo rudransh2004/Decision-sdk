@@ -15,6 +15,7 @@ from futurix_decision import __version__
 from futurix_decision.datasets import DecisionInput
 from futurix_decision.errors import ConfigError
 from futurix_decision.inference.schemas import DecisionRequest, DecisionResult
+from futurix_decision.models.protocol import DecisionBackend
 
 PROFILE_INSTRUCTIONS = {
     "baseline": "",
@@ -74,7 +75,7 @@ def _compat_input(
     return DecisionInput(kind=kind, state=canonical_state, question=prompt, options=options)
 
 
-def create_app(engine: Any) -> FastAPI:
+def create_app(engine: DecisionBackend) -> FastAPI:
     app = FastAPI(title="Futurix Decision API", version=__version__)
     lock = threading.Lock()
     counters: dict[str, int] = defaultdict(int)

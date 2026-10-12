@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal, get_args, overload
 
 import httpx
 
@@ -45,12 +45,16 @@ from futurix_decision.inference.schemas import (
     score_input,
 )
 from futurix_decision.models.families import identify_family, reject_native_checkpoint
+from futurix_decision.models.protocol import DecisionBackend
 from futurix_decision.models.sources import (
     checkpoint_source,
     infer_local_family,
     read_checkpoint_json,
     require_checkpoint_files,
 )
+
+if TYPE_CHECKING:
+    from futurix_decision.models.decision_model import DecisionModel
 
 ALIASES = {
     "bosun-0.6b": "Hanno-Labs/bosun-v3.1-0.6b",
@@ -925,25 +929,94 @@ class NativeDecisionModel:
         return finetune_native(self, dataset, output_dir, config=config, **kwargs)
 
 
+Strategy = Literal["pointer", "bosun", "letter_code"]
+
+
+@overload
 def load_model(
     checkpoint: str | Path,
     *,
-    convert: bool = False,
     family: str | None = None,
-    **kwargs: Any,
-) -> Any:
+    convert: Literal[True],
+    strategy: Strategy | None = None,
+    head_type: str | None = None,
+    train_backbone: bool | None = None,
+    revision: str | None = None,
+    device: str | None = None,
+    **family_kwargs: Any,
+) -> DecisionModel: ...
+
+
+@overload
+def load_model(
+    checkpoint: str | Path,
+    *,
+    family: str | None = None,
+    convert: bool = False,
+    strategy: Strategy | None = None,
+    head_type: str | None = None,
+    train_backbone: bool | None = None,
+    revision: str | None = None,
+    device: str | None = None,
+    **family_kwargs: Any,
+) -> DecisionBackend: ...
+
+
+def load_model(
+    checkpoint: str | Path,
+    *,
+    family: str | None = None,
+    convert: bool = False,
+    strategy: Strategy | None = None,
+    head_type: str | None = None,
+    train_backbone: bool | None = None,
+    revision: str | None = None,
+    device: str | None = None,
+    **family_kwargs: Any,
+) -> DecisionBackend:
     """Load a known Hub release on demand or an existing local decision checkpoint.
 
-    For a local copy with no recognizable publisher metadata, specify `family`.
+    For a local copy with no recognizable publisher metadata, specify ``family``.
     This never converts a trained native decision readout into an untrained LM.
-    For raw LMs, ``convert=True`` accepts pointer, Bosun-style tokens, or a
-    fixed letter-code readout. Only Qwen3.5 has a noncausal adapter.
+
+    - ``convert=True`` turns a raw causal LM into an untrained ``DecisionModel``
+      with the readout that ``strategy`` names: ``"pointer"`` (default),
+      ``"bosun"`` tokens, or a fixed ``"letter_code"`` table. Only Qwen3.5 has
+      a noncausal adapter.
+    - ``head_type`` and ``train_backbone`` configure Futurix checkpoints and
+      conversions; a saved checkpoint rejects values that differ from its own.
+    - ``revision`` pins the Hub commit. ``device`` places the model, for example
+      ``"cuda:0"``; publisher runtimes default to ``"cpu"``.
+    - ``family_kwargs`` go to the family's loader, for example ``base_url`` and
+      ``trust_remote_code`` for publisher runtimes, or ``max_sequence_length``
+      and Transformers ``from_pretrained`` arguments for ``DecisionModel``.
 
     Raises ``MissingDependencyError`` when the checkpoint needs torch and it is
     not installed.
     """
+    if strategy is not None and strategy not in get_args(Strategy):
+        raise ConfigError("strategy must be 'pointer', 'bosun', or 'letter_code'")
+    if strategy is not None and not convert:
+        raise ConfigError("strategy is only for converting a plain causal LM")
+    if device is not None and "device_map" in family_kwargs:
+        raise ConfigError("pass either device or device_map, not both")
+    kwargs = dict(family_kwargs)
+    for key, value in (
+        ("revision", revision),
+        ("head_type", head_type),
+        ("train_backbone", train_backbone),
+    ):
+        if value is not None:
+            kwargs[key] = value
     with torch_required(f"loading {checkpoint}"):
-        return _load_model(checkpoint, convert=convert, family=family, **kwargs)
+        model = _load_model(
+            checkpoint, convert=convert, family=family, strategy=strategy, device=device, **kwargs
+        )
+        if device is not None and not isinstance(model, NativeDecisionModel):
+            model.backbone.to(device)
+            if model.decision_head is not None:
+                model.decision_head.to(device)
+        return model
 
 
 def _load_model(
@@ -951,17 +1024,10 @@ def _load_model(
     *,
     convert: bool,
     family: str | None,
+    strategy: Strategy | None,
+    device: str | None,
     **kwargs: Any,
-) -> Any:
-    strategy = kwargs.pop("strategy", None)
-    if strategy == "pplx":  # Legacy call sites; never write this name to new exports.
-        strategy = "letter_code"
-    if strategy is not None and strategy not in ("pointer", "bosun", "letter_code"):
-        raise ConfigError("strategy must be 'pointer', 'bosun', or 'letter_code'")
-    if strategy is not None and not convert:
-        raise ConfigError("strategy is only for converting a plain causal LM")
-    if convert and kwargs.get("head_type") == "pplx":
-        kwargs["head_type"] = "letter_code"
+) -> NativeDecisionModel | DecisionModel:
     original, _ = checkpoint_source(checkpoint)
     name, local = checkpoint_source(ALIASES.get(original, original))
     path = Path(name)
@@ -1010,6 +1076,7 @@ def _load_model(
     ):
         if convert:
             raise ConfigError("Bosun v3.1 already contains a trained decision head")
+        _reject_futurix_options(kwargs, family)
         if local:
             require_checkpoint_files(path, "bosun")
         from futurix_decision.models.decision_model import DecisionModel
@@ -1020,6 +1087,7 @@ def _load_model(
     ):
         if convert:
             raise ConfigError(f"{family} already contains a trained decision readout")
+        _reject_futurix_options(kwargs, family)
         if local:
             require_checkpoint_files(path, family)
         from futurix_decision.models.decision_model import DecisionModel
@@ -1184,4 +1252,15 @@ def _load_model(
             f"cannot identify local decision checkpoint at {name!r}; "
             "pass the correct family=... or include the publisher's native config/head"
         )
-    return NativeDecisionModel.from_pretrained(name, family=family, **kwargs)
+    _reject_futurix_options(kwargs, family)
+    return NativeDecisionModel.from_pretrained(
+        name, family=family, device=device or "cpu", **kwargs
+    )
+
+
+def _reject_futurix_options(kwargs: Mapping[str, Any], family: str | None) -> None:
+    for key in ("head_type", "train_backbone"):
+        if key in kwargs:
+            raise ConfigError(
+                f"{key} applies to Futurix checkpoints and convert=True, not {family} releases"
+            )

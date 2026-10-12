@@ -12,7 +12,13 @@ from itertools import islice
 from pathlib import Path
 from typing import Any
 
-from futurix_decision import DecisionModel, DecisionTrainer, evaluate, load_model
+from futurix_decision import (
+    DecisionModel,
+    DecisionTrainer,
+    NativeDecisionModel,
+    evaluate,
+    load_model,
+)
 from futurix_decision.datasets import load_decisions
 from futurix_decision.errors import ConfigError, MissingDependencyError
 from futurix_decision.rewards import BrierScore, LogScore, RankedProbabilityScore, SphericalScore
@@ -140,6 +146,8 @@ def _train(args: argparse.Namespace) -> None:
             device="cuda:0" if args.gpu is not None else "cpu",
             family=args.native_family,
         )
+        if not isinstance(native, NativeDecisionModel):
+            raise ConfigError(f"{checkpoint} is not a publisher-native checkpoint")
         rows = (
             islice(_source(dataset), args.max_examples)
             if args.max_examples is not None
@@ -473,7 +481,6 @@ def main(argv: list[str] | None = None) -> None:
     train.add_argument(
         "--convert-strategy",
         choices=("pointer", "bosun", "letter_code"),
-        type=lambda value: "letter_code" if value == "pplx" else value,
         help="Convert a raw model before training; letter_code supports RLCD",
     )
     train.add_argument(

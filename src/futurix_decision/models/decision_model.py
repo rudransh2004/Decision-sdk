@@ -131,9 +131,6 @@ class DecisionModel:
             raise ConfigError("Eikos requires EikosDecisionModel to preserve its SemIf readout")
         if head_type == "tokens" and (decision_head is not None or head_config):
             raise ConfigError("token readout does not take a custom decision head")
-        # Read old local exports but always write new metadata when re-exporting.
-        if head_type == "pplx" and head_prompt_version == "pplx-v1":
-            head_type, head_prompt_version = "letter_code", "letter-code-v1"
         if head_prompt_version not in ("marker-v1", "span-v1", "letter-code-v1"):
             raise ConfigError("unsupported candidate prompt version")
         if head_type == "tokens" and head_prompt_version != "marker-v1":
@@ -380,10 +377,12 @@ class DecisionModel:
         ):
             raise CheckpointError("decider-v2.1 checkpoint is missing type-specific calibration")
         stored_head_type = decision_config.get("head_type")
-        if stored_head_type == "pplx":
-            stored_head_type = "letter_code"
-        if head_type == "pplx":
-            head_type = "letter_code"
+        if stored_head_type == "pplx" or decision_config.get("head_prompt_version") == "pplx-v1":
+            raise CheckpointError(
+                f"{checkpoint} uses the pre-release readout name 'pplx'; in its "
+                "decision_config.json set head_type to 'letter_code' and "
+                "head_prompt_version to 'letter-code-v1'"
+            )
         if stored_head_type is not None and head_type is not None and head_type != stored_head_type:
             raise ConfigError("cannot override the saved checkpoint's decision head type")
         if "head_config" in decision_config and head_config is not None:
@@ -392,10 +391,6 @@ class DecisionModel:
                     "cannot override the saved checkpoint's decision head configuration"
                 )
         stored_prompt_version = decision_config.get("head_prompt_version")
-        if stored_prompt_version == "pplx-v1":
-            stored_prompt_version = "letter-code-v1"
-        if head_prompt_version == "pplx-v1":
-            head_prompt_version = "letter-code-v1"
         if (
             stored_prompt_version is not None
             and head_prompt_version is not None
@@ -1070,6 +1065,9 @@ class DecisionModel:
     ) -> DecisionResult:
         example = score_input(state, question, min_score, max_score)
         return self._infer([example], [confidence_threshold])[0]
+
+    def close(self) -> None:
+        """Do nothing: an in-process model holds no connections. Part of ``DecisionBackend``."""
 
     def batch_choice(
         self,

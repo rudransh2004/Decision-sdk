@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 from futurix_decision._lazy import lazy_exports
+from futurix_decision.models.protocol import DecisionBackend
 
 if TYPE_CHECKING:
     from futurix_decision.models.custom_head import PointerDecisionHead, register_decision_head
@@ -21,6 +22,7 @@ __getattr__ = lazy_exports(
 )
 
 __all__ = [
+    "DecisionBackend",
     "DecisionBatch",
     "DecisionModel",
     "NativeCapabilities",

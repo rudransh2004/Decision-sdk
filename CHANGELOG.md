@@ -8,6 +8,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `DecisionBackend`, a runtime-checkable protocol exported from the top-level package
+  (no torch needed): `decide`, `batch_decide`, `choice`, `noul`, `score`, and `close`.
+  `DecisionModel`, `NativeDecisionModel`, `VLLMEngine`, and `DecisionClient`
+  implement it. `DecisionModel.close()` and `VLLMEngine.close()` do nothing.
 - `DecisionResult.kind` and `DecisionResult.from_probabilities(example, probabilities,
   latency_ms=..., confidence_threshold=...)`.
 - `DecisionClient` and `AsyncDecisionClient` (`futurix_decision.client`, no torch needed)
@@ -45,6 +49,16 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Breaking:** `latency_ms` is always wall time per row. `DecisionModel` and
   `VLLMEngine` batches used to stamp the whole batch time on every row. Migration:
   multiply by the batch size for the batch total.
+- **Breaking:** `load_model` has an explicit signature: `family`, `convert`,
+  `strategy: Literal["pointer", "bosun", "letter_code"] | None`, `head_type`,
+  `train_backbone`, `revision`, `device`, and `**family_kwargs`. It is typed to return
+  `DecisionBackend` (`DecisionModel` when `convert=True`). `head_type` and
+  `train_backbone` raise `ConfigError` for publisher, Bosun, Decider, JPT, and Eikos
+  releases instead of reaching their loaders. `device` now also places a `DecisionModel`
+  (publisher runtimes still default to `"cpu"`); passing it with `device_map` raises
+  `ConfigError`. Migration: drop `head_type` and `train_backbone` where a release
+  rejects them, and narrow the result with `isinstance` before calling
+  family-specific methods such as `NativeDecisionModel.finetune`.
 - The native HTTP runtime (`load_model(..., base_url=...)`) uses the client's transport:
   new `timeout` (default 60 s, as before) and `max_retries` (default 3) arguments, the
   same retry policy, and `BackendError` instead of `httpx.HTTPStatusError` for failed
@@ -83,4 +97,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **Breaking:** the `pplx` strategy and head-type alias and the `pplx-v1` prompt-version
+  alias, in `load_model`, `DecisionModel`, and `futurix-decision train
+  --convert-strategy`. Migration: use `letter_code` and `letter-code-v1`. A checkpoint
+  whose `decision_config.json` still names `pplx` raises `CheckpointError`; set
+  `head_type` to `letter_code` and `head_prompt_version` to `letter-code-v1` in that file.
 - The `native-http` extra. `httpx` is now a base dependency.

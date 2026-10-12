@@ -289,3 +289,6 @@ class VLLMEngine:
             score_input(state, question, min_score, max_score),
             confidence_threshold=confidence_threshold,
         )
+
+    def close(self) -> None:
+        """Do nothing; part of ``DecisionBackend``. Delete the engine to free GPU memory."""

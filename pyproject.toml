@@ -109,6 +109,7 @@ module = [
   "futurix_decision.datasets.schema",
   "futurix_decision.client.*",
   "futurix_decision.errors",
+  "futurix_decision.models.protocol",
 ]
 disallow_untyped_defs = true
 

@@ -11,6 +11,7 @@ import httpx
 from pydantic import ValidationError
 
 from futurix_decision import (
+    DecisionBackend,
     DecisionClient,
     DecisionInput,
     DecisionResult,
@@ -69,7 +70,21 @@ def sampling_params(**kwargs):
     return SimpleNamespace(**kwargs)
 
 
-class LatencyTests(unittest.TestCase):
+class ProtocolTests(unittest.TestCase):
+    def test_every_backend_satisfies_the_protocol(self):
+        with tempfile.TemporaryDirectory() as temp:
+            backends = [
+                tiny_model(),
+                NativeDecisionModel.from_runtime("convaiinnovations/laya", "laya", Overconfident()),
+                fake_vllm_engine(temp),
+                DecisionClient(transport=httpx.MockTransport(lambda request: httpx.Response(500))),
+            ]
+            for backend in backends:
+                with self.subTest(backend=type(backend).__name__):
+                    self.assertIsInstance(backend, DecisionBackend)
+                    backend.close()
+        self.assertNotIsInstance(object(), DecisionBackend)
+
     def test_latency_is_per_row_for_batches(self):
         model = tiny_model()
         with patch(
