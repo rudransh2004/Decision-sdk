@@ -60,34 +60,49 @@ uv pip compile pyproject.toml --extra decider-vllm --python-platform x86_64-many
 
 ## Add a model family
 
-Each family is a `FamilyAdapter` (`src/futurix_decision/models/families/base.py`).
-`load_model` and the CLI find adapters by name in the registry
-(`src/futurix_decision/models/registry.py`). To add a family:
+Each family is a `FamilyAdapter` (`src/futurix_decision/models/families/base.py`), and
+the adapter is the only place the SDK records the family. `load_model` and the CLI find
+adapters through the registry (`src/futurix_decision/models/registry.py`), which derives
+Hub ID lookup, short names, and local-copy detection from the adapters' attributes. To
+add a family:
 
 1. Create `src/futurix_decision/models/families/<family>.py` with a `FamilyAdapter`
    subclass. Import torch and the publisher's packages inside methods, not at module
    level, so `import futurix_decision` stays torch-free.
-2. Add one instance of it to the list at the end of `registry.py`.
-3. Add tests, and a row for the family in the family table
-   (`src/futurix_decision/models/families/__init__.py`) and the README matrix.
+2. Import it in `registry.py` and add one instance to the list at the end.
+3. Add tests, and a README "Supported decision models" row if the family lists
+   `checkpoints`. `tests/test_family_registry.py` fails when a row's Hub IDs, training
+   columns, or vLLM column disagree with the adapter.
 
-The adapter sets three attributes and implements `load`:
+The adapter sets `name`, implements `load`, and declares what it supports:
 
 ```python
 class FamilyAdapter(ABC):
     name: str  # family= in load_model, --model-format in the CLI
-    checkpoints: tuple[str, ...]  # Hub IDs load_model recognizes by name
-    extra: str | None  # pip extra that installs the family
+    checkpoints: tuple[str, ...] = ()  # Hub IDs load_model loads by name
+    unsupported_checkpoints: tuple[str, ...] = ()  # published, recognized only to refuse
+    aliases: Mapping[str, str] = {}  # short name -> Hub ID in checkpoints
+    markers: tuple[str, ...] = ()  # files that identify a local copy
+    extra: str | None = None  # pip extra that installs the family
+    trainable: bool = False  # trains on labeled data (DecisionTrainer or finetune)
+    vllm: Literal["direct", "export", "server"] | None = None
 
     def load(self, checkpoint: str, *, device: str | None = None, **kwargs) -> DecisionBackend: ...
+    def detect(self, directory: Path) -> bool: ...  # optional; default checks markers
     def requires(self, path: Path) -> None: ...  # optional
     def finetune(self, model, dataset, output_dir, **kwargs) -> DecisionBackend: ...  # optional
     def training_kwargs(self, section, *, method: str) -> dict: ...  # optional
+    def model_class(self) -> type[DecisionModel] | None: ...  # optional
 ```
 
 - `load` returns any `DecisionBackend`. It receives the `load_model` keyword arguments,
   or the options of the CLI command. Raise `ConfigError` for options the family does
   not support.
+- `detect` tells `load_model` that a local directory without `family=` belongs to this
+  family. The registry asks families in registration order and takes the first `True`,
+  so check something only this family's releases contain. Override it to read a config
+  file; `optional_json` in `models/sources.py` reads one that may be absent. When no
+  family claims a directory, a family whose Hub ID ends in the directory's name does.
 - `requires` raises `CheckpointError` when a local directory lacks a file `load` needs.
   `load_model` calls it before `load`, so `load` need not check again. Build it with
   `CheckpointFiles` from `models/sources.py`: `require`, `one_of`, `tokenizer`, and
@@ -97,21 +112,27 @@ class FamilyAdapter(ABC):
   `DecisionTrainer`, which needs `load` to return a `DecisionModel`.
 - `training_kwargs` turns the `model:` section of a `futurix-decision train` config into
   `load` options. The default accepts a section that sets no family options.
+- `model_class` names the `DecisionModel` subclass that reads the family's saved
+  checkpoints, so `DecisionModel.from_pretrained` can pick it from a saved
+  `prompt_format`. Decider, JPT, and Eikos subclass `LetterAdapter`
+  (`models/families/letter.py`), which provides it.
+- `vllm` decides what `--backend vllm` does: `"direct"` checkpoints load in
+  `VLLMEngine`, `"export"` ones need `futurix-decision export` first, and `"server"`
+  means the publisher's own vLLM-backed System One server.
+
+`register_family` refuses a Hub ID or alias that another family already claims.
 
 A family that runs a publisher's own code subclasses `PublisherAdapter`
 (`models/families/publisher.py`) instead; `kev.py` and `laya.py` are short examples.
-It sets `readout` and the capability attributes (`images`, `max_options`,
-`remote_code`, `transformers`, `trainable`), implements `open` to load the publisher's
+It also sets `readout` and the runtime capabilities (`images`, `max_options`,
+`remote_code`, `transformers`, `http_error`), implements `open` to load the publisher's
 model object and `files` to list its checkpoint files, and pairs with a
 `PublisherRuntime` subclass that answers System One payloads. `NativeDecisionModel`
 enforces the capabilities and validates the answers. A trainable family implements
-`train`; `finetune_native` writes the manifest and reloads the export.
+`train`; `finetune_native` writes the `futurix_native.json` manifest, which names the
+family, and reloads the export.
 
-`load_model` still identifies local checkpoints through `infer_local_family` in
-`models/sources.py`. A family without a recognizable file layout loads with
-`family=` passed explicitly.
-
-Code outside the SDK can register a family at runtime:
+Code outside the SDK registers a family at runtime, with the same attributes:
 
 ```python
 from futurix_decision import FamilyAdapter, load_model, register_family
@@ -120,13 +141,16 @@ from futurix_decision import FamilyAdapter, load_model, register_family
 class AcmeAdapter(FamilyAdapter):
     name = "acme"
     checkpoints = ("acme/decider-1",)
+    aliases = {"acme-small": "acme/decider-1"}
+    markers = ("acme.json",)
 
     def load(self, checkpoint, *, device=None, **kwargs):
         return AcmeBackend(checkpoint, device=device, **kwargs)
 
 
 register_family(AcmeAdapter())
-model = load_model("acme/decider-1")
+model = load_model("acme-small")
+local = load_model("./downloads/acme")  # found by its acme.json
 ```
 
 After `register_family`, `futurix-decision evaluate --model-format acme` also loads it,
