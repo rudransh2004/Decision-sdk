@@ -1260,6 +1260,19 @@ FastAPI exposes `POST /v1/decision`, `/v1/decision/choice`,
 they are translated into canonical `DecisionInput` objects, including
 criteria descriptions. Media is explicitly rejected by text-only backends.
 
+The server micro-batches concurrent requests for every backend: the first
+waiting row holds a batch open for `--batch-window-ms` (default 5), or until
+`--max-batch` rows (default 32), and the batch runs as one `batch_decide`
+call (one `generate` call with `--backend vllm`). Each row keeps its own
+`confidence_threshold`. If a batch fails, its rows are retried one at a
+time, so only the requests whose rows fail get an error. `--api-key` (or the
+`FUTURIX_API_KEY` environment variable) requires `Authorization: Bearer
+<key>` on every endpoint except `/health`; `DecisionClient(api_key=...)`
+sends it. Without a key the server binds `127.0.0.1` unless `--host` says
+otherwise; with a key it defaults to `0.0.0.0`. In Python,
+`create_app(backend, api_key=..., batch_window_ms=..., max_batch=...)` from
+`futurix_decision.vllm.api` builds the same app.
+
 ## Verification and limitations
 
 ```bash

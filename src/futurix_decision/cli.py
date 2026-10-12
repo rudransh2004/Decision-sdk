@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from itertools import islice
@@ -445,7 +446,17 @@ def _serve(args: argparse.Namespace) -> None:
             )
         else:
             engine = _load(args.model_format, args.model, device=device)
-    uvicorn.run(create_app(engine), host=args.host, port=args.port)
+    api_key = args.api_key or os.environ.get("FUTURIX_API_KEY") or None
+    host = args.host or ("0.0.0.0" if api_key else "127.0.0.1")
+    if api_key is None and host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            f"warning: serving on {host} without an API key; set --api-key or FUTURIX_API_KEY",
+            file=sys.stderr,
+        )
+    app = create_app(
+        engine, api_key=api_key, batch_window_ms=args.batch_window_ms, max_batch=args.max_batch
+    )
+    uvicorn.run(app, host=host, port=args.port)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -549,8 +560,24 @@ def main(argv: list[str] | None = None) -> None:
     serve.add_argument("--trust-remote-code", action="store_true")
     serve.add_argument("--backend", choices=("transformers", "vllm"), default="transformers")
     serve.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
-    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument(
+        "--host", help="Bind address (default 127.0.0.1, or 0.0.0.0 with an API key)"
+    )
     serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--api-key",
+        help="Require 'Authorization: Bearer <key>' on every endpoint except /health "
+        "(default: the FUTURIX_API_KEY environment variable)",
+    )
+    serve.add_argument(
+        "--batch-window-ms",
+        type=float,
+        default=5.0,
+        help="How long the first waiting request holds a batch open for others",
+    )
+    serve.add_argument(
+        "--max-batch", type=int, default=32, help="Most rows in one batch_decide call"
+    )
     serve.set_defaults(run=_serve)
     args = parser.parse_args(argv)
     args.run(args)

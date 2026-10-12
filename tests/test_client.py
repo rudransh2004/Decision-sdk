@@ -44,6 +44,9 @@ class FakeEngine:
             confidence_threshold=confidence_threshold,
         )
 
+    def batch_decide(self, examples, *, confidence_threshold=None):
+        return [self.decide(row, confidence_threshold=confidence_threshold) for row in examples]
+
 
 def handler_sequence(*responses):
     """A MockTransport handler that replays responses and records requests."""

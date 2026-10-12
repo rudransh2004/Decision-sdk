@@ -56,6 +56,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pass as before. `max_batch_tokens` is not part of `DecisionBackend`: an HTTP client or
   publisher runtime has no tokenizer to budget with. The batching helper,
   `futurix_decision.models.batching.token_budget_batches`, is shared with `evaluate`.
+- `futurix-decision serve` micro-batches concurrent requests for every backend
+  (`futurix_decision.vllm.batcher.MicroBatcher`): the first waiting row holds a batch
+  open for `--batch-window-ms` (default 5) or until `--max-batch` rows (default 32), and
+  the batch runs as one `batch_decide` call. Each row keeps its own
+  `confidence_threshold`. If a batch call raises, its rows are retried one at a time, so
+  an error reaches only the requests whose rows cause it. `/metrics` adds
+  `decision_batches_total`.
+- Bearer auth for `futurix-decision serve`: `--api-key` or the `FUTURIX_API_KEY`
+  environment variable requires `Authorization: Bearer <key>` on every endpoint except
+  `/health` (HTTP 401 otherwise). `create_app(engine, *, api_key=None,
+  batch_window_ms=5.0, max_batch=32)` takes the same settings.
 - The package ships a `py.typed` marker, so type checkers read its inline annotations.
 - The `dev` extra installs `fastapi`, `httpx`, `ruff`, `mypy`, and `types-PyYAML`.
   The serving tests now run under `pip install -e ".[dev]"` instead of skipping.
@@ -156,6 +167,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`config`, `checkpoint`, `backend`, or `invalid_output`). Invalid output used to be a
   500. `DecisionClient` and `AsyncDecisionClient` raise `InvalidOutputError` for an
   `invalid_output` response without retrying it, and still retry other 502s.
+- The server's endpoints are async and the global lock is gone: one worker thread makes
+  every backend call, so the event loop keeps accepting requests while a batch runs.
+  `--backend vllm` gets the same batching over `VLLMEngine` (one `generate` call per
+  batch); it does not use vLLM's async engine. A backend served by `create_app` must
+  implement `batch_decide`.
+- `serve --host` defaults to `127.0.0.1` without an API key and to `0.0.0.0` with one.
+  Serving on another address without a key prints a warning.
 - `evaluate` and `fit_temperature` take any `DecisionBackend`. `max_batch_tokens` in
   `evaluate` needs a `DecisionModel` or `VLLMEngine` (optionally inside `Calibrated`) and
   raises `ConfigError` for other backends.
@@ -236,6 +254,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   whose `decision_config.json` still names `pplx` raises `CheckpointError`; set
   `head_type` to `letter_code` and `head_prompt_version` to `letter-code-v1` in that file.
 - The `native-http` extra. `httpx` is now a base dependency.
+- **Breaking:** `futurix_decision.vllm.api.create_vllm_app`. Nothing called it.
+  Migration: `create_app(VLLMEngine(checkpoint, **kwargs))`.
 
 ### Fixed
 

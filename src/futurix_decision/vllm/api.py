@@ -1,13 +1,16 @@
-"""FastAPI Decision API for the HF or vLLM decision backend."""
+"""FastAPI Decision API over any ``DecisionBackend``: Transformers, vLLM, or native."""
 
 from __future__ import annotations
 
+import asyncio
+import hmac
 import json
-import threading
 from collections import defaultdict
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -27,6 +30,7 @@ from futurix_decision.inference.schemas import (
     DecisionResult,
 )
 from futurix_decision.models.protocol import DecisionBackend
+from futurix_decision.vllm.batcher import MicroBatcher
 
 PROFILE_INSTRUCTIONS = {
     "baseline": "",
@@ -103,43 +107,87 @@ def _error_response(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
-def create_app(engine: DecisionBackend) -> FastAPI:
-    app = FastAPI(title="Futurix Decision API", version=__version__)
+def _bearer(api_key: str) -> Callable[[str | None], None]:
+    expected = api_key.encode()
+
+    def check(authorization: str | None = Header(default=None)) -> None:
+        scheme, _, token = (authorization or "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(token.encode(), expected):
+            raise HTTPException(
+                status_code=401,
+                detail="missing or invalid API key",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    return check
+
+
+def create_app(
+    engine: DecisionBackend,
+    *,
+    api_key: str | None = None,
+    batch_window_ms: float = 5.0,
+    max_batch: int = 32,
+) -> FastAPI:
+    """Serve ``engine`` over HTTP; ``DecisionClient`` is the matching client.
+
+    Concurrent requests are micro-batched: rows that arrive within
+    ``batch_window_ms`` of each other, up to ``max_batch``, share one
+    ``engine.batch_decide`` call (see ``MicroBatcher``). This works for any
+    backend, including ``VLLMEngine``, which then makes one ``generate`` call
+    per batch. With ``api_key``, every endpoint except ``/health`` requires
+    ``Authorization: Bearer <api_key>``.
+    """
+    batcher = MicroBatcher(engine, window_ms=batch_window_ms, max_batch=max_batch)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        batcher.close()
+
+    app = FastAPI(title="Futurix Decision API", version=__version__, lifespan=lifespan)
+    app.state.batcher = batcher
     for error in ERROR_STATUS:
         app.add_exception_handler(error, _error_response)
-    lock = threading.Lock()
+    api = APIRouter(dependencies=[Depends(_bearer(api_key))] if api_key else [])
     counters: dict[str, int] = defaultdict(int)
     latency: dict[str, float] = defaultdict(float)
 
-    def run(request: DecisionRequest) -> DecisionResult:
+    async def run(rows: list[DecisionInput], threshold: float | None) -> list[DecisionResult]:
+        results = await asyncio.gather(
+            *(batcher.decide(row, confidence_threshold=threshold) for row in rows)
+        )
+        for row, result in zip(rows, results, strict=True):
+            counters[row.kind] += 1
+            latency[row.kind] += result.latency_ms
+        return list(results)
+
+    async def run_request(request: DecisionRequest) -> DecisionResult:
         try:
             example = request.to_input()
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        with lock:
-            result = engine.decide(example, confidence_threshold=request.confidence_threshold)
-            counters[request.kind] += 1
-            latency[request.kind] += result.latency_ms
+        (result,) = await run([example], request.confidence_threshold)
         return result
 
-    @app.post("/v1/decision", response_model=DecisionResult)
-    def decide(request: DecisionRequest) -> DecisionResult:
-        return run(request)
+    @api.post("/v1/decision", response_model=DecisionResult)
+    async def decide(request: DecisionRequest) -> DecisionResult:
+        return await run_request(request)
 
-    @app.post("/v1/decision/choice", response_model=DecisionResult)
-    def choice(request: DecisionRequest) -> DecisionResult:
-        return run(request.model_copy(update={"kind": "choice"}))
+    @api.post("/v1/decision/choice", response_model=DecisionResult)
+    async def choice(request: DecisionRequest) -> DecisionResult:
+        return await run_request(request.model_copy(update={"kind": "choice"}))
 
-    @app.post("/v1/decision/noul", response_model=DecisionResult)
-    def noul(request: DecisionRequest) -> DecisionResult:
-        return run(request.model_copy(update={"kind": "noul"}))
+    @api.post("/v1/decision/noul", response_model=DecisionResult)
+    async def noul(request: DecisionRequest) -> DecisionResult:
+        return await run_request(request.model_copy(update={"kind": "noul"}))
 
-    @app.post("/v1/decision/score", response_model=DecisionResult)
-    def score(request: DecisionRequest) -> DecisionResult:
-        return run(request.model_copy(update={"kind": "score"}))
+    @api.post("/v1/decision/score", response_model=DecisionResult)
+    async def score(request: DecisionRequest) -> DecisionResult:
+        return await run_request(request.model_copy(update={"kind": "score"}))
 
-    @app.post("/v1/systemone")
-    def systemone(body: SystemOneRequest) -> dict[str, Any]:
+    @api.post("/v1/systemone")
+    async def systemone(body: SystemOneRequest) -> dict[str, Any]:
         if body.media is not None:
             raise HTTPException(
                 status_code=422, detail="media is not supported by text-only checkpoints"
@@ -156,14 +204,12 @@ def create_app(engine: DecisionBackend) -> FastAPI:
                     status_code=422,
                     detail="native System One inference does not support Futurix prompt overrides",
                 )
+            questions = {
+                qid: question.model_dump(exclude_none=True)
+                for qid, question in body.questions.items()
+            }
             try:
-                return engine.system_one(
-                    body.state,
-                    {
-                        qid: question.model_dump(exclude_none=True)
-                        for qid, question in body.questions.items()
-                    },
-                )
+                return await batcher.call(engine.system_one, body.state, questions)
             except (TypeError, ValueError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         if body.prompt_profile not in PROFILE_INSTRUCTIONS:
@@ -183,11 +229,7 @@ def create_app(engine: DecisionBackend) -> FastAPI:
             ]
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        with lock:
-            results = engine.batch_decide(inputs, confidence_threshold=body.confidence_threshold)
-            for row, result in zip(inputs, results, strict=True):
-                counters[row.kind] += 1
-                latency[row.kind] += result.latency_ms
+        results = await run(inputs, body.confidence_threshold)
         answers = {}
         for question_id, row, result in zip(body.questions, inputs, results, strict=True):
             if row.kind == "noul":
@@ -217,23 +259,20 @@ def create_app(engine: DecisionBackend) -> FastAPI:
             "demonstration_format": body.demonstration_format,
         }
 
-    @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "backend": type(engine).__name__}
-
-    @app.get("/metrics", response_class=PlainTextResponse)
-    def metrics() -> str:
-        with lock:
-            return "".join(
+    @api.get("/metrics", response_class=PlainTextResponse)
+    async def metrics() -> str:
+        return (
+            "".join(
                 f'decision_requests_total{{kind="{kind}"}} {counters[kind]}\n'
                 f'decision_latency_ms_sum{{kind="{kind}"}} {latency[kind]}\n'
                 for kind in ("choice", "noul", "score")
             )
+            + f"decision_batches_total {batcher.batches}\n"
+        )
 
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok", "backend": type(engine).__name__}
+
+    app.include_router(api)
     return app
-
-
-def create_vllm_app(checkpoint: str, **kwargs: Any) -> FastAPI:
-    from futurix_decision.vllm.engine import VLLMEngine
-
-    return create_app(VLLMEngine(checkpoint, **kwargs))
