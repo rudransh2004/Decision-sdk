@@ -1,0 +1,28 @@
+{
+  "architecture": "futurix-decision",
+  "head_type": "tokens",
+  "head_config": {},
+  "head_prompt_version": "marker-v1",
+  "train_backbone": true,
+  "bosun_template_fallback": false,
+  "learn_abstain": false,
+  "attention_mode": "causal",
+  "multimodal_loader": false,
+  "decision_tokens": 255,
+  "temperature": 1.0,
+  "seed": 0,
+  "max_sequence_length": 512,
+  "prompt_format": "decider-v2.1",
+  "prompt_schema": "bosun-decision-prompt-v3-stable-slots",
+  "source_checkpoint": "local/native",
+  "supported_types": [
+    "choice",
+    "noul",
+    "score"
+  ],
+  "type_temperatures": {
+    "choice": 1.11,
+    "noul": 1.56,
+    "score": 1.287
+  }
+}
