@@ -19,6 +19,7 @@ from futurix_decision import (
 )
 
 DECISION = {
+    "kind": "choice",
     "decision": "approve",
     "confidence": 0.7,
     "probabilities": {"approve": 0.7, "reject": 0.3},
@@ -36,18 +37,12 @@ class FakeEngine:
         probabilities = {
             option: 0.7 if index == 0 else rest for index, option in enumerate(example.options)
         }
-        winner = example.options[0]
-        abstained = confidence_threshold is not None and 0.7 < confidence_threshold
-        decision = (
-            None
-            if abstained
-            else winner == "true"
-            if example.kind == "noul"
-            else int(winner)
-            if example.kind == "score"
-            else winner
+        return DecisionResult.from_probabilities(
+            example,
+            list(probabilities.values()),
+            latency_ms=2.0,
+            confidence_threshold=confidence_threshold,
         )
-        return DecisionResult(decision, 0.7, probabilities, abstained, 2.0)
 
 
 def handler_sequence(*responses):

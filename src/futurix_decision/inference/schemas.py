@@ -2,30 +2,120 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from collections.abc import Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from futurix_decision.datasets.schema import DecisionInput, DecisionKind, State
 from futurix_decision.errors import ConfigError
 
+Decision = bool | int | str | None
 
-@dataclass(frozen=True)
-class DecisionResult:
-    decision: str | int | bool | None
+
+def typed_decision(kind: DecisionKind, option: str) -> Decision:
+    """Return the decision value that ``option`` names for ``kind``.
+
+    Choice decisions are the option itself. Noul options ``"true"`` and
+    ``"false"`` become booleans and score options integer levels. A
+    ``preserve_order`` row whose candidate IDs name no such value (for example
+    a DecisionBench binary row with IDs ``c000``/``c001``) has no typed
+    decision, so this returns ``None``; read the winner from ``probabilities``.
+    """
+    if kind == "choice":
+        return option
+    if kind == "noul":
+        return {"true": True, "false": False}.get(option)
+    try:
+        level = int(option)
+    except ValueError:
+        return None
+    return level if str(level) == option else None
+
+
+class DecisionResult(BaseModel):
+    """One decision, as every backend returns it and the HTTP API serves it.
+
+    ``decision`` is typed by ``kind``: noul is ``bool``, score ``int``, and
+    choice ``str``. It is ``None`` when the model abstained (confidence below
+    the threshold), or for a ``preserve_order`` row whose candidate IDs name no
+    noul or score value. ``probabilities`` maps every option to its
+    probability and ``confidence`` is the highest one. ``latency_ms`` is the
+    wall time per row: batched calls divide the batch time by the row count.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: DecisionKind
+    decision: Decision
     confidence: float
     probabilities: dict[str, float]
     abstained: bool
     latency_ms: float
 
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "decision": self.decision,
-            "confidence": self.confidence,
-            "probabilities": self.probabilities,
-            "abstained": self.abstained,
-            "latency_ms": self.latency_ms,
-        }
+    @model_validator(mode="after")
+    def check_decision_type(self) -> DecisionResult:
+        if self.decision is None:
+            return self
+        if self.abstained:
+            raise ValueError("an abstained result has no decision")
+        expected = {"choice": str, "noul": bool, "score": int}[self.kind]
+        if not isinstance(self.decision, expected) or (
+            self.kind == "score" and isinstance(self.decision, bool)
+        ):
+            raise ValueError(f"{self.kind} decisions must be {expected.__name__}")
+        return self
+
+    @classmethod
+    def from_probabilities(
+        cls,
+        example: DecisionInput,
+        probabilities: Sequence[float],
+        *,
+        latency_ms: float,
+        confidence_threshold: float | None = None,
+    ) -> DecisionResult:
+        """Build the result for ``example`` from probabilities in option order."""
+        if len(probabilities) != len(example.options):
+            raise ConfigError("probabilities must align with the example's options")
+        winner = max(range(len(probabilities)), key=probabilities.__getitem__)
+        confidence = float(probabilities[winner])
+        abstained = confidence_threshold is not None and confidence < confidence_threshold
+        return cls(
+            kind=example.kind,
+            decision=None if abstained else typed_decision(example.kind, example.options[winner]),
+            confidence=confidence,
+            probabilities={
+                option: float(value)
+                for option, value in zip(example.options, probabilities, strict=True)
+            },
+            abstained=abstained,
+            latency_ms=latency_ms,
+        )
+
+
+def check_confidence_threshold(confidence_threshold: float | None) -> None:
+    if confidence_threshold is not None and (
+        not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
+    ):
+        raise ConfigError("confidence_threshold must be between 0 and 1")
+
+
+def choice_input(state: State, choices: Sequence[str], question: str) -> DecisionInput:
+    return DecisionInput(state=state, question=question, options=list(choices))
+
+
+def noul_input(state: State, question: str) -> DecisionInput:
+    return DecisionInput(kind="noul", state=state, question=question, options=["false", "true"])
+
+
+def score_input(state: State, question: str, min_score: int, max_score: int) -> DecisionInput:
+    return DecisionInput(
+        kind="score",
+        state=state,
+        question=question,
+        options=[str(level) for level in range(min_score, max_score + 1)],
+    )
 
 
 class DecisionRequest(BaseModel):
@@ -63,11 +153,3 @@ class DecisionRequest(BaseModel):
         return DecisionInput(
             kind=self.kind, state=self.state, question=self.question, options=options
         )
-
-
-class DecisionResponse(BaseModel):
-    decision: str | int | bool | None
-    confidence: float
-    probabilities: dict[str, float]
-    abstained: bool
-    latency_ms: float

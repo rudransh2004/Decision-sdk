@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 from collections.abc import Sequence
 from types import TracebackType
 from typing import Any
@@ -20,9 +19,15 @@ from futurix_decision.client._transport import (
     send,
     send_async,
 )
-from futurix_decision.datasets.schema import DecisionInput, State
+from futurix_decision.datasets.schema import DecisionInput, DecisionKind, State
 from futurix_decision.errors import ConfigError, InvalidOutputError
-from futurix_decision.inference.schemas import DecisionResponse, DecisionResult
+from futurix_decision.inference.schemas import (
+    DecisionResult,
+    check_confidence_threshold,
+    choice_input,
+    noul_input,
+    score_input,
+)
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 _KIND_PATHS = {
@@ -40,16 +45,9 @@ _UNSENDABLE = (
 )
 
 
-def _check_threshold(confidence_threshold: float | None) -> None:
-    if confidence_threshold is not None and (
-        not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
-    ):
-        raise ConfigError("confidence_threshold must be between 0 and 1")
-
-
 def _body(example: DecisionInput, confidence_threshold: float | None) -> dict[str, Any]:
     """Translate a DecisionInput into the server's DecisionRequest JSON."""
-    _check_threshold(confidence_threshold)
+    check_confidence_threshold(confidence_threshold)
     unsendable = [name for name in _UNSENDABLE if getattr(example, name) is not None]
     if example.preserve_order:
         unsendable.append("preserve_order")
@@ -71,33 +69,22 @@ def _body(example: DecisionInput, confidence_threshold: float | None) -> dict[st
     return body
 
 
-def _choice_input(state: State, choices: Sequence[str], question: str) -> DecisionInput:
-    return DecisionInput(state=state, question=question, options=list(choices))
-
-
-def _noul_input(state: State, question: str) -> DecisionInput:
-    return DecisionInput(kind="noul", state=state, question=question, options=["false", "true"])
-
-
-def _score_input(state: State, question: str, min_score: int, max_score: int) -> DecisionInput:
-    return DecisionInput(
-        kind="score",
-        state=state,
-        question=question,
-        options=[str(level) for level in range(min_score, max_score + 1)],
-    )
-
-
-def _result(response: httpx.Response) -> DecisionResult:
+def _result(response: httpx.Response, kind: DecisionKind) -> DecisionResult:
     try:
-        payload = DecisionResponse.model_validate_json(response.content)
+        result = DecisionResult.model_validate_json(response.content)
     except ValidationError as error:
         raise InvalidOutputError(
             f"server returned an invalid decision: {error}",
             status_code=response.status_code,
             body=response.text,
         ) from error
-    return DecisionResult(**payload.model_dump())
+    if result.kind != kind:
+        raise InvalidOutputError(
+            f"server answered a {result.kind} decision to a {kind} request",
+            status_code=response.status_code,
+            body=response.text,
+        )
+    return result
 
 
 def _health(response: httpx.Response) -> dict[str, str]:
@@ -159,7 +146,8 @@ class DecisionClient:
         self._http = http_client
 
     def _post(self, path: str, body: dict[str, Any]) -> DecisionResult:
-        return _result(send(self._http, "POST", path, json=body, max_retries=self.max_retries))
+        response = send(self._http, "POST", path, json=body, max_retries=self.max_retries)
+        return _result(response, body["kind"])
 
     def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
@@ -185,7 +173,7 @@ class DecisionClient:
         question: str = "Which option should be selected?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        body = _body(_choice_input(state, choices, question), confidence_threshold)
+        body = _body(choice_input(state, choices, question), confidence_threshold)
         return self._post(_KIND_PATHS["choice"], body)
 
     def noul(
@@ -195,7 +183,7 @@ class DecisionClient:
         question: str = "Is this true?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        body = _body(_noul_input(state, question), confidence_threshold)
+        body = _body(noul_input(state, question), confidence_threshold)
         return self._post(_KIND_PATHS["noul"], body)
 
     def score(
@@ -207,7 +195,7 @@ class DecisionClient:
         max_score: int = 5,
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        example = _score_input(state, question, min_score, max_score)
+        example = score_input(state, question, min_score, max_score)
         return self._post(_KIND_PATHS["score"], _body(example, confidence_threshold))
 
     def health(self) -> dict[str, str]:
@@ -262,7 +250,7 @@ class AsyncDecisionClient:
         response = await send_async(
             self._http, "POST", path, json=body, max_retries=self.max_retries
         )
-        return _result(response)
+        return _result(response, body["kind"])
 
     async def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
@@ -304,7 +292,7 @@ class AsyncDecisionClient:
         question: str = "Which option should be selected?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        body = _body(_choice_input(state, choices, question), confidence_threshold)
+        body = _body(choice_input(state, choices, question), confidence_threshold)
         return await self._post(_KIND_PATHS["choice"], body)
 
     async def noul(
@@ -314,7 +302,7 @@ class AsyncDecisionClient:
         question: str = "Is this true?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        body = _body(_noul_input(state, question), confidence_threshold)
+        body = _body(noul_input(state, question), confidence_threshold)
         return await self._post(_KIND_PATHS["noul"], body)
 
     async def score(
@@ -326,7 +314,7 @@ class AsyncDecisionClient:
         max_score: int = 5,
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        example = _score_input(state, question, min_score, max_score)
+        example = score_input(state, question, min_score, max_score)
         return await self._post(_KIND_PATHS["score"], _body(example, confidence_threshold))
 
     async def health(self) -> dict[str, str]:

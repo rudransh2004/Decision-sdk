@@ -30,13 +30,14 @@ SCRIPT = textwrap.dedent(
     example = DecisionInput(state="sky", question="Which color?", options=["blue", "red"])
     assert example.options == ["blue", "red"]
     result = DecisionResult(
+        kind="choice",
         decision="blue",
         confidence=0.9,
         probabilities={"blue": 0.9, "red": 0.1},
         abstained=False,
         latency_ms=1.0,
     )
-    assert result.to_dict()["decision"] == "blue"
+    assert result.model_dump()["decision"] == "blue"
     assert compute_metrics([[0.9, 0.1]], [[1.0, 0.0]])["accuracy"] == 1.0
 
     for name in ("DecisionModel", "SFTTrainer", "evaluate", "fit_temperature"):
@@ -78,6 +79,7 @@ SCRIPT = textwrap.dedent(
         return httpx.Response(
             200,
             json={
+                "kind": "noul",
                 "decision": True,
                 "confidence": 0.8,
                 "probabilities": {"false": 0.2, "true": 0.8},

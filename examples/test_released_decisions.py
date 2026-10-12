@@ -59,14 +59,14 @@ def show_inference(model: object) -> None:
             state=state,
             question="Which team should handle this ticket?",
             choices=["billing", "technical"],
-        ).to_dict(),
-        "noul": model.noul(state=state, question="Does this need urgent escalation?").to_dict(),
+        ).model_dump(),
+        "noul": model.noul(state=state, question="Does this need urgent escalation?").model_dump(),
         "score": model.score(
             state=state,
             question="Rate support priority from 0 to 2.",
             min_score=0,
             max_score=2,
-        ).to_dict(),
+        ).model_dump(),
         "system_one": model.system_one(state, questions),
     }
     print(json.dumps(results, indent=2, allow_nan=False), flush=True)

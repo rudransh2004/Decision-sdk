@@ -17,7 +17,13 @@ from futurix_decision.errors import (
     InvalidOutputError,
     MissingDependencyError,
 )
-from futurix_decision.inference.schemas import DecisionResult
+from futurix_decision.inference.schemas import (
+    DecisionResult,
+    check_confidence_threshold,
+    choice_input,
+    noul_input,
+    score_input,
+)
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA, format_bosun_prompt
 from futurix_decision.models.decider import FORMAT as DECIDER_FORMAT
 from futurix_decision.models.decider import letter_table, prepare_decider_rows
@@ -110,12 +116,9 @@ class VLLMEngine:
     def batch_decide(
         self, examples: Sequence[DecisionInput], *, confidence_threshold: float | None = None
     ) -> list[DecisionResult]:
+        check_confidence_threshold(confidence_threshold)
         if not examples:
             return []
-        if confidence_threshold is not None and (
-            not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
-        ):
-            raise ConfigError("confidence_threshold must be in [0, 1]")
         try:
             from vllm import SamplingParams
         except ImportError as exc:
@@ -184,7 +187,8 @@ class VLLMEngine:
                 slots_list.append(selected_ids)
         started = time.perf_counter()
         output = self.llm.generate(prompts, params, use_tqdm=False)
-        latency_ms = (time.perf_counter() - started) * 1000
+        # Report the batch's wall time per row, as every backend does.
+        latency_ms = (time.perf_counter() - started) * 1000 / len(examples)
         if len(output) != len(prompts):
             raise InvalidOutputError("vLLM returned a different number of outputs")
         results = []
@@ -236,21 +240,12 @@ class VLLMEngine:
                 for position, original in enumerate(orders[len(results)]):
                     ordered[original] = probabilities[position]
                 probabilities = ordered
-            winner = max(range(len(probabilities)), key=probabilities.__getitem__)
-            confidence = probabilities[winner]
-            abstained = confidence_threshold is not None and confidence < confidence_threshold
-            decision: str | int | bool | None = None if abstained else row.options[winner]
-            if decision is not None and row.kind == "noul" and not row.preserve_order:
-                decision = decision == "true"
-            if decision is not None and row.kind == "score" and not row.preserve_order:
-                decision = int(decision)
             results.append(
-                DecisionResult(
-                    decision=decision,
-                    confidence=confidence,
-                    probabilities=dict(zip(row.options, probabilities)),
-                    abstained=abstained,
+                DecisionResult.from_probabilities(
+                    row,
+                    probabilities,
                     latency_ms=latency_ms,
+                    confidence_threshold=confidence_threshold,
                 )
             )
         return results
@@ -269,8 +264,7 @@ class VLLMEngine:
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
         return self.decide(
-            DecisionInput(state=state, question=question, options=list(choices)),
-            confidence_threshold=confidence_threshold,
+            choice_input(state, choices, question), confidence_threshold=confidence_threshold
         )
 
     def noul(
@@ -280,10 +274,7 @@ class VLLMEngine:
         question: str = "Is this true?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        return self.decide(
-            DecisionInput(kind="noul", state=state, question=question, options=["false", "true"]),
-            confidence_threshold=confidence_threshold,
-        )
+        return self.decide(noul_input(state, question), confidence_threshold=confidence_threshold)
 
     def score(
         self,
@@ -295,11 +286,6 @@ class VLLMEngine:
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
         return self.decide(
-            DecisionInput(
-                kind="score",
-                state=state,
-                question=question,
-                options=[str(level) for level in range(min_score, max_score + 1)],
-            ),
+            score_input(state, question, min_score, max_score),
             confidence_threshold=confidence_threshold,
         )

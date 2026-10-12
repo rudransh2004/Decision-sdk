@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from futurix_decision import __version__
 from futurix_decision.datasets import DecisionInput
 from futurix_decision.errors import ConfigError
-from futurix_decision.inference.schemas import DecisionRequest, DecisionResponse
+from futurix_decision.inference.schemas import DecisionRequest, DecisionResult
 
 PROFILE_INSTRUCTIONS = {
     "baseline": "",
@@ -80,7 +80,7 @@ def create_app(engine: Any) -> FastAPI:
     counters: dict[str, int] = defaultdict(int)
     latency: dict[str, float] = defaultdict(float)
 
-    def run(request: DecisionRequest) -> DecisionResponse:
+    def run(request: DecisionRequest) -> DecisionResult:
         try:
             example = request.to_input()
         except (TypeError, ValueError) as exc:
@@ -89,22 +89,22 @@ def create_app(engine: Any) -> FastAPI:
             result = engine.decide(example, confidence_threshold=request.confidence_threshold)
             counters[request.kind] += 1
             latency[request.kind] += result.latency_ms
-        return DecisionResponse.model_validate(result.to_dict())
+        return result
 
-    @app.post("/v1/decision", response_model=DecisionResponse)
-    def decide(request: DecisionRequest) -> DecisionResponse:
+    @app.post("/v1/decision", response_model=DecisionResult)
+    def decide(request: DecisionRequest) -> DecisionResult:
         return run(request)
 
-    @app.post("/v1/decision/choice", response_model=DecisionResponse)
-    def choice(request: DecisionRequest) -> DecisionResponse:
+    @app.post("/v1/decision/choice", response_model=DecisionResult)
+    def choice(request: DecisionRequest) -> DecisionResult:
         return run(request.model_copy(update={"kind": "choice"}))
 
-    @app.post("/v1/decision/noul", response_model=DecisionResponse)
-    def noul(request: DecisionRequest) -> DecisionResponse:
+    @app.post("/v1/decision/noul", response_model=DecisionResult)
+    def noul(request: DecisionRequest) -> DecisionResult:
         return run(request.model_copy(update={"kind": "noul"}))
 
-    @app.post("/v1/decision/score", response_model=DecisionResponse)
-    def score(request: DecisionRequest) -> DecisionResponse:
+    @app.post("/v1/decision/score", response_model=DecisionResult)
+    def score(request: DecisionRequest) -> DecisionResult:
         return run(request.model_copy(update={"kind": "score"}))
 
     @app.post("/v1/systemone")

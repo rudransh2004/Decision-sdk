@@ -1184,7 +1184,7 @@ result = model.choice(
     choices=["approve", "request_document", "reject", "escalate"],
     confidence_threshold=0.8,
 )
-print(result.to_dict())  # decision, confidence, probabilities, abstained, latency_ms
+print(result.model_dump())  # kind, decision, confidence, probabilities, abstained, latency_ms
 
 binary = model.noul(state="The certificate is current.", question="Can it be approved?")
 ordinal = model.score(state="Claim details", question="Rate reliability, 0 to 5.")
@@ -1196,9 +1196,14 @@ many = model.batch_choice(
 )  # one padded transformer forward pass for the batch
 ```
 
-`noul` returns a boolean decision; `score` returns an integer level. Any type
-can abstain below a confidence threshold: `decision=None`, `abstained=True`;
-the full probability distribution is still returned. `temperature` defaults
+`result.kind` fixes the type of `result.decision`: `noul` returns a boolean,
+`score` an integer level, and `choice` the option string, for every backend
+and whether or not the row sets `preserve_order`. Any type can abstain below a
+confidence threshold: `decision=None`, `abstained=True`; the full probability
+distribution is still returned. A `preserve_order` benchmark row whose
+candidate IDs are not `true`/`false` or integer levels also has
+`decision=None`; read its winner from `probabilities`. `latency_ms` is the
+wall time per row, so a batch of 8 that takes 80 ms reports 10 ms each. `temperature` defaults
 to **1.0**, is fitted only on held-out examples, and is saved in
 `decision_config.json`.
 

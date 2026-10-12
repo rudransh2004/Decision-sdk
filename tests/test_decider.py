@@ -378,7 +378,7 @@ class DeciderIntegrationTests(unittest.TestCase):
             with patch.dict(sys.modules, {"vllm": SimpleNamespace(SamplingParams=SamplingParams)}):
                 engine = VLLMEngine(export, llm=FakeLLM(), tokenizer=model.tokenizer)
                 result = engine.decide(row)
-            self.assertEqual(result.decision, "false")
+            self.assertIs(result.decision, False)
             self.assertGreater(result.probabilities["false"], result.probabilities["true"])
 
     @unittest.skipUnless(os.environ.get("FUTURIX_TEST_VLLM") == "1", "opt-in GPU vLLM smoke test")

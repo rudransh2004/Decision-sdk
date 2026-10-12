@@ -41,7 +41,7 @@ result = model.choice(
     question="Which team owns this request?",
     choices=["billing", "technical"],
 )
-print(result.to_dict())
+print(result.model_dump())
 ```
 
 `load_model` downloads a missing supported Hub checkpoint into the normal
@@ -49,7 +49,8 @@ Hugging Face cache. Pass a local checkpoint directory to load from disk.
 Publisher models with executable remote code require you to review that code
 and supply a pinned revision; see [model support](model-support.md).
 
-`result.decision` is the selected option, `result.probabilities` maps the
+`result.decision` is the selected option (`True`/`False` for `noul`, an
+integer level for `score`), `result.probabilities` maps the
 supplied options to probabilities, and `result.abstained` reports whether a
 configured confidence threshold led the SDK to decline a choice. Probabilities
 need held-out calibration before you treat them as reliable confidence.

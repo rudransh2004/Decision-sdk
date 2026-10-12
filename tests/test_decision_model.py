@@ -105,7 +105,7 @@ class DecisionModelTests(unittest.TestCase):
         self.assertTrue(abstained.abstained)
         self.assertIsNone(abstained.decision)
         self.assertLess(abstained.confidence, 1.0)
-        self.assertTrue(abstained.to_dict()["abstained"])
+        self.assertTrue(abstained.model_dump()["abstained"])
 
     def test_noul_score_and_threshold_validation(self):
         self.assertIsInstance(self.model.noul(state="ready").decision, bool)

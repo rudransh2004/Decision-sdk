@@ -37,7 +37,13 @@ from futurix_decision.errors import (
     InvalidOutputError,
     MissingDependencyError,
 )
-from futurix_decision.inference.schemas import DecisionResult
+from futurix_decision.inference.schemas import (
+    DecisionResult,
+    check_confidence_threshold,
+    choice_input,
+    noul_input,
+    score_input,
+)
 from futurix_decision.models.families import identify_family, reject_native_checkpoint
 from futurix_decision.models.sources import (
     checkpoint_source,
@@ -297,22 +303,11 @@ def _result(
     total = sum(probabilities.values())
     if abs(total - 1.0) > len(probabilities) * 0.000051:
         raise InvalidOutputError("publisher probabilities do not sum to 1")
-    probabilities = {key: value / total for key, value in probabilities.items()}
-    winner = max(example.options, key=probabilities.__getitem__)
-    confidence = probabilities[winner]
-    abstained = confidence_threshold is not None and confidence < confidence_threshold
-    decision: str | int | bool | None = None if abstained else winner
-    if decision is not None and not example.preserve_order:
-        if example.kind == "noul":
-            decision = winner == "true"
-        elif example.kind == "score":
-            decision = int(winner)
-    return DecisionResult(
-        decision=decision,
-        confidence=confidence,
-        probabilities=probabilities,
-        abstained=abstained,
+    return DecisionResult.from_probabilities(
+        example,
+        [probabilities[option] / total for option in example.options],
         latency_ms=latency_ms,
+        confidence_threshold=confidence_threshold,
     )
 
 
@@ -811,10 +806,7 @@ class NativeDecisionModel:
     def decide(
         self, example: DecisionInput, *, confidence_threshold: float | None = None
     ) -> DecisionResult:
-        if confidence_threshold is not None and (
-            not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
-        ):
-            raise ConfigError("confidence_threshold must be between 0 and 1")
+        check_confidence_threshold(confidence_threshold)
         started = time.perf_counter()
         answer = self._predict(example)
         return _result(
@@ -824,12 +816,9 @@ class NativeDecisionModel:
     def batch_decide(
         self, examples: Sequence[DecisionInput], *, confidence_threshold: float | None = None
     ) -> list[DecisionResult]:
+        check_confidence_threshold(confidence_threshold)
         if not examples:
             return []
-        if confidence_threshold is not None and (
-            not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
-        ):
-            raise ConfigError("confidence_threshold must be between 0 and 1")
         if self.backend == "local" and self.family == "pplx-decider":
             if any(len(row.options) > 255 for row in examples):
                 raise ConfigError("PPLX native readout supports at most 255 options")
@@ -889,8 +878,7 @@ class NativeDecisionModel:
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
         return self.decide(
-            DecisionInput(state=state, question=question, options=list(choices)),
-            confidence_threshold=confidence_threshold,
+            choice_input(state, choices, question), confidence_threshold=confidence_threshold
         )
 
     def noul(
@@ -900,15 +888,7 @@ class NativeDecisionModel:
         question: str = "Is this true?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        return self.decide(
-            DecisionInput(
-                kind="noul",
-                state=state,
-                question=question,
-                options=["false", "true"],
-            ),
-            confidence_threshold=confidence_threshold,
-        )
+        return self.decide(noul_input(state, question), confidence_threshold=confidence_threshold)
 
     def score(
         self,
@@ -920,12 +900,7 @@ class NativeDecisionModel:
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
         return self.decide(
-            DecisionInput(
-                kind="score",
-                state=state,
-                question=question,
-                options=[str(level) for level in range(min_score, max_score + 1)],
-            ),
+            score_input(state, question, min_score, max_score),
             confidence_threshold=confidence_threshold,
         )
 

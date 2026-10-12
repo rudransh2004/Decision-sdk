@@ -15,7 +15,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from futurix_decision.datasets.schema import DecisionInput, State
 from futurix_decision.errors import CheckpointError, ConfigError, MissingDependencyError
-from futurix_decision.inference.schemas import DecisionResult
+from futurix_decision.inference.schemas import (
+    DecisionResult,
+    check_confidence_threshold,
+    choice_input,
+    noul_input,
+    score_input,
+)
 from futurix_decision.models.bosun import (
     BOSUN_CONVERSION_CHAT_TEMPLATE,
     BOSUN_PROMPT_SCHEMA,
@@ -1004,8 +1010,7 @@ class DecisionModel:
         if not examples:
             return []
         for threshold in thresholds:
-            if threshold is not None and (not math.isfinite(threshold) or not 0 <= threshold <= 1):
-                raise ConfigError("confidence_threshold must be between 0 and 1")
+            check_confidence_threshold(threshold)
         device = self._input_device()
         if device.type == "cuda":
             torch.cuda.synchronize(device)
@@ -1019,28 +1024,19 @@ class DecisionModel:
             probabilities = probabilities.cpu()
         if device.type == "cuda":
             torch.cuda.synchronize(device)
-        latency_ms = (time.perf_counter() - started) * 1000
-        results = []
-        for row, (example, slots, threshold) in enumerate(zip(examples, batch.slots, thresholds)):
-            values = [probabilities[row, slot].item() for slot in slots]
-            winner = max(range(len(values)), key=values.__getitem__)
-            confidence = values[winner]
-            abstained = threshold is not None and confidence < threshold
-            decision: str | int | bool | None = None if abstained else example.options[winner]
-            if decision is not None and example.kind == "noul" and not example.preserve_order:
-                decision = decision == "true"
-            if decision is not None and example.kind == "score" and not example.preserve_order:
-                decision = int(decision)
-            results.append(
-                DecisionResult(
-                    decision=decision,
-                    confidence=confidence,
-                    probabilities=dict(zip(example.options, values)),
-                    abstained=abstained,
-                    latency_ms=latency_ms,
-                )
+        # Report the batch's wall time per row, as every backend does.
+        latency_ms = (time.perf_counter() - started) * 1000 / len(examples)
+        return [
+            DecisionResult.from_probabilities(
+                example,
+                [probabilities[row, slot].item() for slot in slots],
+                latency_ms=latency_ms,
+                confidence_threshold=threshold,
             )
-        return results
+            for row, (example, slots, threshold) in enumerate(
+                zip(examples, batch.slots, thresholds, strict=True)
+            )
+        ]
 
     def choice(
         self,
@@ -1050,9 +1046,7 @@ class DecisionModel:
         question: str = "Which option should be selected?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        example = DecisionInput(
-            kind="choice", state=state, question=question, options=list(choices)
-        )
+        example = choice_input(state, choices, question)
         return self._infer([example], [confidence_threshold])[0]
 
     def noul(
@@ -1062,9 +1056,7 @@ class DecisionModel:
         question: str = "Is this true?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        example = DecisionInput(
-            kind="noul", state=state, question=question, options=["false", "true"]
-        )
+        example = noul_input(state, question)
         return self._infer([example], [confidence_threshold])[0]
 
     def score(
@@ -1076,12 +1068,7 @@ class DecisionModel:
         max_score: int = 5,
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        example = DecisionInput(
-            kind="score",
-            state=state,
-            question=question,
-            options=[str(level) for level in range(min_score, max_score + 1)],
-        )
+        example = score_input(state, question, min_score, max_score)
         return self._infer([example], [confidence_threshold])[0]
 
     def batch_choice(

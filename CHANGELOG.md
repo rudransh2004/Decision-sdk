@@ -8,6 +8,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `DecisionResult.kind` and `DecisionResult.from_probabilities(example, probabilities,
+  latency_ms=..., confidence_threshold=...)`.
 - `DecisionClient` and `AsyncDecisionClient` (`futurix_decision.client`, no torch needed)
   for the `futurix-decision serve` API: `decide`, `batch_decide`, `choice`, `noul`,
   `score`, `health`, and `close`, usable as (async) context managers. Settings:
@@ -28,6 +30,21 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Breaking:** `DecisionResult.decision` has one type per kind: `bool` for noul, `int`
+  for score, `str` for choice, and `None` when abstained. `preserve_order` rows no longer
+  return the option ID string: a true-first noul row returns `True`/`False`. A
+  `preserve_order` row whose candidate IDs are not `true`/`false` or integer levels (such
+  as DecisionBench binary rows with IDs `c000`/`c001`) returns `decision=None` with
+  `abstained=False`. Migration: compare noul decisions with `True`/`False`, not
+  `"true"`/`"false"`; read opaque-ID winners from `probabilities`.
+- **Breaking:** `DecisionResult` is a frozen pydantic model and is also the HTTP response
+  model; `DecisionResponse` is gone. It gains a required `kind` field, which the server
+  now sends and `DecisionClient` checks against the request. Migration: replace
+  `result.to_dict()` with `result.model_dump()`, construct results with keyword arguments
+  including `kind`, and upgrade the client and server together.
+- **Breaking:** `latency_ms` is always wall time per row. `DecisionModel` and
+  `VLLMEngine` batches used to stamp the whole batch time on every row. Migration:
+  multiply by the batch size for the batch total.
 - The native HTTP runtime (`load_model(..., base_url=...)`) uses the client's transport:
   new `timeout` (default 60 s, as before) and `max_retries` (default 3) arguments, the
   same retry policy, and `BackendError` instead of `httpx.HTTPStatusError` for failed
