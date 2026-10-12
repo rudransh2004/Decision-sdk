@@ -21,8 +21,8 @@ RLCD, export, and inference.
 
 ## Make it yours
 
-**01 · Train a new decision model** — attach a pointer head or Bosun-style
-decision tokens to a compatible causal LM, then fit it on labeled decisions.
+**01 · Train a new decision model** — choose a pointer, Bosun-style token,
+or letter-code readout for a compatible LM; fit it on labeled decisions.
 
 **02 · Fine-tune a decision model** — adapt supported Bosun, Laya, Clef, Kev
 and other native releases while preserving their own readouts.
@@ -112,19 +112,37 @@ from futurix_decision import load_model
 
 pointer = load_model("your-org/text-causal-lm", convert=True, strategy="pointer")
 bosun_style = load_model("your-org/text-causal-lm", convert=True, strategy="bosun")
+letter_code = load_model(
+    "your-org/text-causal-lm", convert=True,
+    strategy="letter_code", decision_tokens=8,
+)
 ```
 
-**Pointer** adds a candidate-aware head without new vocabulary rows;
-**Bosun-style** adds 256 decision tokens with stable candidate slots. Both
-need decision-data training, and neither copies an existing publisher's
-trained decision ability. Conversion applies to *compatible* Hugging Face
-causal text LMs; model size is limited by your hardware, not the SDK API.
-Expect a tokenizer, a supported text causal architecture, and enough
-memory/disk; encoder-only, seq2seq, and arbitrary multimodal checkpoints
-are **not** general conversion targets. Chat or thinking variants need
-their own prompt/runtime checks. A third fixed-code strategy exists for
-compatible models; it does not reproduce Perplexity Decider's weights.
-[Conversion requirements and tested paths](docs/conversion.md).
+- **Pointer** (default): candidate-aware head, 2–256 choices, no new tokens.
+  Head-only SFT by default; opt into full-backbone SFT or LoRA/QLoRA.
+- **Bosun-style**: 256 fresh decision tokens and stable prompt slots,
+  2–255 supplied choices. Full SFT or LoRA; add token rows **before** QLoRA.
+- **Letter-code**: separate readout initialized from existing single-token
+  letter codes, up to 255 choices **if the tokenizer supports that many**.
+  Full SFT or LoRA; no new vocabulary rows. Does not import Decider weights.
+
+Each path needs labeled decision SFT; calibration and RLCD can follow.
+Conversion is **not** native-model fine-tuning or instant Jev/Bosun quality.
+Architectural candidates include [SmolLM2 base/chat](https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct),
+[Qwen2.5](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct),
+[Qwen3 base/instruct/thinking](https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507),
+[DeepSeek-R1-Distill-Qwen](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B),
+[Mistral](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3),
+[Phi-4 mini](https://huggingface.co/microsoft/Phi-4-mini-instruct),
+[OLMo 2](https://huggingface.co/allenai/OLMo-2-1124-7B-Instruct),
+and [gpt-oss](https://huggingface.co/openai/gpt-oss-20b).
+Qwen3.5-9B has explicit SDK conversion routes; Qwen3.8-27B currently has
+**only** a text-decision letter-code route. These are architecture/routing
+candidates, **not verified released-weight training results**; chat and
+thinking behavior, letter-code tokenization, and hardware must be checked
+per checkpoint. Encoder-only, seq2seq, and arbitrary multimodal LMs are
+not generic conversion targets.
+[Strategy details and checkpoint-by-checkpoint compatibility](docs/conversion.md).
 
 [Quickstart](docs/getting-started.md) ·
 [Training guide](docs/datasets-and-training.md) ·
