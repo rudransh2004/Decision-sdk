@@ -187,5 +187,32 @@ class CLITests(unittest.TestCase):
             self.assertFalse((output / "adapter_config.json").exists())
 
 
+class ModelFormatLoadingTests(unittest.TestCase):
+    """``--model-format`` loads through ``load_model``: aliases resolve, files are checked."""
+
+    def test_family_format_checks_a_local_copy_before_loading(self):
+        from futurix_decision.errors import CheckpointError
+
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(CheckpointError, "decider_config.json"):
+                main(["export", "--model", temp, "--output", temp, "--model-format", "decider"])
+
+    def test_format_resolves_aliases(self):
+        from futurix_decision.errors import ConfigError
+
+        # The alias names Qwen/Qwen3.5-9B, which load_model refuses before downloading.
+        with self.assertRaisesRegex(ConfigError, "not decision-trained"):
+            main(["export", "--model", "qwen3.5-9b", "--output", "unused"])
+
+    def test_format_refuses_another_familys_checkpoint(self):
+        from futurix_decision.errors import CheckpointError
+        from test_sft import tiny_model
+
+        with tempfile.TemporaryDirectory() as temp:
+            tiny_model().save_pretrained(temp)
+            with self.assertRaisesRegex(CheckpointError, "belongs to futurix, not decider"):
+                main(["export", "--model", temp, "--output", temp, "--model-format", "decider"])
+
+
 if __name__ == "__main__":
     unittest.main()

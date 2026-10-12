@@ -145,6 +145,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `evaluate(..., max_batch_tokens=...)` on a `VLLMEngine` measures each row with
   `VLLMEngine.prompt_tokens`. Decider, JPT, and Eikos exports used to be measured with
   the generic Futurix prompt.
+- `--model-format <family>` in `evaluate`, `export`, `serve`, and `train --resume` loads
+  through `load_model(..., family=...)`: short names such as `qwen3.5-9b` resolve, a
+  local copy's files are checked by the family's `requires`, and a checkpoint of another
+  family raises `CheckpointError`. `train --model-format standard` still starts a new
+  readout on a plain causal LM.
 - `evaluate` and `fit_temperature` take any `DecisionBackend`. `max_batch_tokens` in
   `evaluate` needs a `DecisionModel` or `VLLMEngine` (optionally inside `Calibrated`) and
   raises `ConfigError` for other backends.

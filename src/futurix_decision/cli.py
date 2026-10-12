@@ -23,7 +23,7 @@ from futurix_decision.datasets import load_decisions
 from futurix_decision.errors import ConfigError, MissingDependencyError
 from futurix_decision.models.families.base import FamilyAdapter
 from futurix_decision.models.families.publisher import PublisherAdapter
-from futurix_decision.models.registry import get_family, registered_families
+from futurix_decision.models.registry import get_family, registered_families, resolve_alias
 from futurix_decision.rewards import BrierScore, LogScore, RankedProbabilityScore, SphericalScore
 from futurix_decision.trainers import CalibrationConfig, RLCDConfig, SFTConfig
 from futurix_decision.utils.config import load_config
@@ -73,6 +73,31 @@ def _model_formats() -> list[str]:
 
 def _adapter(model_format: str) -> FamilyAdapter:
     return get_family("futurix" if model_format == "standard" else model_format)
+
+
+def _load(model_format: str, checkpoint: str, **kwargs: Any) -> Any:
+    """Load ``checkpoint`` as ``model_format`` through ``load_model``.
+
+    ``load_model`` resolves aliases such as ``kev``, refuses a checkpoint of
+    another family, and checks a local copy's files with the family's
+    ``requires`` before loading.
+    """
+    return load_model(checkpoint, family=_adapter(model_format).name, **kwargs)
+
+
+def _load_for_training(model_format: str, checkpoint: str, **kwargs: Any) -> Any:
+    """``_load``, except that ``standard`` may also start from a plain causal LM.
+
+    ``FuturixAdapter.load`` attaches a new, untrained readout to a plain LM;
+    ``load_model`` refuses that without ``convert=True``.
+    """
+    adapter = _adapter(model_format)
+    if adapter.name == "futurix":
+        name = resolve_alias(checkpoint)
+        path = Path(name)
+        if not (path.is_dir() and adapter.detect(path)):
+            return adapter.load(name, **kwargs)
+    return _load(model_format, checkpoint, **kwargs)
 
 
 def _require_vllm_checkpoint(model_format: str) -> None:
@@ -201,7 +226,7 @@ def _train(args: argparse.Namespace) -> None:
         )
         return
     if args.resume:
-        model = get_family("futurix").load(checkpoint, trainable_adapter=True, **device_kwargs)
+        model = _load("standard", checkpoint, trainable_adapter=True, **device_kwargs)
         if model.config.prompt_format != progress["prompt_format"]:
             raise ConfigError("resumed checkpoint prompt format differs from progress metadata")
         if model.config.head_type != progress.get("head_type", "tokens"):
@@ -238,7 +263,7 @@ def _train(args: argparse.Namespace) -> None:
                 load_kwargs["attention_mode"] = model_section["attention_mode"]
             model = load_model(checkpoint, convert=True, strategy=conversion, **load_kwargs)
         else:
-            model = adapter.load(checkpoint, **load_kwargs)
+            model = _load_for_training(source_format, checkpoint, **load_kwargs)
         _require_decision_model(model, source_format, "DecisionTrainer")
     method = args.finetune_method
     overrides = {"method": method} if method else {}
@@ -326,7 +351,7 @@ def _evaluate(args: argparse.Namespace) -> None:
                 family=args.native_family,
             )
         else:
-            model = _adapter(args.model_format).load(args.model, **device_kwargs)
+            model = _load(args.model_format, args.model, **device_kwargs)
     result = evaluate(
         model,
         dataset,
@@ -368,7 +393,7 @@ def _export(args: argparse.Namespace) -> None:
         )
     device_kwargs = _select_gpu(args.gpu)
     revision = {"revision": args.revision} if args.revision else {}
-    model = _adapter(args.model_format).load(args.model, **revision, **device_kwargs)
+    model = _load(args.model_format, args.model, **revision, **device_kwargs)
     _require_decision_model(model, args.model_format, "export")
     output = Path(args.output)
     model.save_pretrained(output, safe_serialization=True)
@@ -419,7 +444,7 @@ def _serve(args: argparse.Namespace) -> None:
                 device=device,
             )
         else:
-            engine = _adapter(args.model_format).load(args.model, device=device)
+            engine = _load(args.model_format, args.model, device=device)
     uvicorn.run(create_app(engine), host=args.host, port=args.port)
 
 
