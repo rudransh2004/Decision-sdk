@@ -276,7 +276,8 @@ class AsyncDecisionClient:
         """Decide each example, returning results in input order.
 
         The server has no batch endpoint, so this sends one request per example,
-        at most ``max_concurrency`` at a time. The first failure is raised.
+        at most ``max_concurrency`` at a time. The first failure cancels the
+        other requests and is raised.
         """
         if (
             isinstance(max_concurrency, bool)
@@ -291,7 +292,20 @@ class AsyncDecisionClient:
             async with semaphore:
                 return await self._post("/v1/decision", body)
 
-        return list(await asyncio.gather(*(one(body) for body in bodies)))
+        # asyncio.TaskGroup would do this, but it needs Python 3.11.
+        tasks = [asyncio.ensure_future(one(body)) for body in bodies]
+        if not tasks:
+            return []
+        try:
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for task in tasks:
+            if task in done and (error := task.exception()) is not None:
+                raise error
+        return [task.result() for task in tasks]
 
     async def choice(
         self,

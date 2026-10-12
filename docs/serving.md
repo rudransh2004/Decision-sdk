@@ -130,7 +130,8 @@ Pass `transport` or `http_client` to route the connection, for example to an
 
 The server has no batch endpoint, so `batch_decide` sends one request per
 example. The sync client sends them one after another. The async client runs
-at most `max_concurrency` (8) at a time:
+at most `max_concurrency` (8) at a time, and its first failure cancels the
+other requests:
 
 <!-- test -->
 ```python

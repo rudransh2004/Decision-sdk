@@ -273,6 +273,31 @@ class AsyncRetryTests(unittest.TestCase):
         self.assertEqual(len(results), 10)
         self.assertEqual(peak, 3)
 
+    def test_batch_failure_cancels_the_other_requests(self):
+        started = []
+        finished = []
+
+        async def handle(request):
+            started.append(request)
+            if len(started) == 1:
+                return httpx.Response(422, json={"detail": "bad row"})
+            await asyncio.sleep(0.02)
+            finished.append(request)
+            return ok()
+
+        async def run():
+            async with AsyncDecisionClient(
+                transport=httpx.MockTransport(handle), max_retries=0
+            ) as client:
+                with self.assertRaises(BackendError):
+                    await client.batch_decide([CHOICE] * 10, max_concurrency=3)
+                await asyncio.sleep(0.1)  # Anything left running would finish now.
+
+        asyncio.run(run())
+        # The failure frees a slot, so a fourth request may start before the cancel.
+        self.assertLessEqual(len(started), 4)
+        self.assertEqual(finished, [])
+
 
 if __name__ == "__main__":
     unittest.main()
