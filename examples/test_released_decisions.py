@@ -14,7 +14,11 @@ from pathlib import Path
 import torch
 
 from futurix_decision import (
-    DecisionTrainer, NativeSFTConfig, SFTConfig, load_decisions, load_model,
+    DecisionTrainer,
+    NativeSFTConfig,
+    SFTConfig,
+    load_decisions,
+    load_model,
 )
 
 MODELS = {
@@ -44,23 +48,25 @@ def show_inference(model: object) -> None:
     state = {"ticket": "Customer was charged twice for one order."}
     questions = {
         "team": {
-            "type": "choice", "instructions": "Which team should handle this ticket?",
+            "type": "choice",
+            "instructions": "Which team should handle this ticket?",
             "criteria": {"billing": "Payment issue", "technical": "App issue"},
         },
         "urgent": {"type": "noul", "instructions": "Does this need urgent escalation?"},
     }
     results = {
         "choice": model.choice(
-            state=state, question="Which team should handle this ticket?",
+            state=state,
+            question="Which team should handle this ticket?",
             choices=["billing", "technical"],
-        ).to_dict(),
-        "noul": model.noul(
-            state=state, question="Does this need urgent escalation?"
-        ).to_dict(),
+        ).model_dump(),
+        "noul": model.noul(state=state, question="Does this need urgent escalation?").model_dump(),
         "score": model.score(
-            state=state, question="Rate support priority from 0 to 2.",
-            min_score=0, max_score=2,
-        ).to_dict(),
+            state=state,
+            question="Rate support priority from 0 to 2.",
+            min_score=0,
+            max_score=2,
+        ).model_dump(),
         "system_one": model.system_one(state, questions),
     }
     print(json.dumps(results, indent=2, allow_nan=False), flush=True)
@@ -70,7 +76,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("model", choices=MODELS)
     parser.add_argument(
-        "--dataset", type=Path,
+        "--dataset",
+        type=Path,
         default=Path(__file__).parent / "data" / "support_decisions.jsonl",
     )
     parser.add_argument("--device", default="cuda")
@@ -85,20 +92,23 @@ def main() -> None:
     if args.max_examples < 1:
         parser.error("--max-examples must be positive")
 
-    # Both flat JSONL and grouped System One records use this one SDK loader.
     rows = load_decisions(args.dataset)
     print(f"SDK loaded {len(rows)} validated decisions from {args.dataset}", flush=True)
     checkpoint = MODELS[args.model]
     bosun = args.model.startswith("bosun-")
     if bosun:
         model = load_model(
-            checkpoint, dtype=torch.bfloat16,
-            device_map={"": args.device}, max_sequence_length=512,
+            checkpoint,
+            dtype=torch.bfloat16,
+            device_map={"": args.device},
+            max_sequence_length=512,
         )
     else:
         native_options = {"dtype": torch.bfloat16, "merge": False} if args.model == "kev" else {}
         model = load_model(
-            checkpoint, device=args.device, revision=REVISIONS[checkpoint],
+            checkpoint,
+            device=args.device,
+            revision=REVISIONS[checkpoint],
             trust_remote_code=args.model in REMOTE_CODE,
             **native_options,
         )
@@ -107,13 +117,19 @@ def main() -> None:
     if not args.train:
         return
 
-    training_rows = rows[:args.max_examples]
+    training_rows = rows[: args.max_examples]
     if bosun:
         trainer = DecisionTrainer(
-            model=model, dataset=training_rows,
+            model=model,
+            dataset=training_rows,
             sft_config=SFTConfig(
-                method="lora", epochs=1, batch_size=1, precision="bf16",
-                lora_rank=4, lora_alpha=8, lora_target_modules=["q_proj", "v_proj"],
+                method="lora",
+                epochs=1,
+                batch_size=1,
+                precision="bf16",
+                lora_rank=4,
+                lora_alpha=8,
+                lora_target_modules=["q_proj", "v_proj"],
             ),
         )
         history = trainer.train(stages=["decision_sft"])
@@ -125,24 +141,33 @@ def main() -> None:
         options = {}
         if args.model in ("clef", "clef-flash", "pplx-decider"):
             options["config"] = NativeSFTConfig(
-                epochs=1, batch_size=1, train_backbone=False,
+                epochs=1,
+                batch_size=1,
+                train_backbone=False,
             )
         elif args.model in ("laya", "laya-multilingual", "gliner"):
             options["config"] = NativeSFTConfig(
-                epochs=1, batch_size=2, learning_rate=2e-5,
+                epochs=1,
+                batch_size=2,
+                learning_rate=2e-5,
             )
         if args.model in ("laya", "laya-multilingual"):
             options["device"] = args.device
         if args.model == "kev":
             options["config"] = {
-                "device": "cuda", "dtype": "bf16", "epochs": 1,
-                "batch": 1, "accum": 1, "max_steps": args.max_examples,
+                "device": "cuda",
+                "dtype": "bf16",
+                "epochs": 1,
+                "batch": 1,
+                "accum": 1,
+                "max_steps": args.max_examples,
             }
         trained = model.finetune(training_rows, args.output, **options)
         print(f"SDK native training report: {trained.training_report}", flush=True)
         reload_path = Path(trained.checkpoint)  # GLiNER publishes into output/final.
         reload_kwargs = {
-            "device": args.device, "trust_remote_code": args.model in REMOTE_CODE,
+            "device": args.device,
+            "trust_remote_code": args.model in REMOTE_CODE,
             **({"dtype": torch.bfloat16, "merge": False} if args.model == "kev" else {}),
         }
         # A 27B checkpoint cannot coexist with its original GPU weights during

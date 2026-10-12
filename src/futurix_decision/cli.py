@@ -1,0 +1,612 @@
+"""futurix-decision train | evaluate | export | serve."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import shutil
+from dataclasses import replace
+from datetime import datetime, timezone
+from itertools import islice
+from pathlib import Path
+from typing import Any
+
+from futurix_decision import (
+    DecisionModel,
+    DecisionTrainer,
+    NativeDecisionModel,
+    evaluate,
+    load_model,
+)
+from futurix_decision.datasets import load_decisions
+from futurix_decision.errors import ConfigError, MissingDependencyError
+from futurix_decision.models.families.base import FamilyAdapter
+from futurix_decision.models.families.publisher import PublisherAdapter
+from futurix_decision.models.registry import get_family, registered_families, resolve_alias
+from futurix_decision.rewards import BrierScore, LogScore, RankedProbabilityScore, SphericalScore
+from futurix_decision.trainers import CalibrationConfig, RLCDConfig, SFTConfig
+from futurix_decision.utils.config import load_config
+
+logger = logging.getLogger(__name__)
+
+
+def _source(path: str, *, split: str = "train", revision: str | None = None):
+    return load_decisions(path, split=split, streaming=True, revision=revision)
+
+
+def _config_for(cls, config: dict[str, Any], stage: str, overrides: dict[str, Any] | None = None):
+    section = dict(config.get("training", {}).get(stage, {}))
+    section.pop("enabled", None)
+    section.update(overrides or {})
+    return cls(**section)
+
+
+def _rewards(config: dict[str, Any]):
+    weights = config.get("rewards")
+    if weights is None:
+        return None
+    constructors = {
+        "log": LogScore,
+        "brier": BrierScore,
+        "spherical": SphericalScore,
+        "ranked": RankedProbabilityScore,
+    }
+    unknown = set(weights) - set(constructors)
+    if unknown:
+        raise ConfigError(f"unknown reward rules: {sorted(unknown)}")
+    return [constructors[name](weight=weight) for name, weight in weights.items()]
+
+
+def _model_formats() -> list[str]:
+    """``--model-format`` values: ``standard``, registered non-publisher families, ``native``.
+
+    ``standard`` is the ``futurix`` family. Publisher runtimes are reached
+    through ``native``, which identifies the family from the checkpoint or
+    ``--native-family`` and passes the publisher options.
+    """
+    names = [
+        adapter.name
+        for adapter in registered_families()
+        if adapter.name != "futurix" and not isinstance(adapter, PublisherAdapter)
+    ]
+    return ["standard", *names, "native"]
+
+
+def _adapter(model_format: str) -> FamilyAdapter:
+    return get_family("futurix" if model_format == "standard" else model_format)
+
+
+def _load(model_format: str, checkpoint: str, **kwargs: Any) -> Any:
+    """Load ``checkpoint`` as ``model_format`` through ``load_model``.
+
+    ``load_model`` resolves aliases such as ``kev``, refuses a checkpoint of
+    another family, and checks a local copy's files with the family's
+    ``requires`` before loading.
+    """
+    return load_model(checkpoint, family=_adapter(model_format).name, **kwargs)
+
+
+def _load_for_training(model_format: str, checkpoint: str, **kwargs: Any) -> Any:
+    """``_load``, except that ``standard`` may also start from a plain causal LM.
+
+    ``FuturixAdapter.load`` attaches a new, untrained readout to a plain LM;
+    ``load_model`` refuses that without ``convert=True``.
+    """
+    adapter = _adapter(model_format)
+    if adapter.name == "futurix":
+        name = resolve_alias(checkpoint)
+        path = Path(name)
+        if not (path.is_dir() and adapter.detect(path)):
+            return adapter.load(name, **kwargs)
+    return _load(model_format, checkpoint, **kwargs)
+
+
+def _require_vllm_checkpoint(model_format: str) -> None:
+    """Refuse a ``--backend vllm`` run that ``VLLMEngine`` cannot load as given."""
+    if model_format == "native":
+        raise ConfigError(
+            "native decision heads need the publisher runtime; OpenJev uses --native-base-url"
+        )
+    adapter = _adapter(model_format)
+    if adapter.vllm == "export":
+        raise ConfigError(
+            f"export the {adapter.name} checkpoint with `futurix-decision export` before vLLM"
+        )
+    if adapter.vllm != "direct":
+        raise ConfigError(f"{adapter.name} has no vLLM decision path; use --backend transformers")
+
+
+def _require_decision_model(model: Any, model_format: str, purpose: str) -> None:
+    if not isinstance(model, DecisionModel):
+        raise ConfigError(
+            f"{purpose} needs a DecisionModel; {model_format} loaded {type(model).__name__}"
+        )
+
+
+def _select_gpu(index: int | None) -> dict[str, Any]:
+    """Restrict this SDK process to one physical GPU before CUDA initializes."""
+    if index is None:
+        return {}
+    import torch
+
+    if index < 0 or torch.cuda.is_initialized():
+        raise ConfigError("--gpu must be non-negative and selected before CUDA initializes")
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(index)
+    if not torch.cuda.is_available():
+        raise ConfigError(f"GPU {index} is not available")
+    return {"dtype": torch.bfloat16, "device_map": {"": 0}}
+
+
+def _train(args: argparse.Namespace) -> None:
+    device_kwargs = _select_gpu(args.gpu)
+    config = load_config(args.config) if args.config else {}
+    model_section = config.get("model", {})
+    checkpoint = args.model or model_section.get("name")
+    dataset = args.dataset or config.get("dataset")
+    output = args.output or config.get("output")
+    if not all((checkpoint, dataset, output)):
+        raise ConfigError("train requires model, dataset and output (arguments or YAML)")
+    if args.method:
+        stages = [{"sft": "decision_sft"}.get(args.method, args.method)]
+    elif args.stages:
+        stages = args.stages.split(",")
+    else:
+        stages = [
+            name
+            for name, key in (
+                ("decision_sft", "sft"),
+                ("calibration", "calibration"),
+                ("rlcd", "rlcd"),
+            )
+            if config.get("training", {}).get(key, {}).get("enabled", False)
+        ] or ["decision_sft"]
+    checkpoint_dir = args.checkpoint_dir or config.get("checkpoint_dir")
+    previous_history: dict[str, list[dict[str, float | int]]] = {}
+    if args.resume:
+        if not checkpoint_dir:
+            raise ConfigError("--resume requires --checkpoint-dir (or checkpoint_dir in config)")
+        progress = json.loads((Path(checkpoint_dir) / "progress.json").read_text(encoding="utf-8"))
+        if progress["dataset"] != dataset:
+            raise ConfigError("resume dataset differs from the stage checkpoint")
+        completed = progress["completed_stages"]
+        if completed != stages[: len(completed)]:
+            raise ConfigError("resume stages differ from the completed stage prefix")
+        previous_history = progress["history"]
+        checkpoint = progress["checkpoint"]
+        stages = stages[len(completed) :]
+        if not stages:
+            raise ConfigError("all configured stages have already completed")
+    selected_method = args.finetune_method or next(
+        (
+            config.get("training", {}).get(stage, {}).get("method")
+            for stage in ("sft", "calibration", "rlcd")
+            if config.get("training", {}).get(stage, {}).get("enabled")
+            and config.get("training", {}).get(stage, {}).get("method")
+        ),
+        "full",
+    )
+    revision = args.revision or model_section.get("revision")
+    source_format = args.model_format or model_section.get("format", "standard")
+    conversion = args.convert_strategy or model_section.get("strategy")
+    if conversion and (args.resume or source_format != "standard"):
+        raise ConfigError("raw-model conversion requires a fresh run with --model-format standard")
+    if source_format == "native":
+        if args.resume or stages != ["decision_sft"] or args.finetune_method:
+            raise ConfigError(
+                "native fine-tuning supports a fresh decision_sft run; "
+                "use publisher config for other recipes"
+            )
+        if args.calibration_dataset or args.validation_dataset or args.log_jsonl or checkpoint_dir:
+            raise ConfigError(
+                "native trainers manage their own checkpoints/calibration; "
+                "use the Python API for customization"
+            )
+        native = load_model(
+            checkpoint,
+            revision=revision,
+            trust_remote_code=args.trust_remote_code,
+            device="cuda:0" if args.gpu is not None else "cpu",
+            family=args.native_family,
+        )
+        if not isinstance(native, NativeDecisionModel):
+            raise ConfigError(f"{checkpoint} is not a publisher-native checkpoint")
+        rows = (
+            islice(_source(dataset), args.max_examples)
+            if args.max_examples is not None
+            else dataset
+        )
+        tuned = get_family(native.family).finetune(native, rows, output)
+        print(
+            json.dumps(
+                {
+                    "output": str(output),
+                    "family": tuned.family,
+                    "train_items": tuned.training_report["train_items"],
+                }
+            )
+        )
+        return
+    if args.resume:
+        model = _load("standard", checkpoint, trainable_adapter=True, **device_kwargs)
+        if model.config.prompt_format != progress["prompt_format"]:
+            raise ConfigError("resumed checkpoint prompt format differs from progress metadata")
+        if model.config.head_type != progress.get("head_type", "tokens"):
+            raise ConfigError("resumed checkpoint decision head differs from progress metadata")
+        if model_section.get("head_type", model.config.head_type) != model.config.head_type:
+            raise ConfigError("resumed checkpoint decision head differs from training config")
+    else:
+        adapter = _adapter(source_format)
+        section = dict(model_section)
+        if args.decision_tokens is not None:
+            section["decision_tokens"] = args.decision_tokens
+        load_kwargs = adapter.training_kwargs(section, method=selected_method) | device_kwargs
+        if revision:
+            load_kwargs["revision"] = revision
+        if selected_method == "qlora":
+            import torch
+            from transformers import BitsAndBytesConfig
+
+            load_kwargs.pop("dtype", None)
+            load_kwargs.update(
+                quantization_config=BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                ),
+                device_map={
+                    "": 0 if args.gpu is not None else int(os.environ.get("LOCAL_RANK", 0))
+                },
+            )
+        if conversion:
+            if args.trust_remote_code:
+                load_kwargs["trust_remote_code"] = True
+            if "attention_mode" in model_section:
+                load_kwargs["attention_mode"] = model_section["attention_mode"]
+            model = load_model(checkpoint, convert=True, strategy=conversion, **load_kwargs)
+        else:
+            model = _load_for_training(source_format, checkpoint, **load_kwargs)
+        _require_decision_model(model, source_format, "DecisionTrainer")
+    method = args.finetune_method
+    overrides = {"method": method} if method else {}
+    if args.max_examples is not None:
+        overrides["max_examples"] = args.max_examples
+    sft = _config_for(SFTConfig, config, "sft", overrides)
+    calibration = _config_for(CalibrationConfig, config, "calibration", overrides)
+    rlcd = _config_for(RLCDConfig, config, "rlcd", overrides)
+    if args.log_jsonl:
+        sft = replace(sft, log_jsonl=args.log_jsonl)
+        calibration = replace(calibration, log_jsonl=args.log_jsonl)
+        rlcd = replace(rlcd, log_jsonl=args.log_jsonl)
+    trainer = DecisionTrainer(
+        model=model,
+        dataset=dataset,
+        calibration_dataset=args.calibration_dataset,
+        sft_config=sft,
+        calibration_config=calibration,
+        rlcd_config=rlcd,
+        rewards=_rewards(config),
+        checkpoint_dir=checkpoint_dir,
+        validation_dataset=args.validation_dataset,
+        validation_max_rows=args.validation_max_rows,
+    )
+    if args.resume and progress.get("dataset_revision") != trainer.dataset_revision:
+        raise ConfigError("resume dataset revision differs from the stage checkpoint")
+    trainer.history.update(previous_history)
+    if args.resume:
+        trainer.validation_metrics.update(progress.get("validation_metrics", {}))
+    trainer.train(stages=stages)
+    if args.selection_metric != "last" and trainer.validation_metrics and checkpoint_dir:
+        trainer.select_best(metric=args.selection_metric)
+    trainer.export(output, merge_lora=True, safetensors=True)
+    if trainer._active and trainer._active._accelerator.is_main_process:
+        print(
+            json.dumps(
+                {
+                    "output": str(output),
+                    "stages": list(trainer.history),
+                    "selected_stage": trainer.selected_stage,
+                    "temperature": trainer.model.config.temperature,
+                }
+            )
+        )
+
+
+def _evaluate(args: argparse.Namespace) -> None:
+    device_kwargs = _select_gpu(args.gpu)
+    if args.max_sequence_length is not None:
+        device_kwargs["max_sequence_length"] = args.max_sequence_length
+    if args.revision:
+        device_kwargs["revision"] = args.revision
+    dataset = _source(args.dataset, split=args.split, revision=args.dataset_revision)
+    if args.skip_rows:
+        if args.skip_rows < 0:
+            raise ConfigError("--skip-rows must be non-negative")
+        dataset = islice(dataset, args.skip_rows, None)
+    if args.max_rows is not None:
+        if args.max_rows < 1:
+            raise ConfigError("--max-rows must be positive")
+        dataset = islice(dataset, args.max_rows)
+    if args.backend == "vllm":
+        _require_vllm_checkpoint(args.model_format)
+        if args.revision:
+            raise ConfigError(
+                "--revision is for PyTorch upstream loading; export a pinned model for vLLM"
+            )
+        from futurix_decision.vllm import VLLMEngine
+
+        model = VLLMEngine(
+            args.model,
+            max_model_len=args.max_sequence_length or 4096,
+            gpu_memory_utilization=args.vllm_gpu_memory_utilization,
+        )
+        if args.max_sequence_length is not None:
+            model.max_sequence_length = args.max_sequence_length
+    else:
+        if args.model_format == "native":
+            model = load_model(
+                args.model,
+                device="cuda:0" if args.gpu is not None else "cpu",
+                revision=args.revision,
+                trust_remote_code=args.trust_remote_code,
+                base_url=args.native_base_url,
+                family=args.native_family,
+            )
+        else:
+            model = _load(args.model_format, args.model, **device_kwargs)
+    result = evaluate(
+        model,
+        dataset,
+        batch_size=args.batch_size,
+        progress_every=args.progress_every,
+        predictions_output=args.predictions_output,
+        resume=args.resume_evaluation,
+        run_id=json.dumps(
+            {
+                "model": args.model,
+                "model_format": args.model_format,
+                "dataset": args.dataset,
+                "split": args.split,
+                "max_rows": args.max_rows,
+                **({"revision": args.revision} if args.revision else {}),
+                **({"dataset_revision": args.dataset_revision} if args.dataset_revision else {}),
+                **({"backend": args.backend} if args.backend != "transformers" else {}),
+                **({"skip_rows": args.skip_rows} if args.skip_rows else {}),
+            },
+            sort_keys=True,
+        ),
+        max_batch_tokens=(
+            args.max_batch_tokens
+            if args.backend == "vllm" or isinstance(model, DecisionModel)
+            else None
+        ),
+    )
+    if args.metrics_output:
+        destination = Path(args.metrics_output)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(result, indent=2))
+
+
+def _export(args: argparse.Namespace) -> None:
+    if args.model_format == "native":
+        raise ConfigError(
+            "native publisher artifacts are exported by load_model(...).finetune(dataset, output)"
+        )
+    device_kwargs = _select_gpu(args.gpu)
+    revision = {"revision": args.revision} if args.revision else {}
+    model = _load(args.model_format, args.model, **revision, **device_kwargs)
+    _require_decision_model(model, args.model_format, "export")
+    output = Path(args.output)
+    model.save_pretrained(output, safe_serialization=True)
+    previous = Path(args.model) / "training_metadata.json"
+    if previous.is_file():
+        shutil.copyfile(previous, output / "training_metadata.json")
+    else:
+        (output / "training_metadata.json").write_text(
+            json.dumps(
+                {"exported_from": args.model, "created_at": datetime.now(timezone.utc).isoformat()},
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    print(str(output))
+
+
+def _serve(args: argparse.Namespace) -> None:
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise MissingDependencyError("serve requires pip install futurix-decision[serve]") from exc
+    from futurix_decision.vllm.api import create_app
+
+    if args.backend == "vllm":
+        _require_vllm_checkpoint(args.model_format)
+        if args.revision:
+            raise ConfigError(
+                "--revision is for PyTorch upstream loading; export a pinned model for vLLM"
+            )
+        from futurix_decision.vllm import VLLMEngine
+
+        engine = VLLMEngine(args.model)
+    else:
+        import torch
+
+        if args.device == "cuda" and not torch.cuda.is_available():
+            raise ConfigError("CUDA requested but not available")
+        device = (
+            ("cuda" if torch.cuda.is_available() else "cpu")
+            if args.device == "auto"
+            else args.device
+        )
+        if args.model_format == "native":
+            engine = load_model(
+                args.model,
+                base_url=args.native_base_url,
+                family=args.native_family,
+                revision=args.revision,
+                trust_remote_code=args.trust_remote_code,
+                device=device,
+            )
+        else:
+            revision = {"revision": args.revision} if args.revision else {}
+            engine = _load(args.model_format, args.model, **revision, device=device)
+    api_key = args.api_key or os.environ.get("FUTURIX_API_KEY") or None
+    host = args.host or ("0.0.0.0" if api_key else "127.0.0.1")
+    if api_key is None and host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning("serving on %s without an API key; set --api-key or FUTURIX_API_KEY", host)
+    app = create_app(
+        engine, api_key=api_key, batch_window_ms=args.batch_window_ms, max_batch=args.max_batch
+    )
+    uvicorn.run(app, host=host, port=args.port)
+
+
+def _configure_logging(level: str) -> None:
+    package = logging.getLogger("futurix_decision")
+    for existing in package.handlers:
+        if getattr(existing, "_futurix_cli", False):
+            package.removeHandler(existing)
+    handler = logging.StreamHandler()
+    handler._futurix_cli = True
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    package.addHandler(handler)
+    package.setLevel(level)
+    package.propagate = False
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="futurix-decision")
+    formats = _model_formats()
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        type=str.upper,
+        choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
+        help="Verbosity of progress and status messages on stderr",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    train = commands.add_parser("train", help="Run SFT, calibration, and/or RLCD")
+    train.add_argument("--config")
+    train.add_argument("--model")
+    train.add_argument("--dataset")
+    train.add_argument("--calibration-dataset")
+    train.add_argument("--validation-dataset")
+    train.add_argument("--validation-max-rows", type=int)
+    train.add_argument("--output")
+    train.add_argument("--method", choices=("sft", "decision_sft", "calibration", "rlcd"))
+    train.add_argument("--stages", help="Comma-separated ordered stage names")
+    train.add_argument("--finetune-method", choices=("full", "lora", "qlora"))
+    train.add_argument("--log-jsonl")
+    train.add_argument("--model-format", choices=formats)
+    train.add_argument(
+        "--convert-strategy",
+        choices=("pointer", "bosun", "letter_code"),
+        help="Convert a raw model before training; letter_code supports RLCD",
+    )
+    train.add_argument(
+        "--decision-tokens",
+        type=int,
+        help="Number of available decision codes/slots for a raw conversion",
+    )
+    train.add_argument("--revision", help="Pinned upstream model revision")
+    train.add_argument("--trust-remote-code", action="store_true")
+    train.add_argument("--native-family", help="Native family for a local publisher checkpoint")
+    train.add_argument("--gpu", type=int, help="Physical GPU index; isolates this SDK process")
+    train.add_argument("--checkpoint-dir", help="Save a reloadable checkpoint after each stage")
+    train.add_argument(
+        "--resume", action="store_true", help="Continue from checkpoint-dir/progress.json"
+    )
+    train.add_argument("--max-examples", type=int, help="Limit training rows per stage for a pilot")
+    train.add_argument(
+        "--selection-metric", choices=("accuracy", "nll", "last"), default="accuracy"
+    )
+    train.set_defaults(run=_train)
+    evaluation = commands.add_parser("evaluate", help="Report held-out decision metrics")
+    evaluation.add_argument("--model", required=True)
+    evaluation.add_argument("--dataset", default="SargeDev/jev-distill-corpus-v3")
+    evaluation.add_argument("--split", default="test_set_30k")
+    evaluation.add_argument("--dataset-revision", help="Pinned Hugging Face dataset commit")
+    evaluation.add_argument("--batch-size", type=int, default=16)
+    evaluation.add_argument(
+        "--model-format",
+        choices=formats,
+        default="standard",
+    )
+    evaluation.add_argument(
+        "--revision", help="Pinned upstream model revision for PyTorch evaluation"
+    )
+    evaluation.add_argument("--trust-remote-code", action="store_true")
+    evaluation.add_argument(
+        "--native-base-url", help="Publisher System One server (not generic vLLM)"
+    )
+    evaluation.add_argument(
+        "--native-family", help="Native family for a local publisher checkpoint"
+    )
+    evaluation.add_argument("--backend", choices=("transformers", "vllm"), default="transformers")
+    evaluation.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.75)
+    evaluation.add_argument("--gpu", type=int)
+    evaluation.add_argument("--max-rows", type=int)
+    evaluation.add_argument(
+        "--skip-rows", type=int, default=0, help="Skip rows before a diagnostic slice"
+    )
+    evaluation.add_argument("--metrics-output")
+    evaluation.add_argument("--max-sequence-length", type=int)
+    evaluation.add_argument("--progress-every", type=int, default=1000)
+    evaluation.add_argument(
+        "--predictions-output", help="Append per-row results for resumable evaluation"
+    )
+    evaluation.add_argument("--resume-evaluation", action="store_true")
+    evaluation.add_argument("--max-batch-tokens", type=int, default=16384)
+    evaluation.set_defaults(run=_evaluate)
+    export = commands.add_parser("export", help="Export a full Hugging Face checkpoint")
+    export.add_argument("--model", required=True)
+    export.add_argument("--output", required=True)
+    export.add_argument(
+        "--model-format",
+        choices=formats,
+        default="standard",
+    )
+    export.add_argument("--revision", help="Pinned upstream model revision")
+    export.add_argument("--gpu", type=int)
+    export.set_defaults(run=_export)
+    serve = commands.add_parser("serve", help="Start the FastAPI decision server")
+    serve.add_argument("--model", required=True)
+    serve.add_argument(
+        "--model-format",
+        choices=formats,
+        default="standard",
+    )
+    serve.add_argument("--native-base-url", help="Publisher System One server (not generic vLLM)")
+    serve.add_argument("--native-family", help="Native family for a local publisher checkpoint")
+    serve.add_argument("--revision", help="Immutable upstream model revision")
+    serve.add_argument("--trust-remote-code", action="store_true")
+    serve.add_argument("--backend", choices=("transformers", "vllm"), default="transformers")
+    serve.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
+    serve.add_argument(
+        "--host", help="Bind address (default 127.0.0.1, or 0.0.0.0 with an API key)"
+    )
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--api-key",
+        help="Require 'Authorization: Bearer <key>' on every endpoint except /health "
+        "(default: the FUTURIX_API_KEY environment variable)",
+    )
+    serve.add_argument(
+        "--batch-window-ms",
+        type=float,
+        default=5.0,
+        help="How long the first waiting request holds a batch open for others",
+    )
+    serve.add_argument(
+        "--max-batch", type=int, default=32, help="Most rows in one batch_decide call"
+    )
+    serve.set_defaults(run=_serve)
+    args = parser.parse_args(argv)
+    _configure_logging(args.log_level)
+    args.run(args)
+
+
+if __name__ == "__main__":
+    main()

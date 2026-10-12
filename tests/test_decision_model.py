@@ -10,6 +10,7 @@ from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
 
 from futurix_decision import DecisionInput, DecisionModel
+from futurix_decision.errors import ConfigError
 from futurix_decision.models.decision_head import (
     assign_slots,
     decision_token,
@@ -60,7 +61,9 @@ class DecisionModelTests(unittest.TestCase):
             len({self.model.tokenizer.convert_tokens_to_ids(decision_token(i)) for i in range(16)}),
             16,
         )
-        self.assertEqual(self.model.backbone.get_input_embeddings().num_embeddings, len(self.model.tokenizer))
+        self.assertEqual(
+            self.model.backbone.get_input_embeddings().num_embeddings, len(self.model.tokenizer)
+        )
 
     def test_new_tokens_initialize_padded_base_rows_independently(self):
         raw = Tokenizer(models.WordLevel({"[UNK]": 0, "[EOS]": 1}, unk_token="[UNK]"))
@@ -75,19 +78,25 @@ class DecisionModelTests(unittest.TestCase):
             backbone.get_input_embeddings().weight[2:18].fill_(0.25)
         model = DecisionModel(backbone, tokenizer, decision_tokens=16, max_sequence_length=256)
         weight = model.backbone.get_output_embeddings().weight.detach()
-        self.assertGreater((weight[model._token_ids[0]] - weight[model._token_ids[1]]).abs().sum().item(), 0)
+        self.assertGreater(
+            (weight[model.readout.token_ids[0]] - weight[model.readout.token_ids[1]])
+            .abs()
+            .sum()
+            .item(),
+            0,
+        )
 
     def test_export_preserves_original_model_provenance(self):
         model = tiny_checkpoint()
-        model.source_checkpoint = "Example/Source"
-        model.source_revision = "a" * 40
-        model.base_model_revision = "b" * 40
+        model.config.source_checkpoint = "Example/Source"
+        model.config.source_revision = "a" * 40
+        model.config.base_model_revision = "b" * 40
         with tempfile.TemporaryDirectory() as path:
             model.save_pretrained(path)
             restored = DecisionModel.from_pretrained(path)
-            self.assertEqual(restored.source_checkpoint, "Example/Source")
-            self.assertEqual(restored.source_revision, "a" * 40)
-            self.assertEqual(restored.base_model_revision, "b" * 40)
+            self.assertEqual(restored.config.source_checkpoint, "Example/Source")
+            self.assertEqual(restored.config.source_revision, "a" * 40)
+            self.assertEqual(restored.config.base_model_revision, "b" * 40)
 
     def test_choice_and_abstention(self):
         result = self.model.choice(state={"document": "expired"}, choices=["approve", "reject"])
@@ -101,16 +110,16 @@ class DecisionModelTests(unittest.TestCase):
         self.assertTrue(abstained.abstained)
         self.assertIsNone(abstained.decision)
         self.assertLess(abstained.confidence, 1.0)
-        self.assertTrue(abstained.to_dict()["abstained"])
+        self.assertTrue(abstained.model_dump()["abstained"])
 
     def test_noul_score_and_threshold_validation(self):
         self.assertIsInstance(self.model.noul(state="ready").decision, bool)
         score = self.model.score(state="ready")
         self.assertIsInstance(score.decision, int)
         self.assertEqual(set(score.probabilities), {str(i) for i in range(6)})
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ConfigError):
             self.model.score(state="ready", min_score=0, max_score=20)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ConfigError):
             self.model.noul(state="ready", confidence_threshold=1.1)
 
     def test_one_forward_per_batch_and_seed_changes_mapping(self):
@@ -119,7 +128,9 @@ class DecisionModelTests(unittest.TestCase):
             {"state": "second", "choices": ["approve", "reject", "escalate"]},
             {"state": "third", "choices": ["continue", "stop"]},
         ]
-        with patch.object(self.model.backbone, "forward", wraps=self.model.backbone.forward) as forward:
+        with patch.object(
+            self.model.backbone, "forward", wraps=self.model.backbone.forward
+        ) as forward:
             results = self.model.batch_choice(rows)
             self.assertEqual(forward.call_count, 1)
         self.assertEqual(len(results), 3)
@@ -135,14 +146,14 @@ class DecisionModelTests(unittest.TestCase):
 
     def test_temperature_changes_probability_sharpness(self):
         example = dict(state="ready", choices=["a", "b", "c"])
-        old_temperature = self.model.temperature
+        old_temperature = self.model.config.temperature
         try:
-            self.model.temperature = 1
+            self.model.config.temperature = 1
             regular = self.model.choice(**example)
-            self.model.temperature = 100
+            self.model.config.temperature = 100
             flattened = self.model.choice(**example)
         finally:
-            self.model.temperature = old_temperature
+            self.model.config.temperature = old_temperature
         uniform = 1 / 3
         self.assertLess(
             max(abs(value - uniform) for value in flattened.probabilities.values()),
@@ -169,14 +180,51 @@ class DecisionModelTests(unittest.TestCase):
                 )
 
     def test_no_silent_truncation(self):
-        old_maximum = self.model.max_sequence_length
+        old_maximum = self.model.config.max_sequence_length
         try:
-            self.model.max_sequence_length = 5
-            with self.assertRaisesRegex(ValueError, "max_sequence_length"):
+            self.model.config.max_sequence_length = 5
+            with self.assertRaisesRegex(ConfigError, "max_sequence_length"):
                 self.model.choice(state="too long", choices=["a", "b"])
         finally:
-            self.model.max_sequence_length = old_maximum
+            self.model.config.max_sequence_length = old_maximum
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TokenBudgetTests(unittest.TestCase):
+    def test_batch_decide_keeps_every_forward_within_the_token_budget(self):
+        model = tiny_checkpoint()
+        shapes = []
+        model.backbone.register_forward_hook(
+            lambda module, args, kwargs, output: shapes.append(tuple(kwargs["input_ids"].shape)),
+            with_kwargs=True,
+        )
+        rows = [
+            DecisionInput(
+                state="word " * (1 + i % 7), question="Next?", options=["approve", "reject", "hold"]
+            )
+            for i in range(10_000)
+        ]
+        budget = 2048
+        results = model.batch_decide(rows, max_batch_tokens=budget)
+        self.assertEqual(len(results), len(rows))
+        self.assertEqual(sum(rows for rows, _ in shapes), len(rows))
+        # Peak activation memory scales with the padded [rows, tokens] of one forward.
+        self.assertLessEqual(max(rows * tokens for rows, tokens in shapes), budget)
+        self.assertGreater(len(shapes), 1)
+        # Chunking does not change any row's answer (this backbone pads on the right).
+        sample = list(range(0, len(rows), 997))
+        for index in sample:
+            expected = model.decide(rows[index]).probabilities
+            for option, value in expected.items():
+                self.assertAlmostEqual(results[index].probabilities[option], value, places=5)
+
+    def test_batch_decide_without_a_budget_is_one_forward(self):
+        model = tiny_checkpoint()
+        calls = []
+        model.backbone.register_forward_hook(lambda *args: calls.append(1))
+        row = DecisionInput(state="s", question="q", options=["a", "b"])
+        model.batch_decide([row] * 5)
+        self.assertEqual(len(calls), 1)

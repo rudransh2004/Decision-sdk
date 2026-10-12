@@ -1,0 +1,51 @@
+site_name: Decision SDK
+site_description: Typed, runtime-defined decisions from local models, vLLM, or a server.
+repo_url: https://github.com/rudransh2004/Decision-sdk
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Tutorial:
+      - Getting started: getting-started.md
+  - How-to guides:
+      - Run decisions: inference.md
+      - Serve decisions over HTTP: serving.md
+      - Datasets and training: datasets-and-training.md
+      - Convert an LLM: conversion.md
+      - vLLM and inference backends: inference-backends.md
+  - Reference:
+      - Model support: model-support.md
+      - API reference: api.md
+      - Benchmarks and run logs: benchmarks.md
+
+exclude_docs: |
+  plans/
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            heading_level: 3
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: false
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            merge_init_into_class: true
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true

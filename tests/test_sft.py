@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 import math
 import os
@@ -20,18 +22,17 @@ from transformers import (
 
 from futurix_decision import DecisionModel, DecisionTrainer, SFTConfig, SFTTrainer
 from futurix_decision.datasets import DecisionExample
+from futurix_decision.errors import ConfigError
 from futurix_decision.models import DecisionBatch
-from futurix_decision.trainers.sft import _representative_rows
 from futurix_decision.trainers import decision_sft_loss, hard_cross_entropy, soft_cross_entropy
+from futurix_decision.trainers.sft import _representative_rows
 
 
 def tiny_model() -> DecisionModel:
     torch.manual_seed(11)
     raw = Tokenizer(models.WordLevel({"[UNK]": 0, "[EOS]": 1}, unk_token="[UNK]"))
     raw.pre_tokenizer = pre_tokenizers.Whitespace()
-    tokenizer = PreTrainedTokenizerFast(
-        tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]"
-    )
+    tokenizer = PreTrainedTokenizerFast(tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]")
     backbone = GPT2LMHeadModel(
         GPT2Config(vocab_size=2, n_positions=256, n_embd=32, n_layer=1, n_head=2)
     )
@@ -74,7 +75,7 @@ class SFTLossTests(unittest.TestCase):
         self.assertAlmostEqual(loss.item(), F.cross_entropy(logits, target).item())
         loss.backward()
         self.assertTrue(torch.any(logits.grad != 0))
-        with self.assertRaisesRegex(ValueError, "integer"):
+        with self.assertRaisesRegex(ConfigError, "integer"):
             hard_cross_entropy(logits, torch.tensor([0.3, 0.7]))
 
     def test_soft_ce_and_smoothing(self):
@@ -116,7 +117,7 @@ class SFTLossTests(unittest.TestCase):
         self.assertEqual(raw.grad[0, 0].item(), 0.0)
         self.assertEqual(raw.grad[1, 1].item(), 0.0)
         self.assertNotEqual(raw.grad[0, 1].item(), 0.0)
-        with self.assertRaisesRegex(ValueError, "hard loss"):
+        with self.assertRaisesRegex(ConfigError, "hard loss"):
             decision_sft_loss(batch, [hard, soft], mode="hard")
 
     def test_one_hot_hard_and_soft_are_equivalent(self):
@@ -151,7 +152,7 @@ class SFTTrainingTests(unittest.TestCase):
             dataset=[example("approve", "a"), example("reject", "b")] * 3,
             sft_config=config,
         )
-        with self.assertRaisesRegex(ValueError, "calibration_dataset"):
+        with self.assertRaisesRegex(ConfigError, "calibration_dataset"):
             trainer.train(stages=["decision_sft", "calibration"])
         history = trainer.train(stages=["decision_sft"])
         self.assertTrue(history)
@@ -167,8 +168,26 @@ class SFTTrainingTests(unittest.TestCase):
             self.assertEqual(result.decision, other.decision)
             self.assertAlmostEqual(result.confidence, other.confidence, places=5)
 
+    def test_training_logs_progress_without_printing(self):
+        trainer = DecisionTrainer(
+            model=tiny_model(),
+            dataset=[example("approve", "a"), example("reject", "b")] * 2,
+            sft_config=SFTConfig(epochs=1, batch_size=2, log_stdout=True),
+        )
+        with (
+            self.assertLogs("futurix_decision", level="INFO") as logs,
+            contextlib.redirect_stdout(io.StringIO()) as printed,
+        ):
+            trainer.train(stages=["decision_sft"])
+        messages = [record.getMessage() for record in logs.records]
+        self.assertIn("starting stage decision_sft", messages)
+        self.assertTrue(any('"step": 1' in message for message in messages))
+        self.assertTrue(all(record.name.startswith("futurix_decision") for record in logs.records))
+        self.assertEqual(printed.getvalue(), "")
+
     def test_reiterable_stream_and_one_shot_rejection(self):
-        source = lambda: (example("approve", str(i)) for i in range(3))
+        def source():
+            return (example("approve", str(i)) for i in range(3))
 
         class Repeatable:
             def __iter__(self):
@@ -178,7 +197,7 @@ class SFTTrainingTests(unittest.TestCase):
             tiny_model(), config=SFTConfig(epochs=2, batch_size=2, learning_rate=0.002)
         )
         self.assertTrue(trainer.train(Repeatable()))
-        with self.assertRaisesRegex(ValueError, "one-shot"):
+        with self.assertRaisesRegex(ConfigError, "one-shot"):
             SFTTrainer(tiny_model(), config=SFTConfig(epochs=2)).train(source())
 
     def test_jsonl_reopens_for_multiple_epochs(self):
@@ -191,7 +210,7 @@ class SFTTrainingTests(unittest.TestCase):
             self.assertEqual(len(trainer.train(path)), 2)
 
     def test_empty_data_is_an_error(self):
-        with self.assertRaisesRegex(ValueError, "empty"):
+        with self.assertRaisesRegex(ConfigError, "empty"):
             SFTTrainer(tiny_model()).train([])
 
     def test_gradient_checkpointing_training(self):
@@ -211,9 +230,9 @@ class SFTTrainingTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("peft"), "PEFT not installed")
     def test_lora_merges_to_standalone_checkpoint(self):
         model = tiny_model()
-        original_decision_rows = model.backbone.get_input_embeddings().weight[
-            model._token_ids
-        ].detach().clone()
+        original_decision_rows = (
+            model.backbone.get_input_embeddings().weight[model.readout.token_ids].detach().clone()
+        )
         trainer = SFTTrainer(
             model,
             config=SFTConfig(
@@ -231,9 +250,9 @@ class SFTTrainingTests(unittest.TestCase):
             trainer.save_pretrained(temp)
             self.assertTrue((Path(temp) / "config.json").exists())
             self.assertFalse((Path(temp) / "adapter_config.json").exists())
-            merged_decision_rows = model.backbone.get_input_embeddings().weight[
-                model._token_ids
-            ].detach().cpu()
+            merged_decision_rows = (
+                model.backbone.get_input_embeddings().weight[model.readout.token_ids].detach().cpu()
+            )
             self.assertFalse(torch.equal(original_decision_rows, merged_decision_rows))
             loaded = DecisionModel.from_pretrained(temp)
             self.assertAlmostEqual(
@@ -243,7 +262,7 @@ class SFTTrainingTests(unittest.TestCase):
             )
 
     def test_qlora_requires_4_bit_checkpoint(self):
-        with self.assertRaisesRegex(ValueError, "4-bit"):
+        with self.assertRaisesRegex(ConfigError, "4-bit"):
             SFTTrainer(tiny_model(), config=SFTConfig(method="qlora")).train([example()])
 
     @unittest.skipUnless(
@@ -270,8 +289,10 @@ class SFTTrainingTests(unittest.TestCase):
                 config=SFTConfig(
                     method="qlora",
                     precision="bf16" if os.environ.get("FUTURIX_TEST_BF16") == "1" else "no",
-                    lora_rank=2, lora_alpha=4,
-                    batch_size=2, learning_rate=0.003,
+                    lora_rank=2,
+                    lora_alpha=4,
+                    batch_size=2,
+                    learning_rate=0.003,
                     gradient_checkpointing=True,
                 ),
             )
@@ -282,7 +303,7 @@ class SFTTrainingTests(unittest.TestCase):
             loaded = DecisionModel.from_pretrained(adapter)
             result = loaded.choice(state="test", choices=["approve", "reject"])
             self.assertAlmostEqual(sum(result.probabilities.values()), 1.0, places=6)
-            self.assertEqual(loaded.decision_tokens, 16)
+            self.assertEqual(loaded.config.decision_tokens, 16)
 
 
 if __name__ == "__main__":

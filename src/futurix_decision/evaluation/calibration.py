@@ -1,0 +1,82 @@
+"""Held-out scalar temperature fitting for decision logits."""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Sequence
+
+import torch
+import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
+
+from futurix_decision.errors import ConfigError
+from futurix_decision.evaluation.evaluator import EvaluationSource, example_batches
+from futurix_decision.models.calibrated import log_probabilities
+from futurix_decision.models.protocol import DecisionBackend
+
+
+def fit_temperature_from_logits(
+    logits: Sequence[torch.Tensor],
+    targets: Sequence[torch.Tensor],
+    *,
+    max_iter: int = 60,
+) -> float:
+    """Minimize held-out soft-label NLL in log-temperature space on CPU."""
+    if not logits or len(logits) != len(targets) or max_iter < 1:
+        raise ConfigError("provide matching nonempty logits and targets")
+    for z, y in zip(logits, targets, strict=True):
+        if z.ndim != 1 or z.shape != y.shape or z.numel() < 2:
+            raise ConfigError(
+                "each logit vector and target must have matching candidate dimensions"
+            )
+        if not torch.isfinite(z).all() or not torch.isfinite(y).all() or (y < 0).any():
+            raise ConfigError("logits must be finite and targets non-negative finite")
+        if not torch.isclose(y.float().sum(), torch.tensor(1.0), atol=1e-5):
+            raise ConfigError("targets must sum to 1")
+    padded_logits = pad_sequence(
+        [z.detach().float().cpu() for z in logits], batch_first=True, padding_value=-1e9
+    )
+    padded_targets = pad_sequence([y.detach().float().cpu() for y in targets], batch_first=True)
+    log_t = torch.zeros((), requires_grad=True)
+    optimizer = torch.optim.LBFGS(
+        [log_t], lr=0.25, max_iter=max_iter, line_search_fn="strong_wolfe"
+    )
+
+    def closure() -> torch.Tensor:
+        optimizer.zero_grad()
+        temperature = log_t.exp().clamp(min=0.05, max=20.0)
+        loss = (
+            -(padded_targets * F.log_softmax(padded_logits / temperature, dim=-1))
+            .sum(dim=-1)
+            .mean()
+        )
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+    temperature = float(log_t.detach().exp().clamp(min=0.05, max=20.0))
+    if not math.isfinite(temperature):
+        raise ValueError("temperature optimization diverged")
+    return temperature
+
+
+def fit_temperature(
+    model: DecisionBackend, calibration_dataset: EvaluationSource, *, batch_size: int = 16
+) -> float:
+    """Fit a temperature to held-out data from the probabilities ``model`` returns.
+
+    Works for every backend: ``softmax(log p / T)`` equals ``softmax(logits / T)``,
+    so fitting on returned probabilities matches fitting on logits. The result
+    lies in [0.05, 20] and is relative to the model's current output. Apply it
+    with ``Calibrated(model, T)``. To store it in a ``DecisionModel``
+    checkpoint, set ``model.config.temperature = 1.0`` first, then assign the
+    result to it before ``save_pretrained``, as ``CalibrationTrainer`` does.
+    """
+    logits, targets = [], []
+    for examples in example_batches(calibration_dataset, batch_size):
+        results = model.batch_decide(examples)
+        for row, result in zip(examples, results, strict=True):
+            probabilities = [result.probabilities[option] for option in row.options]
+            logits.append(torch.tensor(log_probabilities(probabilities)))
+            targets.append(torch.tensor(row.target_distribution(), dtype=torch.float32))
+    return fit_temperature_from_logits(logits, targets)

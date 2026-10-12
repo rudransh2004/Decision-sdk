@@ -23,8 +23,11 @@ class CLITests(unittest.TestCase):
             tiny_model().save_pretrained(base)
             data = root / "decisions.jsonl"
             data.write_text(
-                "\n".join(json.dumps(row.model_dump()) for row in
-                          [example("approve", "one"), example([0.3, 0.7], "two")]) + "\n",
+                "\n".join(
+                    json.dumps(row.model_dump())
+                    for row in [example("approve", "one"), example([0.3, 0.7], "two")]
+                )
+                + "\n",
                 encoding="utf-8",
             )
             config = root / "config.yaml"
@@ -74,7 +77,7 @@ class CLITests(unittest.TestCase):
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 main(["train", "--config", str(config)])
-            self.assertEqual(DecisionModel.from_pretrained(output).head_type, "pointer")
+            self.assertEqual(DecisionModel.from_pretrained(output).config.head_type, "pointer")
             self.assertTrue((output / "decision_head.safetensors").is_file())
             with contextlib.redirect_stdout(io.StringIO()) as captured:
                 main(["evaluate", "--model", str(output), "--dataset", str(data)])
@@ -86,11 +89,16 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             base, output, data, heldout = (
-                root / "base", root / "final", root / "train.jsonl", root / "calibration.jsonl"
+                root / "base",
+                root / "final",
+                root / "train.jsonl",
+                root / "calibration.jsonl",
             )
             tiny_model().save_pretrained(base)
             data.write_text(json.dumps(example([0.7, 0.3]).model_dump()) + "\n", encoding="utf-8")
-            heldout.write_text(json.dumps(example([0.7, 0.3], "heldout").model_dump()) + "\n", encoding="utf-8")
+            heldout.write_text(
+                json.dumps(example([0.7, 0.3], "heldout").model_dump()) + "\n", encoding="utf-8"
+            )
             config = root / "all.yaml"
             config.write_text(
                 f"model:\n  name: {base}\ndataset: {data}\noutput: {output}\n"
@@ -111,8 +119,11 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             base, output, data, heldout, stages = (
-                root / "base", root / "final", root / "train.jsonl",
-                root / "calibration.jsonl", root / "stages",
+                root / "base",
+                root / "final",
+                root / "train.jsonl",
+                root / "calibration.jsonl",
+                root / "stages",
             )
             tiny_model().save_pretrained(base)
             data.write_text(json.dumps(example([0.8, 0.2], "one").model_dump()) + "\n")
@@ -127,10 +138,16 @@ class CLITests(unittest.TestCase):
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 main(["train", "--config", str(config), "--stages", "decision_sft"])
-                main([
-                    "train", "--config", str(config), "--resume",
-                    "--calibration-dataset", str(heldout),
-                ])
+                main(
+                    [
+                        "train",
+                        "--config",
+                        str(config),
+                        "--resume",
+                        "--calibration-dataset",
+                        str(heldout),
+                    ]
+                )
             progress = json.loads((stages / "progress.json").read_text())
             self.assertEqual(progress["completed_stages"], ["decision_sft", "calibration", "rlcd"])
             self.assertEqual(
@@ -151,12 +168,50 @@ class CLITests(unittest.TestCase):
             tiny_untied_model().save_pretrained(base)
             data.write_text(json.dumps(example().model_dump()) + "\n", encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()):
-                main([
-                    "train", "--model", str(base), "--dataset", str(data), "--output", str(output),
-                    "--method", "sft", "--finetune-method", "qlora",
-                ])
+                main(
+                    [
+                        "train",
+                        "--model",
+                        str(base),
+                        "--dataset",
+                        str(data),
+                        "--output",
+                        str(output),
+                        "--method",
+                        "sft",
+                        "--finetune-method",
+                        "qlora",
+                    ]
+                )
             self.assertTrue((output / "config.json").is_file())
             self.assertFalse((output / "adapter_config.json").exists())
+
+
+class ModelFormatLoadingTests(unittest.TestCase):
+    """``--model-format`` loads through ``load_model``: aliases resolve, files are checked."""
+
+    def test_family_format_checks_a_local_copy_before_loading(self):
+        from futurix_decision.errors import CheckpointError
+
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(CheckpointError, "decider_config.json"):
+                main(["export", "--model", temp, "--output", temp, "--model-format", "decider"])
+
+    def test_format_resolves_aliases(self):
+        from futurix_decision.errors import ConfigError
+
+        # The alias names Qwen/Qwen3.5-9B, which load_model refuses before downloading.
+        with self.assertRaisesRegex(ConfigError, "not decision-trained"):
+            main(["export", "--model", "qwen3.5-9b", "--output", "unused"])
+
+    def test_format_refuses_another_familys_checkpoint(self):
+        from futurix_decision.errors import CheckpointError
+        from test_sft import tiny_model
+
+        with tempfile.TemporaryDirectory() as temp:
+            tiny_model().save_pretrained(temp)
+            with self.assertRaisesRegex(CheckpointError, "belongs to futurix, not decider"):
+                main(["export", "--model", temp, "--output", temp, "--model-format", "decider"])
 
 
 if __name__ == "__main__":

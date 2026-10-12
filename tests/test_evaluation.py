@@ -3,20 +3,21 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
 
+from futurix_decision import DecisionResult
+from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation import compute_metrics, evaluate, fit_temperature_from_logits
 from futurix_decision.models import DecisionBatch
 
 
 class MetricTests(unittest.TestCase):
     def test_hard_and_soft_metrics_and_selective_accuracy(self):
-        p = [torch.tensor([0.8, 0.2]), torch.tensor([0.6, 0.4])]
-        y = [torch.tensor([1.0, 0.0]), torch.tensor([0.3, 0.7])]
+        p = [[0.8, 0.2], [0.6, 0.4]]
+        y = [[1.0, 0.0], [0.3, 0.7]]
         result = compute_metrics(p, y, bins=5)
         self.assertAlmostEqual(result["accuracy"], 0.65)
         expected_nll = (-math.log(0.8) - 0.3 * math.log(0.6) - 0.7 * math.log(0.4)) / 2
@@ -59,26 +60,35 @@ class MetricTests(unittest.TestCase):
 @unittest.skipUnless(importlib.util.find_spec("accelerate"), "train extra not installed")
 class EvaluatorTrainerTests(unittest.TestCase):
     def test_vllm_decision_results_use_identical_metric_and_journal_path(self):
-        from test_sft import example, tiny_model
+        from futurix_decision.vllm import VLLMEngine
+        from test_sft import example
 
         rows = [example([1.0, 0.0], "a"), example([0.0, 1.0], "b")]
         calls = []
 
-        def batch_decide(batch):
-            calls.append(len(batch))
-            return [
-                SimpleNamespace(probabilities=dict(zip(row.options, (0.7, 0.3))))
-                for row in batch
-            ]
+        class FakeEngine(VLLMEngine):
+            def __init__(self):
+                pass
 
-        engine = SimpleNamespace(
-            prompt_format="futurix", temperature=1.0, seed=0, decision_tokens=16,
-            tokenizer=tiny_model().tokenizer, batch_decide=batch_decide,
-        )
+            def prompt_tokens(self, example):
+                return 5
+
+            def batch_decide(self, batch, *, confidence_threshold=None):
+                calls.append(len(batch))
+                return [
+                    DecisionResult.from_probabilities(row, [0.7, 0.3], latency_ms=1.0)
+                    for row in batch
+                ]
+
+        engine = FakeEngine()
         with tempfile.TemporaryDirectory() as temp:
             result = evaluate(
-                engine, rows, batch_size=2, max_batch_tokens=1,
-                predictions_output=Path(temp) / "vllm.jsonl", run_id="vllm",
+                engine,
+                rows,
+                batch_size=2,
+                max_batch_tokens=1,
+                predictions_output=Path(temp) / "vllm.jsonl",
+                run_id="vllm",
             )
             self.assertEqual(calls, [1, 1])
             self.assertEqual(result["count"], 2)
@@ -101,7 +111,8 @@ class EvaluatorTrainerTests(unittest.TestCase):
 
         model = tiny_model()
         rows = [
-            example([0.7, 0.3], "one"), example([0.2, 0.8], "two"),
+            example([0.7, 0.3], "one"),
+            example([0.2, 0.8], "two"),
             example([0.9, 0.1], "three"),
         ]
         with tempfile.TemporaryDirectory() as temp:
@@ -114,18 +125,34 @@ class EvaluatorTrainerTests(unittest.TestCase):
                 stream.write('{"id":"incomplete')
             with patch.object(model.backbone, "forward", wraps=model.backbone.forward) as forward:
                 resumed = evaluate(
-                    model, rows, predictions_output=journal, run_id="same",
-                    resume=True, batch_size=2,
+                    model,
+                    rows,
+                    predictions_output=journal,
+                    run_id="same",
+                    resume=True,
+                    batch_size=2,
                 )
                 self.assertEqual(forward.call_count, 1)
             self.assertEqual(resumed["count"], 3)
-            self.assertAlmostEqual(
-                resumed["accuracy"], evaluate(model, rows)["accuracy"], places=6
-            )
-            with self.assertRaisesRegex(ValueError, "identity differs"):
-                evaluate(
-                    model, rows, predictions_output=journal, run_id="different", resume=True
-                )
+            self.assertAlmostEqual(resumed["accuracy"], evaluate(model, rows)["accuracy"], places=6)
+            with self.assertRaisesRegex(ConfigError, "identity differs"):
+                evaluate(model, rows, predictions_output=journal, run_id="different", resume=True)
+
+    def test_calibration_trainer_stores_a_temperature_within_bounds(self):
+        from futurix_decision.trainers.calibration import CalibrationConfig, CalibrationTrainer
+        from test_sft import example, tiny_model
+
+        # Training on hard targets makes the model confident; uniform held-out targets
+        # then push the fitted temperature up to its cap of 20.
+        hard = [example("approve", state) for state in "abcd"]
+        uniform = [example([0.5, 0.5], state) for state in "abcd"]
+        for start in (0.5, 1.7):
+            with self.subTest(start=start):
+                model = tiny_model()
+                model.config.temperature = start
+                config = CalibrationConfig(batch_size=4, epochs=5, learning_rate=0.05)
+                CalibrationTrainer(model, config=config).train(hard, calibration_dataset=uniform)
+                self.assertAlmostEqual(model.config.temperature, 20.0, places=3)
 
     def test_batched_evaluation_and_calibration_save(self):
         from futurix_decision import DecisionModel
@@ -144,11 +171,11 @@ class EvaluatorTrainerTests(unittest.TestCase):
         )
         history = trainer.train(dataset, calibration_dataset=dataset)
         self.assertTrue(history)
-        self.assertGreater(model.temperature, 0)
+        self.assertGreater(model.config.temperature, 0)
         with tempfile.TemporaryDirectory() as temp:
             trainer.save_pretrained(temp)
             restored = DecisionModel.from_pretrained(temp)
-            self.assertAlmostEqual(model.temperature, restored.temperature)
+            self.assertAlmostEqual(model.config.temperature, restored.config.temperature)
 
 
 if __name__ == "__main__":

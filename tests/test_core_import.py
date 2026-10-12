@@ -1,0 +1,176 @@
+"""The core package must import and work without torch or transformers."""
+
+import subprocess
+import sys
+import textwrap
+import unittest
+
+# Runs in a fresh interpreter with torch and transformers made unimportable, so
+# this proves the core is torch-free even in an environment that has torch.
+SCRIPT = textwrap.dedent(
+    """
+    import importlib.abc
+    import sys
+
+    BLOCKED = {"torch", "transformers"}
+
+    class Block(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name.partition(".")[0] in BLOCKED:
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+            return None
+
+    sys.meta_path.insert(0, Block())
+
+    import futurix_decision
+    from futurix_decision import DecisionInput, DecisionResult, MissingDependencyError
+    from futurix_decision.evaluation import compute_metrics
+    from futurix_decision.utils.config import load_config
+    from futurix_decision import FamilyAdapter, register_family
+
+    example = DecisionInput(state="sky", question="Which color?", options=["blue", "red"])
+    assert example.options == ["blue", "red"]
+    result = DecisionResult(
+        kind="choice",
+        decision="blue",
+        confidence=0.9,
+        probabilities={"blue": 0.9, "red": 0.1},
+        abstained=False,
+        latency_ms=1.0,
+    )
+    assert result.model_dump()["decision"] == "blue"
+    assert compute_metrics([[0.9, 0.1]], [[1.0, 0.0]])["accuracy"] == 1.0
+
+    for name in ("DecisionModel", "SFTTrainer", "evaluate", "fit_temperature"):
+        try:
+            getattr(futurix_decision, name)
+        except MissingDependencyError as error:
+            assert "futurix-decision[torch]" in str(error), error
+            assert isinstance(error, ImportError)
+        else:
+            raise AssertionError(f"{name} imported without torch")
+
+    # Native runtimes (HTTP, publisher packages) do not need torch to load.
+    assert callable(futurix_decision.load_model)
+    assert futurix_decision.NativeDecisionModel.__name__ == "NativeDecisionModel"
+
+    # A transformers checkpoint names the missing extra instead of failing on `import torch`.
+    import json
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        (root / "decision_config.json").write_text(json.dumps({"architecture": "futurix-decision"}))
+        for name in ("config.json", "model.safetensors", "tokenizer.json"):
+            (root / name).write_text("{}")
+        try:
+            futurix_decision.load_model(root)
+        except MissingDependencyError as error:
+            assert "futurix-decision[torch]" in str(error), error
+        else:
+            raise AssertionError("load_model loaded a transformers checkpoint without torch")
+
+    # The HTTP client works against a stub server.
+    import httpx
+    from futurix_decision import DecisionClient
+
+    def serve(request):
+        assert request.url.path == "/v1/decision/noul", request.url
+        return httpx.Response(
+            200,
+            json={
+                "kind": "noul",
+                "decision": True,
+                "confidence": 0.8,
+                "probabilities": {"false": 0.2, "true": 0.8},
+                "abstained": False,
+                "latency_ms": 1.0,
+            },
+        )
+
+    with DecisionClient(transport=httpx.MockTransport(serve)) as client:
+        assert client.noul(state="sky is blue").decision is True
+
+    leaked = sorted(m for m in sys.modules if m.partition(".")[0] in BLOCKED)
+    assert not leaked, leaked
+    print("ok")
+    """
+)
+
+# torch is installed but broken: its compiled extension fails to import.
+BROKEN_TORCH = textwrap.dedent(
+    """
+    import importlib.abc
+    import sys
+
+    class Block(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name == "torch._C" or name.startswith("torch._C."):
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+            return None
+
+    sys.meta_path.insert(0, Block())
+
+    import futurix_decision
+    from futurix_decision import MissingDependencyError
+
+    try:
+        futurix_decision.DecisionModel
+    except MissingDependencyError as error:
+        raise AssertionError(f"a broken torch was reported as missing: {error}")
+    except ModuleNotFoundError as error:
+        assert error.name == "torch._C", error.name
+    else:
+        raise AssertionError("DecisionModel imported without torch._C")
+    print("ok")
+    """
+)
+
+
+class CoreImportTests(unittest.TestCase):
+    def test_a_broken_torch_is_not_reported_as_missing(self):
+        completed = subprocess.run(
+            [sys.executable, "-c", BROKEN_TORCH], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "ok")
+
+    def test_core_imports_without_torch(self):
+        completed = subprocess.run(
+            [sys.executable, "-c", SCRIPT], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "ok")
+
+    def test_torch_backed_names_resolve_with_torch(self):
+        import futurix_decision
+        from futurix_decision.models.decision_model import DecisionModel
+
+        self.assertIs(futurix_decision.DecisionModel, DecisionModel)
+        with self.assertRaises(AttributeError):
+            futurix_decision.NotAName  # noqa: B018
+
+    def test_dir_lists_lazy_exports(self):
+        # A fresh interpreter, so no lazy name has been imported and cached yet.
+        script = textwrap.dedent(
+            """
+            import importlib
+
+            for package in ("futurix_decision", "futurix_decision.evaluation",
+                            "futurix_decision.models", "futurix_decision.rewards",
+                            "futurix_decision.trainers"):
+                module = importlib.import_module(package)
+                missing = set(module.__all__) - set(dir(module))
+                assert not missing, (package, sorted(missing))
+            print("ok")
+            """
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

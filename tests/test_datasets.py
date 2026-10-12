@@ -80,9 +80,7 @@ class DatasetTests(unittest.TestCase):
             with self.subTest(row=row), self.assertRaises(ValueError):
                 DecisionExample.model_validate(row)
         with self.assertRaises(ValueError):
-            DecisionInput(
-                kind="noul", state="ready", question="Go?", options=["true", "false"]
-            )
+            DecisionInput(kind="noul", state="ready", question="Go?", options=["true", "false"])
         with self.assertRaises(ValueError):
             DecisionInput(state={"broken": float("nan")}, question="Go?", options=["a", "b"])
         with self.assertRaises(ValueError):
@@ -90,8 +88,10 @@ class DatasetTests(unittest.TestCase):
 
     def test_openjev_four_decimal_rounding_only(self):
         rounded = {
-            **ROW, "options": ["0", "3", "4"],
-            "target": [0.3333, 0.3333, 0.3333], "source": "openjev_v2",
+            **ROW,
+            "options": ["0", "3", "4"],
+            "target": [0.3333, 0.3333, 0.3333],
+            "source": "openjev_v2",
         }
         example = normalize_decision(rounded)
         self.assertAlmostEqual(sum(example.target_distribution()), 1.0)
@@ -107,9 +107,7 @@ class DatasetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)
             (path / "decisions.json").write_text(json.dumps([ROW]), encoding="utf-8")
-            (path / "decisions.jsonl").write_text(
-                "\n" + json.dumps(ROW) + "\n", encoding="utf-8"
-            )
+            (path / "decisions.jsonl").write_text("\n" + json.dumps(ROW) + "\n", encoding="utf-8")
             self.assertEqual(load_decisions(path / "decisions.json")[0].id, ROW["id"])
             self.assertEqual(load_decisions(path / "decisions.jsonl")[0].id, ROW["id"])
             self.assertEqual(
@@ -120,7 +118,9 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(load_decisions([ROW])[0].id, ROW["id"])
 
     def test_open_decisions_uses_real_dataset_id_and_streams(self):
-        with patch("futurix_decision.datasets.loader.load_decisions", return_value=iter([])) as load:
+        with patch(
+            "futurix_decision.datasets.loader.load_decisions", return_value=iter([])
+        ) as load:
             load_open_decisions()
             load.assert_called_once_with(OPEN_DECISIONS_DATASET, split="train", streaming=True)
 
@@ -128,13 +128,16 @@ class DatasetTests(unittest.TestCase):
         row = {"state": "context", "question": "Choose", "options": ["a", "b"], "target": "a"}
         with patch("datasets.load_dataset", return_value=[row]) as hub:
             result = load_decisions(
-                "SargeDev/jev-distill-corpus-v3", split="test_set_30k",
+                "SargeDev/jev-distill-corpus-v3",
+                split="test_set_30k",
                 revision="a" * 40,
             )
             self.assertEqual(result[0].options, ["a", "b"])
             hub.assert_called_once_with(
-                "SargeDev/jev-distill-corpus-v3", split="test_set_30k",
-                streaming=False, revision="a" * 40,
+                "SargeDev/jev-distill-corpus-v3",
+                split="test_set_30k",
+                streaming=False,
+                revision="a" * 40,
             )
 
 
