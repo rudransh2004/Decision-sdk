@@ -2,7 +2,8 @@
 
 [Back to the project overview](../README.md) ·
 [Datasets and training](datasets-and-training.md) ·
-[Model support](model-support.md)
+[Model support](model-support.md) ·
+[LLM conversion](conversion.md)
 
 > The public repository is a documentation preview; installation commands
 > require the SDK source, which will be published separately once ready.

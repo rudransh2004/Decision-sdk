@@ -66,6 +66,8 @@ token rows with a reserved null slot. Parameter count does not impose an
 SDK limit, but storage, memory, model architecture, and tokenizer
 compatibility still do. Encoder-only, seq2seq, multimodal, API-only, and
 unsupported custom-code checkpoints are not general conversion targets.
+See the [conversion guide](conversion.md) for strategy requirements and
+what has actually been tested.
 
 ## Licenses, downloads, and trust
 

@@ -76,7 +76,8 @@ the full LM, or choose `method="lora"` for adapters. `strategy="bosun"`
 instead adds 256 fresh decision-token rows and defaults to a trainable
 backbone. Both conversions **start untrained**. Bosun-style token rows must
 be added before quantizing a base for QLoRA. Full SFT is possible; LoRA is
-an efficiency choice, not a requirement.
+an efficiency choice, not a requirement. See the
+[conversion guide](conversion.md) for architecture and tokenizer requirements.
 
 For an already trained native model, use its publisher-specific fine-tuning
 path through the SDK:

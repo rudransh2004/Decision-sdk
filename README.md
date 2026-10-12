@@ -30,6 +30,14 @@ and other native releases while preserving their own readouts.
 **03 · Infer and deploy** — run `choice`, `noul` (yes/no), and `score`;
 batch, evaluate, export, or serve through supported backends.
 
+After the source release, install the training extra with
+`python -m pip install -e ".[train]"`. Save a labeled row as
+`decisions.jsonl`:
+
+```json
+{"id":"ticket-1","kind":"choice","state":"Customer was charged twice","question":"Which team?","options":["billing","technical"],"target":"billing"}
+```
+
 ```python
 from futurix_decision import DecisionTrainer, SFTConfig, load_model
 
@@ -49,10 +57,21 @@ result = load_model("./my-decision-model").choice(
 print(result.decision, result.probabilities)
 ```
 
-Already have a decision model? `load_model("laya").finetune("decisions.jsonl",
-"./my-laya")` continues its native training path. See
-[getting started](docs/getting-started.md) and
-[datasets and training](docs/datasets-and-training.md).
+This quickstart updates the **pointer head**; to train the backbone too, set
+`train_backbone=True` when converting or use LoRA. For reliable confidence,
+calibrate on separate held-out data; one demo row cannot establish quality.
+
+Already have a decision model? Continue its **native** readout instead:
+
+```python
+released = load_model("laya")  # install .[laya] after source release
+tuned = released.finetune("decisions.jsonl", "./my-laya")
+print(tuned.choice(state="Customer was charged twice",
+                   choices=["billing", "technical"]).decision)
+```
+
+[Getting started](docs/getting-started.md) ·
+[Bring your own data](docs/datasets-and-training.md).
 
 ## Supported decision models
 
@@ -93,8 +112,12 @@ bosun_style = load_model("your-org/text-causal-lm", convert=True, strategy="bosu
 need decision-data training, and neither copies an existing publisher's
 trained decision ability. Conversion applies to *compatible* Hugging Face
 causal text LMs; model size is limited by your hardware, not the SDK API.
-We'll document specific convertible LLM families separately.
-[Conversion guide and code](docs/datasets-and-training.md#convert-and-train-a-compatible-causal-lm).
+Expect a tokenizer, a supported text causal architecture, and enough
+memory/disk; encoder-only, seq2seq, and arbitrary multimodal checkpoints
+are **not** general conversion targets. Chat or thinking variants need
+their own prompt/runtime checks. A third fixed-code strategy exists for
+compatible models; it does not reproduce Perplexity Decider's weights.
+[Conversion requirements and tested paths](docs/conversion.md).
 
 [Quickstart](docs/getting-started.md) ·
 [Training guide](docs/datasets-and-training.md) ·
