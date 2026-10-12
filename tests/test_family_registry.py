@@ -1,5 +1,8 @@
 """Family adapters: the registry that load_model and the CLI dispatch through."""
 
+import contextlib
+import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +16,7 @@ from futurix_decision import (
     load_model,
     register_family,
 )
+from futurix_decision.cli import main
 from futurix_decision.models.families import FAMILIES
 from futurix_decision.models.families.publisher import PUBLISHER_CHECKPOINTS
 from futurix_decision.models.registry import family_for_checkpoint, get_family
@@ -56,9 +60,10 @@ class AcmeAdapter(FamilyAdapter):
     checkpoints = ("acme/decider-1",)
 
     def __init__(self):
-        self.checked = []
+        self.checked, self.loaded = [], []
 
     def load(self, checkpoint, *, device=None, **kwargs):
+        self.loaded.append(checkpoint)
         return UniformBackend(checkpoint, device=device, **kwargs)
 
     def requires(self, path):
@@ -119,6 +124,80 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(adapter.training_kwargs({"name": "acme/decider-1"}, method="full"), {})
         with self.assertRaisesRegex(ConfigError, "head_type"):
             adapter.training_kwargs({"head_type": "pointer"}, method="full")
+
+    def test_builtin_training_options_keep_each_release_contract(self):
+        self.assertEqual(
+            get_family("futurix").training_kwargs(
+                {"name": "base", "head_type": "pointer", "seed": 3, "prompt_format": ""},
+                method="qlora",
+            ),
+            {"head_type": "pointer", "seed": 3},
+        )
+        bosun = get_family("bosun")
+        self.assertEqual(
+            bosun.training_kwargs({"max_sequence_length": 512, "seed": 1}, method="lora"),
+            {"max_sequence_length": 512},
+        )
+        with self.assertRaisesRegex(ConfigError, "token decision head"):
+            bosun.training_kwargs({"head_type": "pointer"}, method="full")
+        with self.assertRaisesRegex(ConfigError, "unquantized"):
+            bosun.training_kwargs({}, method="qlora")
+        self.assertEqual(
+            get_family("jpt").training_kwargs({"temperature": 1.2, "seed": 2}, method="full"),
+            {"seed": 2, "temperature": 1.2},
+        )
+        self.assertEqual(
+            get_family("decider").training_kwargs({"temperature": 1.2}, method="full"), {}
+        )
+        with self.assertRaisesRegex(ConfigError, "Eikos one-pass width"):
+            get_family("eikos").training_kwargs({"decision_tokens": 255}, method="full")
+        with self.assertRaisesRegex(ConfigError, "255 existing option labels"):
+            get_family("decider").training_kwargs({"decision_tokens": 16}, method="full")
+        with self.assertRaisesRegex(ConfigError, "native prompt"):
+            get_family("jpt").training_kwargs({"prompt_format": "bosun-v3"}, method="full")
+
+
+class RegisteredFamilyCLITests(unittest.TestCase):
+    def test_cli_evaluates_and_refuses_to_export_a_registered_family(self):
+        with patch.dict(REGISTRY), tempfile.TemporaryDirectory() as temp:
+            adapter = AcmeAdapter()
+            register_family(adapter)
+            dataset = Path(temp) / "eval.jsonl"
+            dataset.write_text(
+                json.dumps({"state": "s", "question": "q", "options": ["x", "y"], "label": "x"})
+                + "\n"
+            )
+            with contextlib.redirect_stdout(io.StringIO()) as captured:
+                main(
+                    [
+                        "evaluate",
+                        "--model",
+                        "acme/decider-1",
+                        "--model-format",
+                        "acme",
+                        "--dataset",
+                        str(dataset),
+                    ]
+                )
+            result = json.loads(captured.getvalue())
+            self.assertEqual(result["count"], 1)
+            self.assertEqual(adapter.loaded, ["acme/decider-1"])
+            with self.assertRaisesRegex(ConfigError, "export needs a DecisionModel"):
+                main(
+                    [
+                        "export",
+                        "--model",
+                        "acme/decider-1",
+                        "--model-format",
+                        "acme",
+                        "--output",
+                        str(Path(temp) / "out"),
+                    ]
+                )
+
+    def test_cli_rejects_an_unregistered_format(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main(["evaluate", "--model", "acme/decider-1", "--model-format", "acme"])
 
 
 if __name__ == "__main__":

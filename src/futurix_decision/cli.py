@@ -21,6 +21,9 @@ from futurix_decision import (
 )
 from futurix_decision.datasets import load_decisions
 from futurix_decision.errors import ConfigError, MissingDependencyError
+from futurix_decision.models.families.base import FamilyAdapter
+from futurix_decision.models.families.publisher import PublisherAdapter
+from futurix_decision.models.registry import get_family, registered_families
 from futurix_decision.rewards import BrierScore, LogScore, RankedProbabilityScore, SphericalScore
 from futurix_decision.trainers import CalibrationConfig, RLCDConfig, SFTConfig
 from futurix_decision.utils.config import load_config
@@ -51,6 +54,32 @@ def _rewards(config: dict[str, Any]):
     if unknown:
         raise ConfigError(f"unknown reward rules: {sorted(unknown)}")
     return [constructors[name](weight=weight) for name, weight in weights.items()]
+
+
+def _model_formats() -> list[str]:
+    """``--model-format`` values: ``standard``, each registered family, and ``native``.
+
+    ``standard`` is the ``futurix`` family. Publisher runtimes are reached
+    through ``native``, which identifies the family from the checkpoint or
+    ``--native-family`` and passes the publisher options.
+    """
+    names = [
+        adapter.name
+        for adapter in registered_families()
+        if adapter.name != "futurix" and not isinstance(adapter, PublisherAdapter)
+    ]
+    return ["standard", *names, "native"]
+
+
+def _adapter(model_format: str) -> FamilyAdapter:
+    return get_family("futurix" if model_format == "standard" else model_format)
+
+
+def _require_decision_model(model: Any, model_format: str, purpose: str) -> None:
+    if not isinstance(model, DecisionModel):
+        raise ConfigError(
+            f"{purpose} needs a DecisionModel; {model_format} loaded {type(model).__name__}"
+        )
 
 
 def _select_gpu(index: int | None) -> dict[str, Any]:
@@ -115,14 +144,6 @@ def _train(args: argparse.Namespace) -> None:
         ),
         "full",
     )
-    load_kwargs = {
-        key: model_section[key]
-        for key in ("decision_tokens", "max_sequence_length", "seed", "head_type", "head_config")
-        if key in model_section
-    }
-    if args.decision_tokens is not None:
-        load_kwargs["decision_tokens"] = args.decision_tokens
-    load_kwargs.update(device_kwargs)
     revision = args.revision or model_section.get("revision")
     source_format = args.model_format or model_section.get("format", "standard")
     conversion = args.convert_strategy or model_section.get("strategy")
@@ -153,7 +174,7 @@ def _train(args: argparse.Namespace) -> None:
             if args.max_examples is not None
             else dataset
         )
-        tuned = native.finetune(rows, output)
+        tuned = get_family(native.family).finetune(native, rows, output)
         print(
             json.dumps(
                 {
@@ -165,52 +186,21 @@ def _train(args: argparse.Namespace) -> None:
         )
         return
     if args.resume:
-        model = DecisionModel.from_pretrained(checkpoint, trainable_adapter=True, **device_kwargs)
+        model = get_family("futurix").load(checkpoint, trainable_adapter=True, **device_kwargs)
         if model.prompt_format != progress["prompt_format"]:
             raise ConfigError("resumed checkpoint prompt format differs from progress metadata")
         if model.head_type != progress.get("head_type", "tokens"):
             raise ConfigError("resumed checkpoint decision head differs from progress metadata")
         if model_section.get("head_type", model.head_type) != model.head_type:
             raise ConfigError("resumed checkpoint decision head differs from training config")
-    elif source_format == "bosun":
-        if model_section.get("head_type", "tokens") != "tokens":
-            raise ConfigError("Bosun's prompt contract requires the token decision head")
-        bosun_kwargs = dict(device_kwargs)
-        if revision:
-            bosun_kwargs["revision"] = revision
-        if "max_sequence_length" in model_section:
-            bosun_kwargs["max_sequence_length"] = model_section["max_sequence_length"]
-        model = DecisionModel.from_bosun(checkpoint, **bosun_kwargs)
     else:
-        if source_format in ("decider", "jpt", "eikos"):
-            if model_section.get("head_type", "tokens") != "tokens" or model_section.get(
-                "head_config"
-            ):
-                raise ConfigError(
-                    "native letter models use their trained readout, not a new decision head"
-                )
-            expected_format = {
-                "decider": "decider-v2.1",
-                "jpt": "jpt-llm2jev-chat",
-                "eikos": "eikos-letter-v1-semif",
-            }[source_format]
-            if source_format == "eikos" and "decision_tokens" in model_section:
-                raise ConfigError("Eikos one-pass width comes from the release metadata")
-            if source_format != "eikos" and model_section.get("decision_tokens", 255) != 255:
-                raise ConfigError("native letter models support 255 existing option labels")
-            if model_section.get("prompt_format", expected_format) != expected_format:
-                raise ConfigError(f"{source_format} requires its native prompt")
-            load_kwargs = {
-                key: load_kwargs[key]
-                for key in ("max_sequence_length", "seed")
-                if key in load_kwargs
-            } | device_kwargs
-            if source_format == "jpt" and "temperature" in model_section:
-                load_kwargs["temperature"] = model_section["temperature"]
+        adapter = _adapter(source_format)
+        section = dict(model_section)
+        if args.decision_tokens is not None:
+            section["decision_tokens"] = args.decision_tokens
+        load_kwargs = adapter.training_kwargs(section, method=selected_method) | device_kwargs
         if revision:
             load_kwargs["revision"] = revision
-        if source_format not in ("decider", "jpt", "eikos") and model_section.get("prompt_format"):
-            load_kwargs["prompt_format"] = model_section["prompt_format"]
         if selected_method == "qlora":
             import torch
             from transformers import BitsAndBytesConfig
@@ -233,15 +223,8 @@ def _train(args: argparse.Namespace) -> None:
                 load_kwargs["attention_mode"] = model_section["attention_mode"]
             model = load_model(checkpoint, convert=True, strategy=conversion, **load_kwargs)
         else:
-            model = (
-                DecisionModel.from_decider(checkpoint, **load_kwargs)
-                if source_format == "decider"
-                else DecisionModel.from_jpt(checkpoint, **load_kwargs)
-                if source_format == "jpt"
-                else DecisionModel.from_eikos(checkpoint, **load_kwargs)
-                if source_format == "eikos"
-                else DecisionModel.from_pretrained(checkpoint, **load_kwargs)
-            )
+            model = adapter.load(checkpoint, **load_kwargs)
+        _require_decision_model(model, source_format, "DecisionTrainer")
     method = args.finetune_method
     overrides = {"method": method} if method else {}
     if args.max_examples is not None:
@@ -332,16 +315,8 @@ def _evaluate(args: argparse.Namespace) -> None:
                 base_url=args.native_base_url,
                 family=args.native_family,
             )
-        elif args.model_format == "bosun":
-            model = DecisionModel.from_bosun(args.model, **device_kwargs)
-        elif args.model_format == "decider":
-            model = DecisionModel.from_decider(args.model, **device_kwargs)
-        elif args.model_format == "jpt":
-            model = DecisionModel.from_jpt(args.model, **device_kwargs)
-        elif args.model_format == "eikos":
-            model = DecisionModel.from_eikos(args.model, **device_kwargs)
         else:
-            model = DecisionModel.from_pretrained(args.model, **device_kwargs)
+            model = _adapter(args.model_format).load(args.model, **device_kwargs)
     result = evaluate(
         model,
         dataset,
@@ -363,7 +338,11 @@ def _evaluate(args: argparse.Namespace) -> None:
             },
             sort_keys=True,
         ),
-        max_batch_tokens=None if args.model_format == "native" else args.max_batch_tokens,
+        max_batch_tokens=(
+            args.max_batch_tokens
+            if args.backend == "vllm" or isinstance(model, DecisionModel)
+            else None
+        ),
     )
     if args.metrics_output:
         destination = Path(args.metrics_output)
@@ -378,19 +357,9 @@ def _export(args: argparse.Namespace) -> None:
             "native publisher artifacts are exported by load_model(...).finetune(dataset, output)"
         )
     device_kwargs = _select_gpu(args.gpu)
-    if args.model_format == "bosun":
-        model = DecisionModel.from_bosun(args.model, revision=args.revision, **device_kwargs)
-    elif args.model_format == "decider":
-        kwargs = {"revision": args.revision} if args.revision else {}
-        model = DecisionModel.from_decider(args.model, **kwargs, **device_kwargs)
-    elif args.model_format == "jpt":
-        kwargs = {"revision": args.revision} if args.revision else {}
-        model = DecisionModel.from_jpt(args.model, **kwargs, **device_kwargs)
-    elif args.model_format == "eikos":
-        kwargs = {"revision": args.revision} if args.revision else {}
-        model = DecisionModel.from_eikos(args.model, **kwargs, **device_kwargs)
-    else:
-        model = DecisionModel.from_pretrained(args.model, **device_kwargs)
+    revision = {"revision": args.revision} if args.revision else {}
+    model = _adapter(args.model_format).load(args.model, **revision, **device_kwargs)
+    _require_decision_model(model, args.model_format, "export")
     output = Path(args.output)
     model.save_pretrained(output, safe_serialization=True)
     previous = Path(args.model) / "training_metadata.json"
@@ -424,44 +393,32 @@ def _serve(args: argparse.Namespace) -> None:
 
         engine = VLLMEngine(args.model)
     else:
-        if args.model_format == "native":
-            import torch
+        import torch
 
-            native_device = (
-                ("cuda" if torch.cuda.is_available() else "cpu")
-                if args.device == "auto"
-                else args.device
-            )
+        if args.device == "cuda" and not torch.cuda.is_available():
+            raise ConfigError("CUDA requested but not available")
+        device = (
+            ("cuda" if torch.cuda.is_available() else "cpu")
+            if args.device == "auto"
+            else args.device
+        )
+        if args.model_format == "native":
             engine = load_model(
                 args.model,
                 base_url=args.native_base_url,
                 family=args.native_family,
                 revision=args.revision,
                 trust_remote_code=args.trust_remote_code,
-                device=native_device,
+                device=device,
             )
         else:
-            engine = (
-                DecisionModel.from_decider(args.model)
-                if args.model_format == "decider"
-                else DecisionModel.from_jpt(args.model)
-                if args.model_format == "jpt"
-                else DecisionModel.from_eikos(args.model)
-                if args.model_format == "eikos"
-                else DecisionModel.from_pretrained(args.model)
-            )
-        if args.device != "cpu" and args.model_format != "native":
-            import torch
-
-            if torch.cuda.is_available():
-                engine.backbone.to("cuda")
-            elif args.device == "cuda":
-                raise ConfigError("CUDA requested but not available")
+            engine = _adapter(args.model_format).load(args.model, device=device)
     uvicorn.run(create_app(engine), host=args.host, port=args.port)
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="futurix-decision")
+    formats = _model_formats()
     commands = parser.add_subparsers(dest="command", required=True)
     train = commands.add_parser("train", help="Run SFT, calibration, and/or RLCD")
     train.add_argument("--config")
@@ -475,9 +432,7 @@ def main(argv: list[str] | None = None) -> None:
     train.add_argument("--stages", help="Comma-separated ordered stage names")
     train.add_argument("--finetune-method", choices=("full", "lora", "qlora"))
     train.add_argument("--log-jsonl")
-    train.add_argument(
-        "--model-format", choices=("standard", "bosun", "decider", "jpt", "eikos", "native")
-    )
+    train.add_argument("--model-format", choices=formats)
     train.add_argument(
         "--convert-strategy",
         choices=("pointer", "bosun", "letter_code"),
@@ -509,7 +464,7 @@ def main(argv: list[str] | None = None) -> None:
     evaluation.add_argument("--batch-size", type=int, default=16)
     evaluation.add_argument(
         "--model-format",
-        choices=("standard", "bosun", "decider", "jpt", "eikos", "native"),
+        choices=formats,
         default="standard",
     )
     evaluation.add_argument(
@@ -543,17 +498,17 @@ def main(argv: list[str] | None = None) -> None:
     export.add_argument("--output", required=True)
     export.add_argument(
         "--model-format",
-        choices=("standard", "bosun", "decider", "jpt", "eikos", "native"),
+        choices=formats,
         default="standard",
     )
-    export.add_argument("--revision", help="Pinned upstream Bosun revision")
+    export.add_argument("--revision", help="Pinned upstream model revision")
     export.add_argument("--gpu", type=int)
     export.set_defaults(run=_export)
     serve = commands.add_parser("serve", help="Start the FastAPI decision server")
     serve.add_argument("--model", required=True)
     serve.add_argument(
         "--model-format",
-        choices=("standard", "decider", "jpt", "eikos", "native"),
+        choices=formats,
         default="standard",
     )
     serve.add_argument("--native-base-url", help="Publisher System One server (not generic vLLM)")

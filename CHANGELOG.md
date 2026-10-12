@@ -75,6 +75,17 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `load_model(..., convert=True)` on any known decision-model family raises one
   `ConfigError` that names the family. Bosun, Decider, JPT, Eikos, and Futurix
   checkpoints used to raise per-family messages.
+- The CLI loads every `--model-format` through the family registry. `--model-format`
+  accepts any registered family, and `serve` now accepts `bosun`. Other changes:
+  - `train` raises `ConfigError` for an unknown YAML `model.format`; it used to train it
+    as `standard`.
+  - `train --decision-tokens` with `decider`, `jpt`, or `eikos` is checked like the YAML
+    value (255 for Decider and JPT, not allowed for Eikos) instead of being ignored.
+  - `train` with Bosun and QLoRA raises `ConfigError` before loading the model, instead
+    of in the trainer.
+  - `export --revision` applies to every format; `standard` used to ignore it.
+  - `serve --device` also moves a custom decision head, and `--device cuda` without
+    CUDA raises `ConfigError` for `native` too.
 - `evaluate` and `fit_temperature` take any `DecisionBackend`. `max_batch_tokens` in
   `evaluate` needs a `DecisionModel` or `VLLMEngine` (optionally inside `Calibrated`) and
   raises `ConfigError` for other backends.
