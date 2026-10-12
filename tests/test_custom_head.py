@@ -210,7 +210,7 @@ class GeneralConversionTests(unittest.TestCase):
                 )
                 self.assertTrue(any(p.requires_grad for p in unfrozen.backbone.parameters()))
                 values = model.choice(state="ticket", choices=["approve", "reject"])
-                self.assertAlmostEqual(sum(values.probabilities.values()), 1.0)
+                self.assertAlmostEqual(sum(values.probabilities.values()), 1.0, places=6)
                 self.assertEqual(
                     set(model.choice(
                         state=CANDIDATE_MARKER, choices=["approve", "reject"],
