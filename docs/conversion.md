@@ -40,10 +40,10 @@ again: doing so would discard its trained readout.
   candidate slots, and a Bosun-style prompt. Up to 255 supplied candidates;
   slot 255 is reserved. It is *inspired by* Bosun, not a copy of a published
   Bosun checkpoint. The backbone defaults to trainable.
-- **`strategy="pplx"`:** a separate fixed-code decision readout using
+- **`strategy="letter_code"`:** a fixed letter-code decision readout using
   existing single-token answer-code rows, with no new decision tokens.
   Its usable width depends on tokenizer code availability (at most 255).
-  This is PPLX-inspired, **not** Perplexity Decider's released weights.
+  This does **not** load another publisher's trained decision readout.
 
 ```python
 from futurix_decision import DecisionTrainer, SFTConfig, load_model

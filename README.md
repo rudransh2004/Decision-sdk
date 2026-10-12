@@ -75,21 +75,21 @@ print(tuned.choice(state="Customer was charged twice",
 
 ## Supported decision models
 
-| Released decision model | Inference | Train on your dataset | Fine-tune release |
-|:--|:--:|:--:|:--:|
-| [Bosun v3.1 0.6B](https://huggingface.co/Hanno-Labs/bosun-v3.1-0.6b) / [1.7B](https://huggingface.co/Hanno-Labs/bosun-v3.1-1.7b) | ✅ | ✅ SFT / RLCD | ✅ |
-| [Laya](https://huggingface.co/convaiinnovations/laya) / [Multilingual](https://huggingface.co/convaiinnovations/laya-multilingual) | ✅ | ✅ native | ✅ |
-| [Kev 9B](https://huggingface.co/jaredpalmer/kev-9b) | ✅ | ✅ native | ✅ |
-| [Clef](https://huggingface.co/Cloudflare/clef) / [Clef-Flash](https://huggingface.co/Cloudflare/clef-flash) | ✅ | ✅ native | ✅ |
-| [GLiNER2.5-Decide](https://huggingface.co/fastino/GLiNER2.5-Decide) | ✅ | ✅ hard labels | ✅ |
-| [Perplexity Decider 27B](https://huggingface.co/perplexity-ai/pplx-decider-v1.1-27b) | ✅ | ✅ native | ✅ |
-| [Decider 4B](https://huggingface.co/Mapika/decider-4b) | ✅ | ✅ SFT / RLCD | ✅ |
-| [JPT 4B](https://huggingface.co/kirp/jpt-4b) / [9B](https://huggingface.co/kirp/jpt-9b) | ✅ text | ✅ SFT / RLCD | ✅ |
-| [Eikos 4B](https://huggingface.co/caiovicentino1/Eikos-4B) / [27B](https://huggingface.co/caiovicentino1/Eikos-27B) | ✅ text | ✅ SFT / RLCD | ✅ |
-| Nox [1.0](https://huggingface.co/vllm-sr/Decision-1.0-Nox-4B) / [2.0](https://huggingface.co/vllm-sr/Decision-2.0-Nox-4B) | ✅ | — | — |
-| Lux [1.0](https://huggingface.co/vllm-sr/Decision-1.0-Lux-9B) / [2.0](https://huggingface.co/vllm-sr/Decision-2.0-Lux-9B) | ✅ | — | — |
-| [Liquid d1 3B](https://huggingface.co/LiquidAI/d1-3B) | ✅ | — | — |
-| [OpenJev](https://huggingface.co/openjev/openjev) / [Flash 9B](https://huggingface.co/openjev/OpenJev-Flash-9B) | ✅ server | — | — |
+| Released decision model | SDK inference | Train on your dataset | Fine-tune release | vLLM decisions |
+|:--|:--:|:--:|:--:|:--:|
+| [Bosun v3.1 0.6B](https://huggingface.co/Hanno-Labs/bosun-v3.1-0.6b) / [1.7B](https://huggingface.co/Hanno-Labs/bosun-v3.1-1.7b) | ✅ | ✅ SFT / RLCD | ✅ | ✅ export |
+| [Laya](https://huggingface.co/convaiinnovations/laya) / [Multilingual](https://huggingface.co/convaiinnovations/laya-multilingual) | ✅ | ✅ native | ✅ | — |
+| [Kev 9B](https://huggingface.co/jaredpalmer/kev-9b) | ✅ | ✅ native | ✅ | — |
+| [Clef](https://huggingface.co/Cloudflare/clef) / [Clef-Flash](https://huggingface.co/Cloudflare/clef-flash) | ✅ | ✅ native | ✅ | — |
+| [GLiNER2.5-Decide](https://huggingface.co/fastino/GLiNER2.5-Decide) | ✅ | ✅ hard labels | ✅ | — |
+| [Perplexity Decider 27B](https://huggingface.co/perplexity-ai/pplx-decider-v1.1-27b) | ✅ | ✅ native | ✅ | — |
+| [Decider 4B](https://huggingface.co/Mapika/decider-4b) | ✅ | ✅ SFT / RLCD | ✅ | 🧪 export |
+| [JPT 4B](https://huggingface.co/kirp/jpt-4b) / [9B](https://huggingface.co/kirp/jpt-9b) | ✅ text | ✅ SFT / RLCD | ✅ | 🧪 export |
+| [Eikos 4B](https://huggingface.co/caiovicentino1/Eikos-4B) / [27B](https://huggingface.co/caiovicentino1/Eikos-27B) | ✅ text | ✅ SFT / RLCD | ✅ | 🧪 export |
+| Nox [1.0](https://huggingface.co/vllm-sr/Decision-1.0-Nox-4B) / [2.0](https://huggingface.co/vllm-sr/Decision-2.0-Nox-4B) | ✅ | — | — | — |
+| Lux [1.0](https://huggingface.co/vllm-sr/Decision-1.0-Lux-9B) / [2.0](https://huggingface.co/vllm-sr/Decision-2.0-Lux-9B) | ✅ | — | — | — |
+| [Liquid d1 3B](https://huggingface.co/LiquidAI/d1-3B) | ✅ | — | — | — |
+| [OpenJev](https://huggingface.co/openjev/openjev) / [Flash 9B](https://huggingface.co/openjev/OpenJev-Flash-9B) | ✅ server | — | — | ↗ helper |
 
 “Train” means an SDK path for training **on labeled decision data**, not
 pretraining a publisher architecture from scratch. A checkmark is
@@ -97,6 +97,13 @@ model-specific: some paths need publisher packages, pinned remote code,
 substantial GPU memory, or hard labels. OpenJev requires its running
 publisher server; Nox, Lux, and d1 remain inference-only here.
 [See requirements and limits](docs/model-support.md).
+
+**vLLM legend:** ✅ export = decision-aware SDK inference from an exported
+checkpoint; 🧪 export = adapter/fixture path implemented, **not** verified
+for numerical parity on the published weights; ↗ helper = the publisher's
+separate vLLM-backed server; — = no SDK vLLM decision adapter. `vllm-sr`
+in a repo name does not mean `VLLMEngine` can serve its decision head.
+[Backend requirements and examples](docs/inference-backends.md).
 
 ## Convert an LLM into a decision model
 
@@ -121,7 +128,8 @@ compatible models; it does not reproduce Perplexity Decider's weights.
 
 [Quickstart](docs/getting-started.md) ·
 [Training guide](docs/datasets-and-training.md) ·
-[Model requirements](docs/model-support.md)
+[Model requirements](docs/model-support.md) ·
+[Inference backends](docs/inference-backends.md)
 
 <details>
 <summary><strong>Open full technical reference</strong> · datasets, architectures, experiments, CLI and API</summary>
@@ -632,7 +640,7 @@ canonical JSONL.
 ## Convert a text causal LM into a decision model
 
 Choose the readout **when converting**, before training: `strategy="pointer"`
-(default), `strategy="bosun"`, or `strategy="pplx"`. All start **untrained** and load compatible
+(default), `strategy="bosun"`, or `strategy="letter_code"`. All start **untrained** and load compatible
 `AutoModelForCausalLM` and tokenizer checkpoints from Hugging Face or disk
 without replacing a native decision readout. An LM's parameter count does not
 change the API, but it must still fit available memory and storage. Pointer
@@ -660,23 +668,23 @@ print(restored.choice(state="I was charged twice", choices=["billing", "technica
 Each JSONL row can contain
 `{"id":"r1","kind":"choice","state":"I was charged twice","question":"Which team?","options":["billing","technical"],"target":"billing"}`.
 
-### PPLX-style conversion followed by RLCD
+### Letter-code conversion followed by RLCD
 
-`strategy="pplx"` gives a raw checkpoint a separate, fixed-width answer-code
+`strategy="letter_code"` gives a raw checkpoint a separate, fixed-width answer-code
 readout, initialized from the LM's existing single-token letter-code output
 rows. The prompt presents options as letter codes; a single backbone forward
 scores the **supplied options only**. No 256 new tokenizer rows or copied
 publisher decision weights are involved. The SDK saves the codebook,
-attention mode, trained readout, and backbone for exact local reload. This is
-**inspired by PPLX-Decider**, not a claim to reproduce its released weights
-or benchmarks. The `DecisionTrainer` supplies soft-label SFT, held-out
+attention mode, trained readout, and backbone for exact local reload. It is
+separate from the native Perplexity Decider importer and makes no claim to
+reproduce that release or its benchmarks. The `DecisionTrainer` supplies soft-label SFT, held-out
 calibration, then logit-level RLCD:
 
 ```python
 from futurix_decision import DecisionTrainer, RLCDConfig, SFTConfig, load_model
 
 model = load_model(
-    "your-text-causal-LM", convert=True, strategy="pplx",
+    "your-text-causal-LM", convert=True, strategy="letter_code",
     decision_tokens=255,  # lower this if the tokenizer lacks 255 single-token codes
 )
 trainer = DecisionTrainer(
@@ -686,12 +694,12 @@ trainer = DecisionTrainer(
     rlcd_config=RLCDConfig(method="lora", batch_size=1, kl_beta=0.0),
 )
 trainer.train(stages=["decision_sft", "calibration", "rlcd"])
-trainer.export("./my-pplx-style-decision-model")
+trainer.export("./my-letter-code-decision-model")
 ```
 
 The `kl_beta=0` example avoids holding another large reference backbone in
 memory; set a nonzero anchor with adequate memory or stage checkpoints.
-The CLI equivalent accepts `futurix-decision train --convert-strategy pplx
+The CLI equivalent accepts `futurix-decision train --convert-strategy letter_code
 --model your-text-causal-LM --dataset decisions.jsonl --calibration-dataset
 heldout.jsonl --stages decision_sft,calibration,rlcd --output ./my-decider`.
 
@@ -1144,12 +1152,14 @@ curl -s http://127.0.0.1:8000/v1/decision/choice \
   -d '{"state":{"gst_certificate":"expired"},"question":"Next?","choices":["approve","request_document","reject"],"confidence_threshold":0.8}'
 ```
 
-The vLLM adapter (tested against vLLM 0.20 on a tiny checkpoint) uses
-`allowed_token_ids` + `logprob_token_ids` for every assigned slot in one
-restricted **one-token** step. It ignores the sampled token and performs no
-freeform text generation; vLLM's public API does not expose a zero-token
-logits-only pass. Temperature is applied to the restricted decision scores.
-Batch requests are passed to vLLM together.
+The vLLM adapter (tested against vLLM 0.20 on a tiny checkpoint) masks to
+`allowed_token_ids` and requests `logprobs` for every allowed candidate
+after one restricted **one-token** step. Current GPU workers do not honor
+`logprob_token_ids`, so the SDK uses processed top-k logprobs instead.
+It ignores the sampled token and performs no freeform text generation;
+vLLM's public API does not expose a zero-token logits-only pass. Temperature
+is applied to the restricted decision scores. Batch requests run together.
+Decider `score` uses a separate restricted prefill per score level.
 
 FastAPI exposes `POST /v1/decision`, `/v1/decision/choice`,
 `/v1/decision/noul`, `/v1/decision/score`, `/v1/systemone`, plus

@@ -46,8 +46,10 @@ only for a plain, compatible causal LM that you intend to train.
 For exact checkpoint IDs, model-specific limits, environment extras,
 verified paths, and caveats, see
 [selected native decision models](../README.md#selected-native-decision-models).
-This list does not imply that every checkpoint supports vLLM. Some vLLM
-paths require an SDK-exported checkpoint and a compatible vLLM version;
+This list does not imply that every checkpoint supports vLLM. Bosun,
+Decider, JPT, and Eikos require SDK exports; OpenJev uses its publisher's
+vLLM-backed helper. The other native decision heads are not served by
+`VLLMEngine`. See the [per-model backend guide](inference-backends.md);
 pointer-head conversion uses PyTorch inference.
 
 ## Converting a plain LM
