@@ -23,7 +23,9 @@ class TrainingLogger:
                 import wandb
             except ImportError as exc:
                 self.close()
-                raise ImportError("W&B logging requires pip install futurix-decision[wandb]") from exc
+                raise ImportError(
+                    "W&B logging requires pip install futurix-decision[wandb]"
+                ) from exc
             self._wandb = wandb.init(project=wandb_project)
 
     def log(self, values: dict) -> None:

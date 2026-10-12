@@ -44,8 +44,11 @@ class SystemOneRequest(BaseModel):
 
 
 def _compat_input(
-    state: Any, question_id: str, question: SystemOneQuestion,
-    demonstrations: Any, prompt_profile: str,
+    state: Any,
+    question_id: str,
+    question: SystemOneQuestion,
+    demonstrations: Any,
+    prompt_profile: str,
 ) -> DecisionInput:
     kind = question.type
     if kind not in ("noul", "choice", "score"):
@@ -56,11 +59,7 @@ def _compat_input(
     elif isinstance(criteria, list):
         options = [str(i) for i in range(len(criteria))]
     elif isinstance(criteria, dict):
-        options = (
-            sorted(criteria, key=lambda key: int(key))
-            if kind == "score"
-            else list(criteria)
-        )
+        options = sorted(criteria, key=lambda key: int(key)) if kind == "score" else list(criteria)
     else:
         raise ValueError(f"question {question_id!r}: criteria must list choices")
     prompt = question.instructions or question_id
@@ -86,9 +85,7 @@ def create_app(engine: Any) -> FastAPI:
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         with lock:
-            result = engine.decide(
-                example, confidence_threshold=request.confidence_threshold
-            )
+            result = engine.decide(example, confidence_threshold=request.confidence_threshold)
             counters[request.kind] += 1
             latency[request.kind] += result.latency_ms
         return DecisionResponse.model_validate(result.to_dict())
@@ -112,18 +109,28 @@ def create_app(engine: Any) -> FastAPI:
     @app.post("/v1/systemone")
     def systemone(body: SystemOneRequest) -> dict[str, Any]:
         if body.media is not None:
-            raise HTTPException(status_code=422, detail="media is not supported by text-only checkpoints")
+            raise HTTPException(
+                status_code=422, detail="media is not supported by text-only checkpoints"
+            )
         from futurix_decision.models.native import NativeDecisionModel
 
         if isinstance(engine, NativeDecisionModel):
-            if body.prompt_profile != "baseline" or body.demonstrations or body.confidence_threshold is not None:
+            if (
+                body.prompt_profile != "baseline"
+                or body.demonstrations
+                or body.confidence_threshold is not None
+            ):
                 raise HTTPException(
-                    status_code=422, detail="native System One inference does not support Futurix prompt overrides"
+                    status_code=422,
+                    detail="native System One inference does not support Futurix prompt overrides",
                 )
             try:
                 return engine.system_one(
                     body.state,
-                    {qid: question.model_dump(exclude_none=True) for qid, question in body.questions.items()},
+                    {
+                        qid: question.model_dump(exclude_none=True)
+                        for qid, question in body.questions.items()
+                    },
                 )
             except (TypeError, ValueError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -134,8 +141,11 @@ def create_app(engine: Any) -> FastAPI:
         try:
             inputs = [
                 _compat_input(
-                    body.state, question_id, question,
-                    (body.demonstrations or {}).get(question_id), body.prompt_profile,
+                    body.state,
+                    question_id,
+                    question,
+                    (body.demonstrations or {}).get(question_id),
+                    body.prompt_profile,
                 )
                 for question_id, question in body.questions.items()
             ]
@@ -153,19 +163,24 @@ def create_app(engine: Any) -> FastAPI:
             elif row.kind == "score":
                 answer = {
                     "type": "score",
-                    "score": sum(int(option) * probability for option, probability in result.probabilities.items()),
+                    "score": sum(
+                        int(option) * probability
+                        for option, probability in result.probabilities.items()
+                    ),
                     "probabilities": result.probabilities,
                 }
             else:
                 answer = {
-                    "type": "choice", "choice": result.decision,
+                    "type": "choice",
+                    "choice": result.decision,
                     "probabilities": result.probabilities,
                 }
             answer.update(confidence=result.confidence, abstained=result.abstained)
             answers[question_id] = answer
         return {
             "model": body.model or "futurix-decision",
-            "answers": answers, "thinking": False,
+            "answers": answers,
+            "thinking": False,
             "prompt_profile": body.prompt_profile,
             "demonstration_format": body.demonstration_format,
         }

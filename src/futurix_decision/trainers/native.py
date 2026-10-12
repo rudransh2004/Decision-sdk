@@ -21,6 +21,7 @@ from futurix_decision.trainers.sft import DatasetSource, _canonical_rows
 @dataclass(frozen=True)
 class NativeSFTConfig:
     """Common smoke-training controls; publisher configs remain available for advanced tuning."""
+
     epochs: int = 1
     batch_size: int = 1
     learning_rate: float = 2e-5
@@ -38,10 +39,15 @@ class NativeSFTConfig:
 
 def _write_manifest(path: Path, model: NativeDecisionModel) -> None:
     (path / "futurix_native.json").write_text(
-        json.dumps({
-            "family": model.family, "base_checkpoint": model.checkpoint,
-            "source_revision": model.source_revision,
-        }, indent=2) + "\n",
+        json.dumps(
+            {
+                "family": model.family,
+                "base_checkpoint": model.checkpoint,
+                "source_revision": model.source_revision,
+            },
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -98,11 +104,17 @@ def _gliner_record(row: DecisionExample, *, target_policy: str) -> dict[str, Any
             "target_policy='argmax' to explicitly discard soft probabilities"
         )
     winner = row.options[max(range(len(target)), key=target.__getitem__)]
-    labels = dict(zip(row.options, row.candidate_descriptions, strict=True)) if row.candidate_descriptions else None
+    labels = (
+        dict(zip(row.options, row.candidate_descriptions, strict=True))
+        if row.candidate_descriptions
+        else None
+    )
     text = row.state if isinstance(row.state, str) else json.dumps(row.state, ensure_ascii=False)
     task: dict[str, Any] = {
-        "task": row.question_id or "decision", "labels": row.options,
-        "true_label": [winner], "prompt": row.question,
+        "task": row.question_id or "decision",
+        "labels": row.options,
+        "true_label": [winner],
+        "prompt": row.question,
     }
     if labels:
         task["label_descriptions"] = {
@@ -131,9 +143,12 @@ def _kev_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]]:
                 raise ValueError("Kev native pointer head supports at most 255 options")
             winner = max(probs, key=probs.__getitem__)
             questions[qid] = {
-                **question, "label": (
-                    winner == "true" if question["type"] == "noul"
-                    else int(winner) if question["type"] == "score"
+                **question,
+                "label": (
+                    winner == "true"
+                    if question["type"] == "noul"
+                    else int(winner)
+                    if question["type"] == "score"
                     else winner
                 ),
                 "target": probs,
@@ -142,7 +157,9 @@ def _kev_records(rows: Iterable[DecisionExample]) -> Iterable[dict[str, Any]]:
 
 
 def _train_pplx(
-    model: NativeDecisionModel, rows: list[DecisionExample], path: Path,
+    model: NativeDecisionModel,
+    rows: list[DecisionExample],
+    path: Path,
     config: NativeSFTConfig,
 ) -> dict[str, Any]:
     import torch
@@ -155,7 +172,8 @@ def _train_pplx(
     native.train(True)
     optimizer = torch.optim.AdamW(
         (p for p in native.parameters() if p.requires_grad),
-        lr=config.learning_rate, weight_decay=config.weight_decay,
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
     )
     losses: list[float] = []
     for _epoch in range(config.epochs):
@@ -163,10 +181,14 @@ def _train_pplx(
             examples = rows[offset : offset + config.batch_size]
             if any(len(row.options) > 255 for row in examples):
                 raise ValueError("PPLX native readout supports at most 255 options")
-            records = [{
-                "state": row.state, "question": _question(row),
-                **({"images": row.images} if row.images else {}),
-            } for row in examples]
+            records = [
+                {
+                    "state": row.state,
+                    "question": _question(row),
+                    **({"images": row.images} if row.images else {}),
+                }
+                for row in examples
+            ]
             batch = native.prepare(records)
             logits = native(batch)
             if logits.shape[0] != len(examples):
@@ -175,10 +197,18 @@ def _train_pplx(
             for prediction, row in zip(logits, examples, strict=True):
                 if prediction.shape[0] < len(row.options):
                     raise ValueError("PPLX returned fewer logits than decision options")
-                target = torch.tensor(row.target_distribution(), device=prediction.device, dtype=torch.float32)
-                terms.append(-(target * functional.log_softmax(
-                    prediction[: len(row.options)].float(), dim=-1,
-                )).sum())
+                target = torch.tensor(
+                    row.target_distribution(), device=prediction.device, dtype=torch.float32
+                )
+                terms.append(
+                    -(
+                        target
+                        * functional.log_softmax(
+                            prediction[: len(row.options)].float(),
+                            dim=-1,
+                        )
+                    ).sum()
+                )
             loss = torch.stack(terms).mean()
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -190,7 +220,9 @@ def _train_pplx(
 
 
 def _train_clef(
-    model: NativeDecisionModel, rows: list[DecisionExample], path: Path,
+    model: NativeDecisionModel,
+    rows: list[DecisionExample],
+    path: Path,
     config: NativeSFTConfig,
 ) -> dict[str, Any]:
     import torch
@@ -209,18 +241,26 @@ def _train_clef(
         native.language_model.eval()
     optimizer = torch.optim.AdamW(
         (p for p in native.parameters() if p.requires_grad),
-        lr=config.learning_rate, weight_decay=config.weight_decay,
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
     )
     losses: list[float] = []
     for _epoch in range(config.epochs):
         for offset in range(0, len(rows), config.batch_size):
             examples = rows[offset : offset + config.batch_size]
             records = [
-                module.encode_record(processor.tokenizer, {
-                    "id": row.id, "state": row.state,
-                    "questions": {"decision": _question(row)},
-                    **({"images": _images_for_native(row.images, "clef")} if row.images else {}),
-                }, processor=processor)
+                module.encode_record(
+                    processor.tokenizer,
+                    {
+                        "id": row.id,
+                        "state": row.state,
+                        "questions": {"decision": _question(row)},
+                        **(
+                            {"images": _images_for_native(row.images, "clef")} if row.images else {}
+                        ),
+                    },
+                    processor=processor,
+                )
                 for row in examples
             ]
             device = next(native.parameters()).device
@@ -238,8 +278,12 @@ def _train_clef(
                 keys = _option_keys(row)
                 distribution = row.target_distribution()
                 target = torch.tensor(
-                    [distribution[keys.index(option)] for option in records[i].questions[0].option_ids],
-                    device=prediction.device, dtype=torch.float32,
+                    [
+                        distribution[keys.index(option)]
+                        for option in records[i].questions[0].option_ids
+                    ],
+                    device=prediction.device,
+                    dtype=torch.float32,
                 )
                 terms.append(-(target * functional.log_softmax(prediction, dim=-1)).sum())
             loss = torch.stack(terms).mean()
@@ -261,8 +305,12 @@ def _train_clef(
 
 
 def finetune_native(
-    model: NativeDecisionModel, dataset: DatasetSource, output_dir: str | Path,
-    *, config: Any | None = None, **kwargs: Any,
+    model: NativeDecisionModel,
+    dataset: DatasetSource,
+    output_dir: str | Path,
+    *,
+    config: Any | None = None,
+    **kwargs: Any,
 ) -> NativeDecisionModel:
     path = Path(output_dir)
     if path.exists() and any(path.iterdir()):
@@ -274,9 +322,12 @@ def finetune_native(
         data = Path(temporary) / "train.jsonl"
         if model.family == "laya":
             if kwargs.keys() - {"device"}:
-                raise TypeError(f"unsupported Laya training options: {sorted(kwargs.keys() - {'device'})}")
+                raise TypeError(
+                    f"unsupported Laya training options: {sorted(kwargs.keys() - {'device'})}"
+                )
             count = _write_rows(
-                data, _grouped_records(_text_only(_canonical_rows(dataset), "Laya")),
+                data,
+                _grouped_records(_text_only(_canonical_rows(dataset), "Laya")),
             )
             try:
                 from laya.train import finetune
@@ -284,14 +335,21 @@ def finetune_native(
                 raise ImportError("install futurix-decision[laya] to train Laya") from exc
             if isinstance(config, NativeSFTConfig):
                 from laya.train import TrainConfig
+
                 config = TrainConfig(
-                    epochs=config.epochs, micro_batch=config.batch_size,
-                    grad_accum=1, encoder_lr=config.learning_rate,
-                    head_lr=config.learning_rate, weight_decay=config.weight_decay,
+                    epochs=config.epochs,
+                    micro_batch=config.batch_size,
+                    grad_accum=1,
+                    encoder_lr=config.learning_rate,
+                    head_lr=config.learning_rate,
+                    weight_decay=config.weight_decay,
                     freeze_encoder=not config.train_backbone,
                 )
             report = finetune(
-                str(data), model.checkpoint, str(path), config=config,
+                str(data),
+                model.checkpoint,
+                str(path),
+                config=config,
                 device=kwargs.get("device", "auto"),
             )
         elif model.family == "gliner":
@@ -299,8 +357,11 @@ def finetune_native(
             if kwargs:
                 raise TypeError(f"unsupported GLiNER training options: {sorted(kwargs)}")
             count = _write_rows(
-                data, (_gliner_record(row, target_policy=target_policy)
-                       for row in _canonical_rows(dataset)),
+                data,
+                (
+                    _gliner_record(row, target_policy=target_policy)
+                    for row in _canonical_rows(dataset)
+                ),
             )
             try:
                 from gliner2 import AutoExtractor
@@ -311,11 +372,16 @@ def finetune_native(
                 config = TrainingConfig(output_dir=str(path))
             elif isinstance(config, NativeSFTConfig):
                 if not config.train_backbone:
-                    raise ValueError("GLiNER's native trainer does not expose readout-only training")
+                    raise ValueError(
+                        "GLiNER's native trainer does not expose readout-only training"
+                    )
                 config = TrainingConfig(
-                    output_dir=str(path), num_epochs=config.epochs,
-                    batch_size=config.batch_size, encoder_lr=config.learning_rate,
-                    task_lr=config.learning_rate, weight_decay=config.weight_decay,
+                    output_dir=str(path),
+                    num_epochs=config.epochs,
+                    batch_size=config.batch_size,
+                    encoder_lr=config.learning_rate,
+                    task_lr=config.learning_rate,
+                    weight_decay=config.weight_decay,
                     num_workers=0,
                 )
             elif Path(config.output_dir) != path:
@@ -342,16 +408,26 @@ def finetune_native(
             )
             release = Checkpoint(source)
             command = [
-                sys.executable, "-m", "kev.train", "--data", str(data),
-                "--init_from", source, "--base", release.meta.base,
-                "--out", str(path),
+                sys.executable,
+                "-m",
+                "kev.train",
+                "--data",
+                str(data),
+                "--init_from",
+                source,
+                "--base",
+                release.meta.base,
+                "--out",
+                str(path),
             ]
             if getattr(release.meta, "base_revision", None):
                 command.extend(["--base_revision", release.meta.base_revision])
             for key, value in flags.items():
                 if not key.replace("_", "").isalnum() or key.startswith("_"):
                     raise ValueError(f"invalid Kev training option: {key}")
-                command.extend([f"--{key}", str(int(value)) if isinstance(value, bool) else str(value)])
+                command.extend(
+                    [f"--{key}", str(int(value)) if isinstance(value, bool) else str(value)]
+                )
             subprocess.run(command, check=True)
             report = {"train_items": count}
         else:
@@ -364,7 +440,10 @@ def finetune_native(
                 raise TypeError(f"{model.family} fine-tuning uses NativeSFTConfig")
             if model.family == "clef":
                 report = _train_clef(
-                    model, rows, path, config or NativeSFTConfig(train_backbone=False),
+                    model,
+                    rows,
+                    path,
+                    config or NativeSFTConfig(train_backbone=False),
                 )
             else:
                 report = _train_pplx(model, rows, path, config or NativeSFTConfig())
@@ -373,7 +452,8 @@ def finetune_native(
         raise RuntimeError(f"publisher trainer did not export a native checkpoint at {path}")
     _write_manifest(path, model)
     trained = NativeDecisionModel.from_pretrained(
-        path, trust_remote_code=model.family in ("pplx-decider", "clef"),
+        path,
+        trust_remote_code=model.family in ("pplx-decider", "clef"),
         revision=model.source_revision,
     )
     trained.training_report = {"train_items": count, "publisher_report": report}

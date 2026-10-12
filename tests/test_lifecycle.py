@@ -42,12 +42,8 @@ class LifecycleTests(unittest.TestCase):
             resumed.history.update(trainer.history)
             resumed.train(stages=["rlcd"])
             self.assertIsNotNone(resumed._active.reference_model)
-            self.assertIsNot(
-                resumed._active.reference_model.backbone, resumed.model.backbone
-            )
-            self.assertEqual(
-                list(resumed.history), ["decision_sft", "calibration", "rlcd"]
-            )
+            self.assertIsNot(resumed._active.reference_model.backbone, resumed.model.backbone)
+            self.assertEqual(list(resumed.history), ["decision_sft", "calibration", "rlcd"])
 
     def test_stage_checkpoints_are_reloadable_and_progress_is_atomic(self):
         from test_sft import example, tiny_model
@@ -67,7 +63,9 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(progress["completed_stages"], ["decision_sft", "calibration"])
             self.assertEqual(set(progress["validation_metrics"]), {"decision_sft", "calibration"})
             self.assertIn(trainer.select_best(metric="accuracy"), progress["completed_stages"])
-            self.assertEqual(progress["checkpoint"], str((checkpoint_dir / "calibration").resolve()))
+            self.assertEqual(
+                progress["checkpoint"], str((checkpoint_dir / "calibration").resolve())
+            )
             for stage in progress["completed_stages"]:
                 loaded = DecisionModel.from_pretrained(checkpoint_dir / stage)
                 self.assertEqual(evaluate(loaded, [example([0.8, 0.2])])["count"], 1)
@@ -131,7 +129,8 @@ class LifecycleTests(unittest.TestCase):
             model = DecisionModel.from_pretrained(
                 base,
                 quantization_config=BitsAndBytesConfig(
-                    load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
                     bnb_4bit_compute_dtype=torch.bfloat16,
                 ),
                 device_map="cuda:0",
@@ -150,8 +149,13 @@ class LifecycleTests(unittest.TestCase):
             loaded = DecisionModel.from_pretrained(output)
             self.assertEqual(loaded.decision_tokens, 16)
             self.assertAlmostEqual(
-                sum(loaded.choice(state="test", choices=["approve", "reject"]).probabilities.values()),
-                1.0, places=6,
+                sum(
+                    loaded.choice(
+                        state="test", choices=["approve", "reject"]
+                    ).probabilities.values()
+                ),
+                1.0,
+                places=6,
             )
 
 

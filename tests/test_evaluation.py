@@ -67,18 +67,25 @@ class EvaluatorTrainerTests(unittest.TestCase):
         def batch_decide(batch):
             calls.append(len(batch))
             return [
-                SimpleNamespace(probabilities=dict(zip(row.options, (0.7, 0.3))))
-                for row in batch
+                SimpleNamespace(probabilities=dict(zip(row.options, (0.7, 0.3)))) for row in batch
             ]
 
         engine = SimpleNamespace(
-            prompt_format="futurix", temperature=1.0, seed=0, decision_tokens=16,
-            tokenizer=tiny_model().tokenizer, batch_decide=batch_decide,
+            prompt_format="futurix",
+            temperature=1.0,
+            seed=0,
+            decision_tokens=16,
+            tokenizer=tiny_model().tokenizer,
+            batch_decide=batch_decide,
         )
         with tempfile.TemporaryDirectory() as temp:
             result = evaluate(
-                engine, rows, batch_size=2, max_batch_tokens=1,
-                predictions_output=Path(temp) / "vllm.jsonl", run_id="vllm",
+                engine,
+                rows,
+                batch_size=2,
+                max_batch_tokens=1,
+                predictions_output=Path(temp) / "vllm.jsonl",
+                run_id="vllm",
             )
             self.assertEqual(calls, [1, 1])
             self.assertEqual(result["count"], 2)
@@ -101,7 +108,8 @@ class EvaluatorTrainerTests(unittest.TestCase):
 
         model = tiny_model()
         rows = [
-            example([0.7, 0.3], "one"), example([0.2, 0.8], "two"),
+            example([0.7, 0.3], "one"),
+            example([0.2, 0.8], "two"),
             example([0.9, 0.1], "three"),
         ]
         with tempfile.TemporaryDirectory() as temp:
@@ -114,18 +122,18 @@ class EvaluatorTrainerTests(unittest.TestCase):
                 stream.write('{"id":"incomplete')
             with patch.object(model.backbone, "forward", wraps=model.backbone.forward) as forward:
                 resumed = evaluate(
-                    model, rows, predictions_output=journal, run_id="same",
-                    resume=True, batch_size=2,
+                    model,
+                    rows,
+                    predictions_output=journal,
+                    run_id="same",
+                    resume=True,
+                    batch_size=2,
                 )
                 self.assertEqual(forward.call_count, 1)
             self.assertEqual(resumed["count"], 3)
-            self.assertAlmostEqual(
-                resumed["accuracy"], evaluate(model, rows)["accuracy"], places=6
-            )
+            self.assertAlmostEqual(resumed["accuracy"], evaluate(model, rows)["accuracy"], places=6)
             with self.assertRaisesRegex(ValueError, "identity differs"):
-                evaluate(
-                    model, rows, predictions_output=journal, run_id="different", resume=True
-                )
+                evaluate(model, rows, predictions_output=journal, run_id="different", resume=True)
 
     def test_batched_evaluation_and_calibration_save(self):
         from futurix_decision import DecisionModel

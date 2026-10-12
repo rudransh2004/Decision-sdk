@@ -29,9 +29,7 @@ def tiny_model() -> DecisionModel:
     torch.manual_seed(11)
     raw = Tokenizer(models.WordLevel({"[UNK]": 0, "[EOS]": 1}, unk_token="[UNK]"))
     raw.pre_tokenizer = pre_tokenizers.Whitespace()
-    tokenizer = PreTrainedTokenizerFast(
-        tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]"
-    )
+    tokenizer = PreTrainedTokenizerFast(tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]")
     backbone = GPT2LMHeadModel(
         GPT2Config(vocab_size=2, n_positions=256, n_embd=32, n_layer=1, n_head=2)
     )
@@ -212,9 +210,9 @@ class SFTTrainingTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("peft"), "PEFT not installed")
     def test_lora_merges_to_standalone_checkpoint(self):
         model = tiny_model()
-        original_decision_rows = model.backbone.get_input_embeddings().weight[
-            model._token_ids
-        ].detach().clone()
+        original_decision_rows = (
+            model.backbone.get_input_embeddings().weight[model._token_ids].detach().clone()
+        )
         trainer = SFTTrainer(
             model,
             config=SFTConfig(
@@ -232,9 +230,9 @@ class SFTTrainingTests(unittest.TestCase):
             trainer.save_pretrained(temp)
             self.assertTrue((Path(temp) / "config.json").exists())
             self.assertFalse((Path(temp) / "adapter_config.json").exists())
-            merged_decision_rows = model.backbone.get_input_embeddings().weight[
-                model._token_ids
-            ].detach().cpu()
+            merged_decision_rows = (
+                model.backbone.get_input_embeddings().weight[model._token_ids].detach().cpu()
+            )
             self.assertFalse(torch.equal(original_decision_rows, merged_decision_rows))
             loaded = DecisionModel.from_pretrained(temp)
             self.assertAlmostEqual(
@@ -271,8 +269,10 @@ class SFTTrainingTests(unittest.TestCase):
                 config=SFTConfig(
                     method="qlora",
                     precision="bf16" if os.environ.get("FUTURIX_TEST_BF16") == "1" else "no",
-                    lora_rank=2, lora_alpha=4,
-                    batch_size=2, learning_rate=0.003,
+                    lora_rank=2,
+                    lora_alpha=4,
+                    batch_size=2,
+                    learning_rate=0.003,
                     gradient_checkpointing=True,
                 ),
             )

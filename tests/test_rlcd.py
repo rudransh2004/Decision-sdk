@@ -43,7 +43,9 @@ class ScoringTests(unittest.TestCase):
 
     def test_baselines(self):
         rewards = torch.tensor([[1.0], [2.0], [4.0]])
-        self.assertTrue(torch.allclose(group_advantages(rewards), torch.tensor([[-2.0], [-0.5], [2.5]])))
+        self.assertTrue(
+            torch.allclose(group_advantages(rewards), torch.tensor([[-2.0], [-0.5], [2.5]]))
+        )
         self.assertTrue(
             torch.allclose(
                 group_advantages(rewards, baseline="group").sum(),
@@ -57,8 +59,11 @@ class ScoringTests(unittest.TestCase):
         logits = torch.tensor([[0.0, 0.0, 0.0]], requires_grad=True)
         mask = torch.tensor([[True, True, False]])
         outcome = rlcd_policy_loss(
-            logits, torch.tensor([[1.0, 0.0, 0.0]]),
-            group_size=1024, noise_sigma=0.25, available=mask,
+            logits,
+            torch.tensor([[1.0, 0.0, 0.0]]),
+            group_size=1024,
+            noise_sigma=0.25,
+            available=mask,
         )
         outcome.loss.backward()
         self.assertLess(logits.grad[0, 0].item(), 0)  # GD increases A's logit
@@ -76,9 +81,7 @@ class ScoringTests(unittest.TestCase):
             optimizer = torch.optim.Adam([mean], lr=0.05)
             for _ in range(220):
                 optimizer.zero_grad()
-                loss = rlcd_policy_loss(
-                    mean, target, group_size=64, noise_sigma=0.25
-                ).loss
+                loss = rlcd_policy_loss(mean, target, group_size=64, noise_sigma=0.25).loss
                 loss.backward()
                 optimizer.step()
             probability = mean.detach().softmax(dim=-1)[0, 0].item()
@@ -94,7 +97,8 @@ class ScoringTests(unittest.TestCase):
         with torch.no_grad():
             model.backbone.get_output_embeddings().weight[model._token_ids[0]].add_(0.25)
         trainer = RLCDTrainer(
-            model, config=RLCDConfig(group_size=32, kl_beta=0.5, sft_weight=0.2),
+            model,
+            config=RLCDConfig(group_size=32, kl_beta=0.5, sft_weight=0.2),
             reference_model=reference,
         )
         trainer._assignment_seed = 13
@@ -135,8 +139,12 @@ class RLCDTrainingTests(unittest.TestCase):
         trainer = RLCDTrainer(
             model,
             config=RLCDConfig(
-                group_size=16, batch_size=2, epochs=1, kl_beta=0.0,
-                sft_weight=0.2, learning_rate=0.002,
+                group_size=16,
+                batch_size=2,
+                epochs=1,
+                kl_beta=0.0,
+                sft_weight=0.2,
+                learning_rate=0.002,
             ),
         )
         with patch.object(model.backbone, "forward", wraps=model.backbone.forward) as forward:

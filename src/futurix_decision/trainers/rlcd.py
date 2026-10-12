@@ -86,9 +86,7 @@ def rlcd_policy_loss(
     for rule in rules:
         value = rule.weight * rule.reward(p, targets.unsqueeze(0))
         if isinstance(rule, RankedProbabilityScore) and kinds is not None:
-            ordinal_rows = torch.tensor(
-                [kind == "score" for kind in kinds], device=logits.device
-            )
+            ordinal_rows = torch.tensor([kind == "score" for kind in kinds], device=logits.device)
             value = value * ordinal_rows.unsqueeze(0)
         reward_values = reward_values + value
     if rewards is None and kinds is not None:
@@ -211,9 +209,7 @@ class RLCDTrainer(SFTTrainer):
             if reference.decision_head is not None:
                 reference.decision_head.to(batch.logits.device)
             with torch.no_grad():
-                ref = reference.forward_decisions(
-                    examples, assignment_seed=self._assignment_seed
-                )
+                ref = reference.forward_decisions(examples, assignment_seed=self._assignment_seed)
             for i, slots in enumerate(batch.slots):
                 if ref.slots[i] != slots:
                     raise ValueError("reference candidate assignments do not match")

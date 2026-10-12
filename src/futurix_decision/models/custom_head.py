@@ -49,9 +49,7 @@ def build_decision_head(name: str, hidden_size: int, config: dict) -> nn.Module:
 class PointerDecisionHead(nn.Module):
     """Trainable candidate readout with an optional state-dependent abstain logit."""
 
-    def __init__(
-        self, hidden_size: int, width: int | None = None, abstain: bool = False
-    ) -> None:
+    def __init__(self, hidden_size: int, width: int | None = None, abstain: bool = False) -> None:
         super().__init__()
         width = hidden_size if width is None else width
         if hidden_size < 1 or width < 1:
@@ -73,7 +71,8 @@ class PointerDecisionHead(nn.Module):
         candidates = (q.unsqueeze(1) * k).sum(dim=-1) / self.scale
         return (
             torch.cat((candidates, self.null(state.to(dtype))), dim=-1)
-            if self.null is not None else candidates
+            if self.null is not None
+            else candidates
         )
 
 

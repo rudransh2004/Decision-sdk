@@ -37,14 +37,18 @@ from futurix_decision.trainers import RLCDConfig
 def make_model(*, head_type="pointer", head_config=None, base_checkpoint=None):
     torch.manual_seed(17)
     vocab = {
-        "[UNK]": 0, "[EOS]": 1, "approve": 2, "reject": 3, "escalate": 4,
-        "accept": 5, "true": 6, "false": 7,
+        "[UNK]": 0,
+        "[EOS]": 1,
+        "approve": 2,
+        "reject": 3,
+        "escalate": 4,
+        "accept": 5,
+        "true": 6,
+        "false": 7,
     }
     raw = Tokenizer(models.WordLevel(vocab, unk_token="[UNK]"))
     raw.pre_tokenizer = pre_tokenizers.Whitespace()
-    tokenizer = PreTrainedTokenizerFast(
-        tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]"
-    )
+    tokenizer = PreTrainedTokenizerFast(tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]")
     backbone = GPT2LMHeadModel(
         GPT2Config(vocab_size=len(vocab), n_positions=256, n_embd=32, n_layer=1, n_head=2)
     )
@@ -63,8 +67,12 @@ def row(target="approve", state="review"):
     from futurix_decision.datasets import DecisionExample
 
     return DecisionExample(
-        id=state, kind="choice", state=state, question="Next?",
-        options=["approve", "reject", "escalate"], target=target,
+        id=state,
+        kind="choice",
+        state=state,
+        question="Next?",
+        options=["approve", "reject", "escalate"],
+        target=target,
     )
 
 
@@ -72,29 +80,42 @@ class CustomHeadTests(unittest.TestCase):
     def test_custom_head_is_candidate_aware_and_does_not_add_decision_tokens(self):
         model = make_model()
         self.assertNotIn("<|decision_000|>", model.tokenizer.get_vocab())
-        self.assertEqual(model.tokenizer.encode(CANDIDATE_MARKER, add_special_tokens=False),
-                         [model._marker_id])
+        self.assertEqual(
+            model.tokenizer.encode(CANDIDATE_MARKER, add_special_tokens=False), [model._marker_id]
+        )
         inputs = [
             DecisionInput(state="first", question="Choose", options=["approve", "reject"]),
-            DecisionInput(state="second", question="Choose", options=["reject", "approve", "escalate"]),
+            DecisionInput(
+                state="second", question="Choose", options=["reject", "approve", "escalate"]
+            ),
         ]
         with patch.object(model.backbone, "forward", wraps=model.backbone.forward) as forward:
             batch = model.forward_decisions(inputs, assignment_seed=13)
             self.assertEqual(forward.call_count, 1)
         self.assertEqual(batch.logits.shape, (2, 3))
         self.assertTrue(torch.isneginf(batch.logits[0, 2]))
-        self.assertEqual(batch.slots[0], model.forward_decisions(inputs, assignment_seed=13).slots[0])
+        self.assertEqual(
+            batch.slots[0], model.forward_decisions(inputs, assignment_seed=13).slots[0]
+        )
         self.assertEqual(len(set(batch.slots[1])), 3)
         loss = -torch.log_softmax(batch.logits[0, batch.slots[0]], dim=-1)[0]
         loss.backward()
-        self.assertTrue(any(p.grad is not None and p.grad.abs().sum() > 0
-                            for p in model.decision_head.parameters()))
+        self.assertTrue(
+            any(
+                p.grad is not None and p.grad.abs().sum() > 0
+                for p in model.decision_head.parameters()
+            )
+        )
 
     def test_inference_evaluation_and_safe_roundtrip(self):
         model = make_model(head_config={"width": 16})
         inputs = [
-            DecisionInput(state={"source": "billing"}, question="Choose", options=["approve", "reject"]),
-            DecisionInput(state="second", question="Choose", options=["approve", "reject", "escalate"]),
+            DecisionInput(
+                state={"source": "billing"}, question="Choose", options=["approve", "reject"]
+            ),
+            DecisionInput(
+                state="second", question="Choose", options=["approve", "reject", "escalate"]
+            ),
         ]
         results = model.batch_decide(inputs)
         self.assertEqual(len(results), 2)
@@ -127,7 +148,9 @@ class CustomHeadTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown decision head"):
             make_model(head_type="unregistered")
         with self.assertRaisesRegex(ValueError, "require prompt_format"):
-            DecisionModel(model.backbone, model.tokenizer, head_type="pointer", prompt_format="bosun-v3")
+            DecisionModel(
+                model.backbone, model.tokenizer, head_type="pointer", prompt_format="bosun-v3"
+            )
 
     def test_registered_custom_head_reconstructs_without_dynamic_imports(self):
         class AdditiveHead(torch.nn.Module):
@@ -168,8 +191,13 @@ class CustomHeadTests(unittest.TestCase):
 class GeneralConversionTests(unittest.TestCase):
     def _raw_checkpoint(self, directory: Path, family: str) -> None:
         vocab = {
-            "[UNK]": 0, "[EOS]": 1, "approve": 2, "reject": 3,
-            "ticket": 4, "yes": 5, "no": 6,
+            "[UNK]": 0,
+            "[EOS]": 1,
+            "approve": 2,
+            "reject": 3,
+            "ticket": 4,
+            "yes": 5,
+            "no": 6,
         }
         raw = Tokenizer(models.WordLevel(vocab, unk_token="[UNK]"))
         raw.pre_tokenizer = pre_tokenizers.Whitespace()
@@ -177,16 +205,27 @@ class GeneralConversionTests(unittest.TestCase):
             tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]"
         )
         if family == "gpt2":
-            backbone = GPT2LMHeadModel(GPT2Config(
-                vocab_size=len(tokenizer), n_positions=256, n_embd=32,
-                n_layer=1, n_head=2,
-            ))
+            backbone = GPT2LMHeadModel(
+                GPT2Config(
+                    vocab_size=len(tokenizer),
+                    n_positions=256,
+                    n_embd=32,
+                    n_layer=1,
+                    n_head=2,
+                )
+            )
         else:
-            backbone = LlamaForCausalLM(LlamaConfig(
-                vocab_size=len(tokenizer), hidden_size=32, intermediate_size=64,
-                num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2,
-                max_position_embeddings=256,
-            ))
+            backbone = LlamaForCausalLM(
+                LlamaConfig(
+                    vocab_size=len(tokenizer),
+                    hidden_size=32,
+                    intermediate_size=64,
+                    num_hidden_layers=1,
+                    num_attention_heads=4,
+                    num_key_value_heads=2,
+                    max_position_embeddings=256,
+                )
+            )
         backbone.save_pretrained(directory)
         tokenizer.save_pretrained(directory)
 
@@ -196,9 +235,7 @@ class GeneralConversionTests(unittest.TestCase):
                 base = Path(temp) / "base"
                 base.mkdir()
                 self._raw_checkpoint(base, family)
-                model = load_model(
-                    base, convert=True, decision_tokens=16, max_sequence_length=256
-                )
+                model = load_model(base, convert=True, decision_tokens=16, max_sequence_length=256)
                 self.assertEqual(model.head_type, "pointer")
                 self.assertEqual(model.head_prompt_version, "span-v1")
                 self.assertEqual(
@@ -208,16 +245,22 @@ class GeneralConversionTests(unittest.TestCase):
                 self.assertNotIn(CANDIDATE_MARKER, model.tokenizer.get_vocab())
                 self.assertFalse(any(p.requires_grad for p in model.backbone.parameters()))
                 unfrozen = load_model(
-                    base, convert=True, train_backbone=True,
-                    decision_tokens=16, max_sequence_length=256,
+                    base,
+                    convert=True,
+                    train_backbone=True,
+                    decision_tokens=16,
+                    max_sequence_length=256,
                 )
                 self.assertTrue(any(p.requires_grad for p in unfrozen.backbone.parameters()))
                 values = model.choice(state="ticket", choices=["approve", "reject"])
                 self.assertAlmostEqual(sum(values.probabilities.values()), 1.0, places=6)
                 self.assertEqual(
-                    set(model.choice(
-                        state=CANDIDATE_MARKER, choices=["approve", "reject"],
-                    ).probabilities),
+                    set(
+                        model.choice(
+                            state=CANDIDATE_MARKER,
+                            choices=["approve", "reject"],
+                        ).probabilities
+                    ),
                     {"approve", "reject"},
                 )
                 with tempfile.TemporaryDirectory() as output:
@@ -229,8 +272,11 @@ class GeneralConversionTests(unittest.TestCase):
                     for option, probability in values.probabilities.items():
                         self.assertAlmostEqual(
                             restored.choice(
-                                state="ticket", choices=["approve", "reject"],
-                            ).probabilities[option], probability, places=6,
+                                state="ticket",
+                                choices=["approve", "reject"],
+                            ).probabilities[option],
+                            probability,
+                            places=6,
                         )
                     with self.assertRaisesRegex(ValueError, "candidate prompt version"):
                         DecisionModel.from_pretrained(output, head_prompt_version="marker-v1")
@@ -240,17 +286,22 @@ class GeneralConversionTests(unittest.TestCase):
         model.backbone.is_loaded_in_4bit = True
         length = len(model.tokenizer)
         with patch.object(
-            model.backbone, "resize_token_embeddings",
+            model.backbone,
+            "resize_token_embeddings",
             side_effect=AssertionError("must not resize quantized weights"),
         ):
             converted = DecisionModel(
-                model.backbone, model.tokenizer, head_type="pointer",
-                head_prompt_version="span-v1", decision_tokens=16,
+                model.backbone,
+                model.tokenizer,
+                head_type="pointer",
+                head_prompt_version="span-v1",
+                decision_tokens=16,
                 max_sequence_length=256,
             )
         self.assertEqual(len(converted.tokenizer), length)
         self.assertEqual(
-            converted.backbone.get_input_embeddings().num_embeddings, length,
+            converted.backbone.get_input_embeddings().num_embeddings,
+            length,
         )
         self.assertEqual(
             set(converted.choice(state="ticket", choices=["approve", "reject"]).probabilities),
@@ -264,7 +315,10 @@ class GeneralConversionTests(unittest.TestCase):
                 base.mkdir()
                 self._raw_checkpoint(base, family)
                 model = load_model(
-                    base, convert=True, strategy="bosun", max_sequence_length=256,
+                    base,
+                    convert=True,
+                    strategy="bosun",
+                    max_sequence_length=256,
                 )
                 self.assertEqual(model.head_type, "tokens")
                 self.assertEqual(model.prompt_format, "bosun-v3")
@@ -290,8 +344,11 @@ class GeneralConversionTests(unittest.TestCase):
                     for option, probability in result.probabilities.items():
                         self.assertAlmostEqual(
                             restored.choice(
-                                state="ticket", choices=["approve", "reject"],
-                            ).probabilities[option], probability, places=5,
+                                state="ticket",
+                                choices=["approve", "reject"],
+                            ).probabilities[option],
+                            probability,
+                            places=5,
                         )
 
     def test_bosun_strategy_rejects_incompatible_options_before_loading_weights(self):
@@ -305,7 +362,9 @@ class GeneralConversionTests(unittest.TestCase):
                 load_model(base, convert=True, strategy="bosun", head_type="pointer")
             with self.assertRaisesRegex(ValueError, "before quantizing"):
                 load_model(
-                    base, convert=True, strategy="bosun",
+                    base,
+                    convert=True,
+                    strategy="bosun",
                     quantization_config=SimpleNamespace(load_in_4bit=True),
                 )
             with self.assertRaisesRegex(ValueError, "only for converting"):
@@ -323,14 +382,20 @@ class GeneralConversionTests(unittest.TestCase):
                 base.mkdir()
                 self._raw_checkpoint(base, "gpt2")
                 model = load_model(
-                    base, convert=True, strategy="bosun",
+                    base,
+                    convert=True,
+                    strategy="bosun",
                     max_sequence_length=256,
                 )
                 trainer = DecisionTrainer(
-                    model=model, dataset=[row("approve", "a"), row("reject", "b")],
+                    model=model,
+                    dataset=[row("approve", "a"), row("reject", "b")],
                     sft_config=SFTConfig(
-                        method=method, batch_size=2, learning_rate=0.01,
-                        lora_rank=2, lora_alpha=4,
+                        method=method,
+                        batch_size=2,
+                        learning_rate=0.01,
+                        lora_rank=2,
+                        lora_alpha=4,
                     ),
                 )
                 trainer.train(stages=["decision_sft"])
@@ -345,7 +410,8 @@ class GeneralConversionTests(unittest.TestCase):
                 actual = restored.choice(state="ticket", choices=["approve", "reject"])
                 for option in expected.probabilities:
                     self.assertAlmostEqual(
-                        expected.probabilities[option], actual.probabilities[option],
+                        expected.probabilities[option],
+                        actual.probabilities[option],
                         places=5,
                     )
 
@@ -357,13 +423,20 @@ class GeneralConversionTests(unittest.TestCase):
                 base.mkdir()
                 self._raw_checkpoint(base, "gpt2")
                 model = load_model(
-                    base, convert=True, decision_tokens=16, max_sequence_length=256,
+                    base,
+                    convert=True,
+                    decision_tokens=16,
+                    max_sequence_length=256,
                 )
                 trainer = DecisionTrainer(
-                    model=model, dataset=[row("approve", "a"), row("reject", "b")],
+                    model=model,
+                    dataset=[row("approve", "a"), row("reject", "b")],
                     sft_config=SFTConfig(
-                        method=method, batch_size=2, learning_rate=0.01,
-                        lora_rank=2, lora_alpha=4,
+                        method=method,
+                        batch_size=2,
+                        learning_rate=0.01,
+                        lora_rank=2,
+                        lora_alpha=4,
                     ),
                 )
                 trainer.train(stages=["decision_sft"])
@@ -376,24 +449,28 @@ class GeneralConversionTests(unittest.TestCase):
                 self.assertFalse(DecisionModel.from_pretrained(output).train_backbone)
                 expected = model.choice(state="ticket", choices=["approve", "reject"])
                 actual = DecisionModel.from_pretrained(output).choice(
-                    state="ticket", choices=["approve", "reject"],
+                    state="ticket",
+                    choices=["approve", "reject"],
                 )
                 for option in expected.probabilities:
                     self.assertAlmostEqual(
-                        expected.probabilities[option], actual.probabilities[option],
+                        expected.probabilities[option],
+                        actual.probabilities[option],
                         places=6,
                     )
 
     @unittest.skipUnless(
         os.environ.get("FUTURIX_RUN_QLORA_SMOKE") == "1"
-        and torch.cuda.is_available() and importlib.util.find_spec("bitsandbytes"),
+        and torch.cuda.is_available()
+        and importlib.util.find_spec("bitsandbytes"),
         "explicit CUDA QLoRA smoke test",
     )
     def test_qlora_converts_and_reloads_untouched_four_bit_base(self):
         from transformers import BitsAndBytesConfig
 
         quantization = BitsAndBytesConfig(
-            load_in_4bit=True, bnb_4bit_quant_type="nf4",
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
         with tempfile.TemporaryDirectory() as temp:
@@ -401,15 +478,23 @@ class GeneralConversionTests(unittest.TestCase):
             base.mkdir()
             self._raw_checkpoint(base, "llama")
             model = load_model(
-                base, convert=True, decision_tokens=16, max_sequence_length=256,
-                quantization_config=quantization, device_map={"": 0},
+                base,
+                convert=True,
+                decision_tokens=16,
+                max_sequence_length=256,
+                quantization_config=quantization,
+                device_map={"": 0},
             )
             self.assertTrue(model.backbone.is_loaded_in_4bit)
             self.assertNotIn(CANDIDATE_MARKER, model.tokenizer.get_vocab())
             trainer = DecisionTrainer(
-                model=model, dataset=[row("approve", "a"), row("reject", "b")],
+                model=model,
+                dataset=[row("approve", "a"), row("reject", "b")],
                 sft_config=SFTConfig(
-                    method="qlora", batch_size=2, lora_rank=2, lora_alpha=4,
+                    method="qlora",
+                    batch_size=2,
+                    lora_rank=2,
+                    lora_alpha=4,
                     learning_rate=0.003,
                 ),
             )
@@ -419,25 +504,34 @@ class GeneralConversionTests(unittest.TestCase):
             self.assertTrue((output / "adapter_config.json").is_file())
             self.assertTrue((output / HEAD_WEIGHTS).is_file())
             restored = DecisionModel.from_pretrained(
-                output, quantization_config=quantization, device_map={"": 0},
+                output,
+                quantization_config=quantization,
+                device_map={"": 0},
             )
             self.assertEqual(restored.head_prompt_version, "span-v1")
             self.assertAlmostEqual(
-                sum(restored.choice(
-                    state="ticket", choices=["approve", "reject"],
-                ).probabilities.values()), 1.0, places=5,
+                sum(
+                    restored.choice(
+                        state="ticket",
+                        choices=["approve", "reject"],
+                    ).probabilities.values()
+                ),
+                1.0,
+                places=5,
             )
 
     @unittest.skipUnless(
         os.environ.get("FUTURIX_RUN_QLORA_SMOKE") == "1"
-        and torch.cuda.is_available() and importlib.util.find_spec("bitsandbytes"),
+        and torch.cuda.is_available()
+        and importlib.util.find_spec("bitsandbytes"),
         "explicit CUDA Bosun-style QLoRA smoke test",
     )
     def test_prepared_bosun_tokens_can_train_with_qlora(self):
         from transformers import BitsAndBytesConfig
 
         quantization = BitsAndBytesConfig(
-            load_in_4bit=True, bnb_4bit_quant_type="nf4",
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
         with tempfile.TemporaryDirectory() as temp:
@@ -446,19 +540,28 @@ class GeneralConversionTests(unittest.TestCase):
             self._raw_checkpoint(raw, "llama")
             prepared = Path(temp) / "prepared"
             unquantized = load_model(
-                raw, convert=True, strategy="bosun", max_sequence_length=256,
+                raw,
+                convert=True,
+                strategy="bosun",
+                max_sequence_length=256,
             )
             unquantized.save_pretrained(prepared)
             del unquantized
             model = load_model(
-                prepared, quantization_config=quantization, device_map={"": 0},
+                prepared,
+                quantization_config=quantization,
+                device_map={"": 0},
             )
             self.assertTrue(model.backbone.is_loaded_in_4bit)
             self.assertEqual(model.prompt_format, "bosun-v3")
             trainer = DecisionTrainer(
-                model=model, dataset=[row("approve", "a"), row("reject", "b")],
+                model=model,
+                dataset=[row("approve", "a"), row("reject", "b")],
                 sft_config=SFTConfig(
-                    method="qlora", batch_size=2, lora_rank=2, lora_alpha=4,
+                    method="qlora",
+                    batch_size=2,
+                    lora_rank=2,
+                    lora_alpha=4,
                     learning_rate=0.003,
                 ),
             )
@@ -466,13 +569,20 @@ class GeneralConversionTests(unittest.TestCase):
             output = Path(temp) / "adapter"
             trainer.export(output, merge_lora=False)
             restored = load_model(
-                output, quantization_config=quantization, device_map={"": 0},
+                output,
+                quantization_config=quantization,
+                device_map={"": 0},
             )
             self.assertEqual(restored.prompt_format, "bosun-v3")
             self.assertAlmostEqual(
-                sum(restored.choice(
-                    state="ticket", choices=["approve", "reject"],
-                ).probabilities.values()), 1.0, places=5,
+                sum(
+                    restored.choice(
+                        state="ticket",
+                        choices=["approve", "reject"],
+                    ).probabilities.values()
+                ),
+                1.0,
+                places=5,
             )
 
     @unittest.skipUnless(
@@ -487,14 +597,21 @@ class GeneralConversionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             cache = Path(temp) / "hub"
             model = load_model(
-                checkpoint, revision=revision, cache_dir=str(cache),
-                convert=True, max_sequence_length=256, decision_tokens=16,
+                checkpoint,
+                revision=revision,
+                cache_dir=str(cache),
+                convert=True,
+                max_sequence_length=256,
+                decision_tokens=16,
             )
             self.assertEqual(model.head_prompt_version, "span-v1")
             trainer = DecisionTrainer(
-                model=model, dataset=[row("approve", "a"), row("reject", "b")],
+                model=model,
+                dataset=[row("approve", "a"), row("reject", "b")],
                 sft_config=SFTConfig(
-                    method="full", batch_size=2, learning_rate=0.01,
+                    method="full",
+                    batch_size=2,
+                    learning_rate=0.01,
                 ),
             )
             trainer.train(stages=["decision_sft"])
@@ -506,9 +623,14 @@ class GeneralConversionTests(unittest.TestCase):
             self.assertEqual(restored.source_revision, revision)
             self.assertEqual(restored.head_prompt_version, "span-v1")
             self.assertAlmostEqual(
-                sum(restored.choice(
-                    state="ticket", choices=["approve", "reject"],
-                ).probabilities.values()), 1.0, places=5,
+                sum(
+                    restored.choice(
+                        state="ticket",
+                        choices=["approve", "reject"],
+                    ).probabilities.values()
+                ),
+                1.0,
+                places=5,
             )
 
     @unittest.skipUnless(
@@ -523,15 +645,23 @@ class GeneralConversionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             cache = Path(temp) / "hub"
             model = load_model(
-                checkpoint, revision=revision, cache_dir=str(cache),
-                convert=True, strategy="bosun", max_sequence_length=256,
+                checkpoint,
+                revision=revision,
+                cache_dir=str(cache),
+                convert=True,
+                strategy="bosun",
+                max_sequence_length=256,
                 device_map={"": 0} if torch.cuda.is_available() else None,
             )
             self.assertEqual(model.prompt_format, "bosun-v3")
             trainer = DecisionTrainer(
-                model=model, dataset=[row("approve", "a"), row("reject", "b")],
+                model=model,
+                dataset=[row("approve", "a"), row("reject", "b")],
                 sft_config=SFTConfig(
-                    method="lora", batch_size=2, lora_rank=2, lora_alpha=4,
+                    method="lora",
+                    batch_size=2,
+                    lora_rank=2,
+                    lora_alpha=4,
                 ),
             )
             trainer.train(stages=["decision_sft"])
@@ -542,9 +672,14 @@ class GeneralConversionTests(unittest.TestCase):
             self.assertEqual(restored.prompt_format, "bosun-v3")
             self.assertEqual(len(restored._token_ids), 256)
             self.assertAlmostEqual(
-                sum(restored.choice(
-                    state="ticket", choices=["approve", "reject"],
-                ).probabilities.values()), 1.0, places=5,
+                sum(
+                    restored.choice(
+                        state="ticket",
+                        choices=["approve", "reject"],
+                    ).probabilities.values()
+                ),
+                1.0,
+                places=5,
             )
 
 
@@ -560,16 +695,24 @@ class CustomHeadTrainingTests(unittest.TestCase):
             sft_config=SFTConfig(method="full", batch_size=2, learning_rate=0.01),
         )
         self.assertTrue(trainer.train(stages=["decision_sft"]))
-        self.assertTrue(all(math.isfinite(item["loss"]) for item in trainer.history["decision_sft"]))
-        self.assertTrue(any(not torch.equal(value.detach().cpu(), before[name])
-                            for name, value in model.decision_head.state_dict().items()))
+        self.assertTrue(
+            all(math.isfinite(item["loss"]) for item in trainer.history["decision_sft"])
+        )
+        self.assertTrue(
+            any(
+                not torch.equal(value.detach().cpu(), before[name])
+                for name, value in model.decision_head.state_dict().items()
+            )
+        )
         with tempfile.TemporaryDirectory() as temp:
             trainer.export(temp)
             result = model.choice(state="fresh", choices=["approve", "reject"])
             loaded = DecisionModel.from_pretrained(temp)
             self.assertAlmostEqual(
                 result.probabilities["approve"],
-                loaded.choice(state="fresh", choices=["approve", "reject"]).probabilities["approve"],
+                loaded.choice(state="fresh", choices=["approve", "reject"]).probabilities[
+                    "approve"
+                ],
                 places=6,
             )
 
@@ -604,11 +747,14 @@ class CustomHeadTrainingTests(unittest.TestCase):
             base.backbone.save_pretrained(Path(temp) / "base")
             base.tokenizer.save_pretrained(Path(temp) / "base")
             model = DecisionModel.from_pretrained(
-                Path(temp) / "base", head_type="pointer", decision_tokens=16,
-                max_sequence_length=256
+                Path(temp) / "base",
+                head_type="pointer",
+                decision_tokens=16,
+                max_sequence_length=256,
             )
             trainer = DecisionTrainer(
-                model=model, dataset=[row("approve")],
+                model=model,
+                dataset=[row("approve")],
                 sft_config=SFTConfig(method="lora", batch_size=1, lora_rank=2, lora_alpha=4),
             )
             trainer.train(stages=["decision_sft"])
@@ -629,11 +775,15 @@ class CustomHeadTrainingTests(unittest.TestCase):
 
         base = tiny_untied_model()
         model = DecisionModel(
-            base.backbone, base.tokenizer, head_type="pointer",
-            decision_tokens=16, max_sequence_length=256,
+            base.backbone,
+            base.tokenizer,
+            head_type="pointer",
+            decision_tokens=16,
+            max_sequence_length=256,
         )
         trainer = DecisionTrainer(
-            model=model, dataset=[row("approve")],
+            model=model,
+            dataset=[row("approve")],
             sft_config=SFTConfig(method="lora", batch_size=1, lora_rank=2, lora_alpha=4),
         )
         trainer.train(stages=["decision_sft"])

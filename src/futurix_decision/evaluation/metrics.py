@@ -44,7 +44,9 @@ def compute_metrics(
     ece = 0.0
     for i in range(bins):
         left, right = i / bins, (i + 1) / bins
-        occupied = (confidence >= left) & (confidence <= right if i == bins - 1 else confidence < right)
+        occupied = (confidence >= left) & (
+            confidence <= right if i == bins - 1 else confidence < right
+        )
         if occupied.any():
             gap = abs(float(confidence[occupied].mean() - correct[occupied].mean()))
             gaps.append(gap)

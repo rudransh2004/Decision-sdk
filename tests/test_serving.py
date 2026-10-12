@@ -17,7 +17,9 @@ from futurix_decision.vllm.logits_processor import probabilities_from_logprobs
 class SchemaTests(unittest.TestCase):
     def test_api_schema_and_abstention_validation(self):
         row = DecisionRequest(
-            state={"expired": True}, question="Next?", choices=["approve", "reject"],
+            state={"expired": True},
+            question="Next?",
+            choices=["approve", "reject"],
             confidence_threshold=0.8,
         )
         self.assertEqual(row.to_input().options, ["approve", "reject"])
@@ -45,13 +47,21 @@ class APITests(unittest.TestCase):
         cls.client = TestClient(create_app(tiny_model()))
 
     def test_endpoints_and_systemone(self):
-        payload = {"state": {"gst_certificate": "expired"}, "question": "Next?", "choices": ["approve", "reject"]}
+        payload = {
+            "state": {"gst_certificate": "expired"},
+            "question": "Next?",
+            "choices": ["approve", "reject"],
+        }
         choice = self.client.post("/v1/decision/choice", json=payload)
         self.assertEqual(choice.status_code, 200, choice.text)
         self.assertAlmostEqual(sum(choice.json()["probabilities"].values()), 1.0, places=6)
         self.assertEqual(self.client.post("/v1/decision", json=payload).status_code, 200)
-        self.assertEqual(self.client.post("/v1/decision/noul", json={"state": "ready"}).status_code, 200)
-        self.assertEqual(self.client.post("/v1/decision/score", json={"state": "ready"}).status_code, 200)
+        self.assertEqual(
+            self.client.post("/v1/decision/noul", json={"state": "ready"}).status_code, 200
+        )
+        self.assertEqual(
+            self.client.post("/v1/decision/score", json={"state": "ready"}).status_code, 200
+        )
         self.assertEqual(self.client.post("/v1/decision", json={"state": "ready"}).status_code, 422)
         abstain = self.client.post(
             "/v1/decision/choice", json={**payload, "confidence_threshold": 1.0}
@@ -65,11 +75,19 @@ class APITests(unittest.TestCase):
                 "state": "certificate expired",
                 "questions": {
                     "approve": {
-                        "type": "choice", "instructions": "Next?",
-                        "criteria": {"request_document": "Ask for current certificate", "reject": "Stop"},
+                        "type": "choice",
+                        "instructions": "Next?",
+                        "criteria": {
+                            "request_document": "Ask for current certificate",
+                            "reject": "Stop",
+                        },
                     },
                     "valid": {"type": "noul", "instructions": "Is this valid?"},
-                    "rating": {"type": "score", "instructions": "Rate", "criteria": ["bad", "ok", "good"]},
+                    "rating": {
+                        "type": "score",
+                        "instructions": "Rate",
+                        "criteria": ["bad", "ok", "good"],
+                    },
                 },
             },
         )
@@ -96,7 +114,9 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.client.get("/health").json()["status"], "ok")
         self.assertIn('decision_requests_total{kind="choice"}', self.client.get("/metrics").text)
 
-    @unittest.skipUnless(os.environ.get("FUTURIX_TEST_SERVER") == "1", "opt-in HTTP server smoke test")
+    @unittest.skipUnless(
+        os.environ.get("FUTURIX_TEST_SERVER") == "1", "opt-in HTTP server smoke test"
+    )
     def test_cli_server_over_http(self):
         import httpx
 
@@ -109,9 +129,16 @@ class APITests(unittest.TestCase):
                 port = address.getsockname()[1]
             process = subprocess.Popen(
                 [
-                    sys.executable, "-m", "futurix_decision.cli",
-                    "serve", "--model", temp, "--device", "cpu",
-                    "--port", str(port),
+                    sys.executable,
+                    "-m",
+                    "futurix_decision.cli",
+                    "serve",
+                    "--model",
+                    temp,
+                    "--device",
+                    "cpu",
+                    "--port",
+                    str(port),
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -152,18 +179,21 @@ class VLLMUnitTests(unittest.TestCase):
                 self.calls += 1
                 assert len(prompts) == len(sampling_params) == 2
                 assert all(
-                    params.max_tokens == 1
-                    and params.logprobs == len(params.allowed_token_ids)
+                    params.max_tokens == 1 and params.logprobs == len(params.allowed_token_ids)
                     for params in sampling_params
                 )
                 return [
                     SimpleNamespace(
                         outputs=[
                             SimpleNamespace(
-                                logprobs=[{
-                                    token: SimpleNamespace(logprob=math.log(probability))
-                                    for token, probability in zip(params.allowed_token_ids, [0.8, 0.2])
-                                }]
+                                logprobs=[
+                                    {
+                                        token: SimpleNamespace(logprob=math.log(probability))
+                                        for token, probability in zip(
+                                            params.allowed_token_ids, [0.8, 0.2]
+                                        )
+                                    }
+                                ]
                             )
                         ]
                     )
@@ -184,9 +214,7 @@ class VLLMUnitTests(unittest.TestCase):
             self.assertEqual(results[0].decision, "approve")
             self.assertAlmostEqual(results[1].confidence, 0.8, places=6)
 
-    @unittest.skipUnless(
-        os.environ.get("FUTURIX_TEST_VLLM") == "1", "opt-in GPU vLLM smoke test"
-    )
+    @unittest.skipUnless(os.environ.get("FUTURIX_TEST_VLLM") == "1", "opt-in GPU vLLM smoke test")
     def test_real_vllm_engine_on_local_checkpoint(self):
         from futurix_decision.vllm.engine import VLLMEngine
         from test_sft import tiny_untied_model

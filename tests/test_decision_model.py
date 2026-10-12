@@ -60,7 +60,9 @@ class DecisionModelTests(unittest.TestCase):
             len({self.model.tokenizer.convert_tokens_to_ids(decision_token(i)) for i in range(16)}),
             16,
         )
-        self.assertEqual(self.model.backbone.get_input_embeddings().num_embeddings, len(self.model.tokenizer))
+        self.assertEqual(
+            self.model.backbone.get_input_embeddings().num_embeddings, len(self.model.tokenizer)
+        )
 
     def test_new_tokens_initialize_padded_base_rows_independently(self):
         raw = Tokenizer(models.WordLevel({"[UNK]": 0, "[EOS]": 1}, unk_token="[UNK]"))
@@ -75,7 +77,9 @@ class DecisionModelTests(unittest.TestCase):
             backbone.get_input_embeddings().weight[2:18].fill_(0.25)
         model = DecisionModel(backbone, tokenizer, decision_tokens=16, max_sequence_length=256)
         weight = model.backbone.get_output_embeddings().weight.detach()
-        self.assertGreater((weight[model._token_ids[0]] - weight[model._token_ids[1]]).abs().sum().item(), 0)
+        self.assertGreater(
+            (weight[model._token_ids[0]] - weight[model._token_ids[1]]).abs().sum().item(), 0
+        )
 
     def test_export_preserves_original_model_provenance(self):
         model = tiny_checkpoint()
@@ -119,7 +123,9 @@ class DecisionModelTests(unittest.TestCase):
             {"state": "second", "choices": ["approve", "reject", "escalate"]},
             {"state": "third", "choices": ["continue", "stop"]},
         ]
-        with patch.object(self.model.backbone, "forward", wraps=self.model.backbone.forward) as forward:
+        with patch.object(
+            self.model.backbone, "forward", wraps=self.model.backbone.forward
+        ) as forward:
             results = self.model.batch_choice(rows)
             self.assertEqual(forward.call_count, 1)
         self.assertEqual(len(results), 3)

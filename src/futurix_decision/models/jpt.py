@@ -38,8 +38,8 @@ INSTRUCTION = (
 def _render_value(value: Any, indent: int = 0) -> str:
     pad = " " * indent
     if isinstance(value, str):
-        return value if not indent else "\n".join(
-            pad + line for line in (value.splitlines() or [""])
+        return (
+            value if not indent else "\n".join(pad + line for line in (value.splitlines() or [""]))
         )
     if isinstance(value, dict):
         return "\n".join(
@@ -62,7 +62,8 @@ def _prompt(tokenizer: Any, example: DecisionInput, order: Sequence[int]) -> str
     if isinstance(state, dict) and set(state) == {"messages"}:
         messages = state["messages"]
         if not (
-            isinstance(messages, list) and messages
+            isinstance(messages, list)
+            and messages
             and all(isinstance(message, dict) and "role" in message for message in messages)
         ):
             raise ValueError("JPT state.messages must contain valid chat messages")
@@ -84,19 +85,16 @@ def _prompt(tokenizer: Any, example: DecisionInput, order: Sequence[int]) -> str
         if example.kind == "noul":
             name = "Yes" if example.options[index] == "true" else "No"
             description = (
-                example.candidate_descriptions[index]
-                if example.candidate_descriptions else None
-            ) or (
-                example.candidate_labels[index]
-                if example.candidate_labels else name.lower()
-            )
+                example.candidate_descriptions[index] if example.candidate_descriptions else None
+            ) or (example.candidate_labels[index] if example.candidate_labels else name.lower())
             option = f"{name}: {description}"
         elif example.kind == "score":
             description = (
                 example.candidate_descriptions[index]
                 if example.candidate_descriptions and example.candidate_descriptions[index]
                 else example.candidate_labels[index]
-                if example.candidate_labels else example.options[index]
+                if example.candidate_labels
+                else example.options[index]
             )
             option = f"{index}: {description}"
         else:
@@ -108,14 +106,12 @@ def _prompt(tokenizer: Any, example: DecisionInput, order: Sequence[int]) -> str
             description = " — ".join(parts) if parts else None
             option = (
                 f"{example.options[index]}: {description}"
-                if description else example.options[index]
+                if description
+                else example.options[index]
             )
         texts.append(option)
     lines = "".join(f"{_LABELS[i]}. {text}\n" for i, text in enumerate(texts))
-    return (
-        f"{prefix}Question: {example.question}\nOptions:\n"
-        f"{lines.rstrip()}{ending}Answer:"
-    )
+    return f"{prefix}Question: {example.question}\nOptions:\n{lines.rstrip()}{ending}Answer:"
 
 
 def _labels(tokenizer: Any, prompt: str, count: int) -> list[int]:
@@ -125,15 +121,15 @@ def _labels(tokenizer: Any, prompt: str, count: int) -> list[int]:
     for label in _LABELS:
         full = tokenizer.encode(prompt + " " + label, add_special_tokens=False)
         if (
-            full[:len(base)] == base and len(full) == len(base) + 1
-            and full[-1] not in ids and tokenizer.decode([full[-1]]).strip() == label
+            full[: len(base)] == base
+            and len(full) == len(base) + 1
+            and full[-1] not in ids
+            and tokenizer.decode([full[-1]]).strip() == label
         ):
             ids.append(full[-1])
         if len(ids) == count:
             return ids
-    raise ValueError(
-        f"JPT tokenizer has only {len(ids)} contextual one-token labels; need {count}"
-    )
+    raise ValueError(f"JPT tokenizer has only {len(ids)} contextual one-token labels; need {count}")
 
 
 def prepare_jpt_row(
@@ -157,14 +153,17 @@ def prepare_jpt_row(
         raise ValueError("JPT option order must be a permutation")
     prompt = _prompt(tokenizer, example, order)
     token_ids = _labels(tokenizer, prompt, len(example.options))
-    if expected_ids is not None and token_ids != list(expected_ids[:len(token_ids)]):
+    if expected_ids is not None and token_ids != list(expected_ids[: len(token_ids)]):
         raise ValueError("JPT contextual label IDs changed with the prompt; cannot score this row")
     return tokenizer.encode(prompt, add_special_tokens=False), token_ids, list(order)
 
 
 class JPTDecisionModel(DecisionModel):
     def __init__(self, backbone: torch.nn.Module, tokenizer: Any, **kwargs: Any) -> None:
-        if kwargs.get("prompt_format", FORMAT) != FORMAT or kwargs.get("head_type", "tokens") != "tokens":
+        if (
+            kwargs.get("prompt_format", FORMAT) != FORMAT
+            or kwargs.get("head_type", "tokens") != "tokens"
+        ):
             raise ValueError("JPT requires its original chat prompt and LM letter readout")
         kwargs["prompt_format"] = FORMAT
         kwargs.setdefault("decision_tokens", MAX_OPTIONS)
@@ -176,8 +175,7 @@ class JPTDecisionModel(DecisionModel):
                 raise ValueError("JPT tokenizer requires a pad or EOS token")
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "left"
-        sample = DecisionInput(state="Calibration state", question="Choose",
-                               options=["yes", "no"])
+        sample = DecisionInput(state="Calibration state", question="Choose", options=["yes", "no"])
         prompt = _prompt(self.tokenizer, sample, [0, 1])
         ids = _labels(self.tokenizer, prompt, self.decision_tokens)
         if max(ids) >= self.backbone.get_input_embeddings().num_embeddings:
@@ -220,10 +218,16 @@ class JPTDecisionModel(DecisionModel):
         tokenizer = AutoTokenizer.from_pretrained(source, **tok_kwargs)
         backbone = AutoModelForMultimodalLM.from_pretrained(source, **hf_kwargs)
         return cls(
-            backbone, tokenizer, temperature=temperature, seed=seed,
-            decision_tokens=MAX_OPTIONS, max_sequence_length=max_sequence_length,
-            base_checkpoint=source, base_model_revision=hf_kwargs.get("revision"),
-            source_checkpoint=source, source_revision=hf_kwargs.get("revision"),
+            backbone,
+            tokenizer,
+            temperature=temperature,
+            seed=seed,
+            decision_tokens=MAX_OPTIONS,
+            max_sequence_length=max_sequence_length,
+            base_checkpoint=source,
+            base_model_revision=hf_kwargs.get("revision"),
+            source_checkpoint=source,
+            source_revision=hf_kwargs.get("revision"),
         )
 
     def forward_decisions(
@@ -238,18 +242,31 @@ class JPTDecisionModel(DecisionModel):
                 if example.kind == "noul" and set(example.options) != {"true", "false"}:
                     raise ValueError("JPT noul requires literal true/false options")
                 identity = json.dumps(
-                    [self.seed, assignment_seed, example.kind, example.state,
-                     example.question, example.options], sort_keys=True, ensure_ascii=False
+                    [
+                        self.seed,
+                        assignment_seed,
+                        example.kind,
+                        example.state,
+                        example.question,
+                        example.options,
+                    ],
+                    sort_keys=True,
+                    ensure_ascii=False,
                 )
                 row_seed = int.from_bytes(
                     hashlib.sha256(identity.encode("utf-8")).digest()[:8], "big"
                 )
                 order = list(range(len(example.options)))
                 random.Random(row_seed).shuffle(order)
-            prepared.append(prepare_jpt_row(
-                example, self.tokenizer, max_options=self.decision_tokens,
-                order=order, expected_ids=self._token_ids,
-            ))
+            prepared.append(
+                prepare_jpt_row(
+                    example,
+                    self.tokenizer,
+                    max_options=self.decision_tokens,
+                    order=order,
+                    expected_ids=self._token_ids,
+                )
+            )
         longest = max(len(ids) for ids, _, _ in prepared)
         if longest > self.max_sequence_length:
             raise ValueError("prompt exceeds max_sequence_length; increase the limit")
@@ -259,11 +276,13 @@ class JPTDecisionModel(DecisionModel):
         )
         mask = torch.zeros_like(ids)
         for index, (tokens, _, _) in enumerate(prepared):
-            ids[index, -len(tokens):] = torch.tensor(tokens, device=device)
-            mask[index, -len(tokens):] = 1
+            ids[index, -len(tokens) :] = torch.tensor(tokens, device=device)
+            mask[index, -len(tokens) :] = 1
         output = self.backbone(input_ids=ids, attention_mask=mask, logits_to_keep=1)
         logits = output.logits[:, -1, :]
-        results = logits.new_full((len(examples), max(len(e.options) for e in examples)), float("-inf"))
+        results = logits.new_full(
+            (len(examples), max(len(e.options) for e in examples)), float("-inf")
+        )
         for index, (_, labels, order) in enumerate(prepared):
             selected = logits[index].index_select(0, torch.tensor(labels, device=device))
             results[index, order] = selected.float()

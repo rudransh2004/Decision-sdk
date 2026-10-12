@@ -43,7 +43,8 @@ from futurix_decision import DecisionTrainer, SFTConfig, load_model
 # A plain LLM becomes a trainable decision model; it is not trained yet.
 model = load_model("HuggingFaceTB/SmolLM2-135M", convert=True, strategy="pointer")
 trainer = DecisionTrainer(
-    model=model, dataset="decisions.jsonl",
+    model=model,
+    dataset="decisions.jsonl",
     sft_config=SFTConfig(method="full"),  # trains the pointer head by default
 )
 trainer.train(stages=["decision_sft"])
@@ -65,8 +66,7 @@ Already have a decision model? Continue its **native** readout instead:
 ```python
 released = load_model("laya")  # install .[laya] for this model
 tuned = released.finetune("decisions.jsonl", "./my-laya")
-print(tuned.choice(state="Customer was charged twice",
-                   choices=["billing", "technical"]).decision)
+print(tuned.choice(state="Customer was charged twice", choices=["billing", "technical"]).decision)
 ```
 
 [Getting started](docs/getting-started.md) ·
@@ -112,8 +112,10 @@ from futurix_decision import load_model
 pointer = load_model("your-org/text-causal-lm", convert=True, strategy="pointer")
 bosun_style = load_model("your-org/text-causal-lm", convert=True, strategy="bosun")
 letter_code = load_model(
-    "your-org/text-causal-lm", convert=True,
-    strategy="letter_code", decision_tokens=8,
+    "your-org/text-causal-lm",
+    convert=True,
+    strategy="letter_code",
+    decision_tokens=8,
 )
 ```
 
@@ -184,14 +186,16 @@ Every training/evaluation record has `id`, `kind` (`choice`, `noul`, or `score`)
 ```python
 from futurix_decision.datasets import load_decisions
 
-dataset = load_decisions({
-    "id": "procurement-001",
-    "kind": "choice",
-    "state": {"gst_certificate": "expired", "budget": "approved"},
-    "question": "What should happen next?",
-    "options": ["approve", "request_document", "reject", "escalate"],
-    "target": [0.02, 0.78, 0.05, 0.15],
-})
+dataset = load_decisions(
+    {
+        "id": "procurement-001",
+        "kind": "choice",
+        "state": {"gst_certificate": "expired", "budget": "approved"},
+        "question": "What should happen next?",
+        "options": ["approve", "request_document", "reject", "escalate"],
+        "target": [0.02, 0.78, 0.05, 0.15],
+    }
+)
 assert dataset[0].target_distribution() == [0.02, 0.78, 0.05, 0.15]
 ```
 
@@ -265,7 +269,8 @@ from futurix_decision import DecisionModel, DecisionTrainer, SFTConfig
 model = DecisionModel.from_decider("Mapika/decider-4b")
 result = model.choice(state="Review this ticket", choices=["approve", "reject"])
 trainer = DecisionTrainer(
-    model=model, dataset="decisions.jsonl",
+    model=model,
+    dataset="decisions.jsonl",
     sft_config=SFTConfig(method="lora"),
 )
 trainer.train(stages=["decision_sft"])
@@ -366,12 +371,14 @@ from pathlib import Path
 from futurix_decision import load_model
 
 # Downloads on first use; remote publisher code needs a reviewed pinned commit.
-release = load_model("clef-flash", revision="<40-character-commit>",
-                     trust_remote_code=True, device="cuda")
+release = load_model(
+    "clef-flash", revision="<40-character-commit>", trust_remote_code=True, device="cuda"
+)
 # No Hub download for the local checkpoint itself (referenced base models may
 # still need to be cached or downloaded, e.g. Bosun and Kev).
-on_disk = load_model(Path("/models/my-clef-variant"),
-                     family="clef", trust_remote_code=True, device="cuda")
+on_disk = load_model(
+    Path("/models/my-clef-variant"), family="clef", trust_remote_code=True, device="cuda"
+)
 ```
 
 The SDK checks required configs, trained heads/readouts and every weight shard
@@ -454,15 +461,18 @@ from futurix_decision import load_model
 nox = load_model(
     "vllm-sr/Decision-2.0-Nox-4B",
     revision="ae269ecf34a0b3a89026bc1afd9c995279212fad",
-    trust_remote_code=True, device="cuda",
+    trust_remote_code=True,
+    device="cuda",
 )
-print(nox.choice(state="Customer requests a refund",
-                 question="Which team?", choices=["billing", "technical"]).probabilities)
+print(
+    nox.choice(
+        state="Customer requests a refund", question="Which team?", choices=["billing", "technical"]
+    ).probabilities
+)
 del nox
 
 # Run separately if GPU memory is limited; any release also loads from disk.
-lux = load_model(Path("/models/Decision-2.0-Lux-9B"),
-                 trust_remote_code=True, device="cuda")
+lux = load_model(Path("/models/Decision-2.0-Lux-9B"), trust_remote_code=True, device="cuda")
 ```
 
 To check a published checkpoint without retaining its weights, run
@@ -475,11 +485,14 @@ remote and local inference. Liquid d1 additionally checks an image request.
 from futurix_decision import NativeSFTConfig, load_model
 
 clef = load_model(
-    "clef-flash", revision="<40-character-Hub-commit>", trust_remote_code=True,
+    "clef-flash",
+    revision="<40-character-Hub-commit>",
+    trust_remote_code=True,
     device="cuda",
 )
-clef.finetune("decisions.jsonl", "./my-clef",
-              config=NativeSFTConfig(epochs=1, train_backbone=False))
+clef.finetune(
+    "decisions.jsonl", "./my-clef", config=NativeSFTConfig(epochs=1, train_backbone=False)
+)
 
 # OpenJev's helper must be running with the model-card vLLM flags/calibration:
 openjev = load_model("openjev-flash", base_url="http://127.0.0.1:3000")
@@ -523,17 +536,25 @@ rows = load_decisions("examples/data/support_decisions.jsonl")
 model = load_model("bosun-0.6b", dtype=torch.bfloat16, device_map={"": "cuda"})
 before = model.choice(state={"ticket": "Charged twice"}, choices=["billing", "technical"])
 trainer = DecisionTrainer(
-    model=model, dataset=rows[:4],
-    sft_config=SFTConfig(method="lora", epochs=1, batch_size=1, precision="bf16",
-                         lora_rank=4, lora_alpha=8,
-                         lora_target_modules=["q_proj", "v_proj"]),
+    model=model,
+    dataset=rows[:4],
+    sft_config=SFTConfig(
+        method="lora",
+        epochs=1,
+        batch_size=1,
+        precision="bf16",
+        lora_rank=4,
+        lora_alpha=8,
+        lora_target_modules=["q_proj", "v_proj"],
+    ),
 )
 trainer.train(stages=["decision_sft"])
 trainer.export("./checkpoints/bosun-support")
 after = load_model("./checkpoints/bosun-support", device_map={"": "cuda"})
-print(before.probabilities, after.choice(
-    state={"ticket": "Charged twice"}, choices=["billing", "technical"]
-).probabilities)
+print(
+    before.probabilities,
+    after.choice(state={"ticket": "Charged twice"}, choices=["billing", "technical"]).probabilities,
+)
 ```
 
 Native models retain their publisher heads and use the SDK's
@@ -546,9 +567,12 @@ from futurix_decision import NativeSFTConfig, load_decisions, load_model
 rows = load_decisions("examples/data/support_decisions.jsonl")
 model = load_model("laya", device="cuda")
 print(model.noul(state="Invoice paid", question="Was it paid?").probabilities)
-trained = model.finetune(rows, "./checkpoints/laya-support",
-                         config=NativeSFTConfig(epochs=1, batch_size=2),
-                         device="cuda")
+trained = model.finetune(
+    rows,
+    "./checkpoints/laya-support",
+    config=NativeSFTConfig(epochs=1, batch_size=2),
+    device="cuda",
+)
 reloaded = load_model(trained.checkpoint, device="cuda")
 ```
 
@@ -627,9 +651,13 @@ trainer = DecisionTrainer(
     model=model,
     dataset="SargeDev/jev-distill-corpus-v3",
     sft_config=SFTConfig(
-        method="lora", precision="bf16", batch_size=16,
-        gradient_accumulation_steps=2, gradient_checkpointing=True,
-        lora_rank=16, lora_alpha=32,
+        method="lora",
+        precision="bf16",
+        batch_size=16,
+        gradient_accumulation_steps=2,
+        gradient_checkpointing=True,
+        lora_rank=16,
+        lora_alpha=32,
     ),
 )
 history = trainer.train(stages=["decision_sft", "calibration", "rlcd"])
@@ -677,8 +705,11 @@ conversion freezes the backbone by default for head-only SFT; set
 from futurix_decision import DecisionTrainer, SFTConfig, load_model
 
 model = load_model(
-    "HuggingFaceTB/SmolLM2-135M", convert=True, strategy="pointer",
-    max_sequence_length=512, decision_tokens=32,  # maximum options per question
+    "HuggingFaceTB/SmolLM2-135M",
+    convert=True,
+    strategy="pointer",
+    max_sequence_length=512,
+    decision_tokens=32,  # maximum options per question
 )
 trainer = DecisionTrainer(
     model=model,
@@ -710,11 +741,14 @@ calibration, then logit-level RLCD:
 from futurix_decision import DecisionTrainer, RLCDConfig, SFTConfig, load_model
 
 model = load_model(
-    "your-text-causal-LM", convert=True, strategy="letter_code",
+    "your-text-causal-LM",
+    convert=True,
+    strategy="letter_code",
     decision_tokens=255,  # lower this if the tokenizer lacks 255 single-token codes
 )
 trainer = DecisionTrainer(
-    model=model, dataset="decisions.jsonl",
+    model=model,
+    dataset="decisions.jsonl",
     calibration_dataset="heldout.jsonl",
     sft_config=SFTConfig(method="lora", batch_size=1),
     rlcd_config=RLCDConfig(method="lora", batch_size=1, kl_beta=0.0),
@@ -746,11 +780,14 @@ For Bosun-style training on a *plain* LM, select the other strategy:
 
 ```python
 bosun_style = load_model(
-    "HuggingFaceTB/SmolLM2-135M", convert=True, strategy="bosun",
+    "HuggingFaceTB/SmolLM2-135M",
+    convert=True,
+    strategy="bosun",
     max_sequence_length=512,  # fixed 256 decision tokens; at most 255 choices
 )
 trainer = DecisionTrainer(
-    model=bosun_style, dataset="decisions.jsonl",
+    model=bosun_style,
+    dataset="decisions.jsonl",
     sft_config=SFTConfig(method="lora", batch_size=2),
 )
 trainer.train(stages=["decision_sft"])
@@ -777,11 +814,13 @@ prepared = load_model("your-plain-causal-LM", convert=True, strategy="bosun")
 prepared.save_pretrained("./prepared-bosun")  # untrained; includes the new rows
 del prepared
 quantized = load_model(
-    "./prepared-bosun", device_map={"": 0},
+    "./prepared-bosun",
+    device_map={"": 0},
     quantization_config=BitsAndBytesConfig(load_in_4bit=True),
 )
 trainer = DecisionTrainer(
-    model=quantized, dataset="decisions.jsonl",
+    model=quantized,
+    dataset="decisions.jsonl",
     sft_config=SFTConfig(method="qlora", batch_size=2),
 )
 trainer.train(stages=["decision_sft"])
@@ -814,13 +853,16 @@ decoder-only checkpoint:
 from futurix_decision import DecisionModel, DecisionTrainer, SFTConfig
 
 model = DecisionModel.from_pretrained(
-    "your-decoder-checkpoint", head_type="pointer",
-    head_config={"width": 256}, decision_tokens=256,
+    "your-decoder-checkpoint",
+    head_type="pointer",
+    head_config={"width": 256},
+    decision_tokens=256,
 )
 # Optional head-only training (leave the backbone frozen):
 model.backbone.requires_grad_(False)
 trainer = DecisionTrainer(
-    model=model, dataset="decisions.jsonl",
+    model=model,
+    dataset="decisions.jsonl",
     calibration_dataset="heldout.jsonl",
     sft_config=SFTConfig(method="full"),
     checkpoint_dir="./pointer-stages",
@@ -849,6 +891,7 @@ You can supply your own `torch.nn.Module` by registering a trusted factory:
 import torch
 from futurix_decision import DecisionModel, register_decision_head
 
+
 class MyHead(torch.nn.Module):
     def __init__(self, hidden_size: int, width: int = 128):
         super().__init__()
@@ -858,13 +901,13 @@ class MyHead(torch.nn.Module):
     def forward(self, state, options, available):
         # state [batch, hidden], options [batch, candidates, hidden],
         # available [batch, candidates]; return [batch, candidates] logits.
-        return (
-            self.query(state).unsqueeze(1) * self.option(options)
-        ).sum(dim=-1)
+        return (self.query(state).unsqueeze(1) * self.option(options)).sum(dim=-1)
+
 
 register_decision_head("my_head", MyHead)
 model = DecisionModel.from_pretrained(
-    "your-decoder-checkpoint", head_type="my_head",
+    "your-decoder-checkpoint",
+    head_type="my_head",
     head_config={"width": 128},
 )
 ```
@@ -1029,10 +1072,15 @@ trainer = DecisionTrainer(
     model=model,
     dataset="decisions.jsonl",  # or "SargeDev/jev-distill-corpus-v3"
     sft_config=SFTConfig(
-        method="lora", epochs=1, batch_size=16,
-        gradient_accumulation_steps=2, learning_rate=1e-4,
-        precision="bf16", gradient_checkpointing=True,
-        lora_rank=16, lora_alpha=32,
+        method="lora",
+        epochs=1,
+        batch_size=16,
+        gradient_accumulation_steps=2,
+        learning_rate=1e-4,
+        precision="bf16",
+        gradient_checkpointing=True,
+        lora_rank=16,
+        lora_alpha=32,
     ),
 )
 history = trainer.train(stages=["decision_sft"])
@@ -1103,9 +1151,12 @@ from futurix_decision import RLCDTrainer
 from futurix_decision.rewards import LogScore, SphericalScore
 
 trainer = RLCDTrainer(
-    model, group_size=8, noise_sigma=0.25,
+    model,
+    group_size=8,
+    noise_sigma=0.25,
     rewards=[LogScore(weight=1.0), SphericalScore(weight=0.5)],
-    sft_weight=0.2, kl_beta=0.01,
+    sft_weight=0.2,
+    kl_beta=0.01,
 )
 history = trainer.train(training_dataset)
 ```
@@ -1134,10 +1185,12 @@ print(result.to_dict())  # decision, confidence, probabilities, abstained, laten
 
 binary = model.noul(state="The certificate is current.", question="Can it be approved?")
 ordinal = model.score(state="Claim details", question="Rate reliability, 0 to 5.")
-many = model.batch_choice([
-    {"state": "First case", "choices": ["approve", "reject"]},
-    {"state": "Second case", "choices": ["request_document", "escalate"]},
-])  # one padded transformer forward pass for the batch
+many = model.batch_choice(
+    [
+        {"state": "First case", "choices": ["approve", "reject"]},
+        {"state": "Second case", "choices": ["request_document", "escalate"]},
+    ]
+)  # one padded transformer forward pass for the batch
 ```
 
 `noul` returns a boolean decision; `score` returns an integer level. Any type

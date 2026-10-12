@@ -29,15 +29,23 @@ def fit_temperature_from_logits(
             raise ValueError("logits must be finite and targets non-negative finite")
         if not torch.isclose(y.float().sum(), torch.tensor(1.0), atol=1e-5):
             raise ValueError("targets must sum to 1")
-    padded_logits = pad_sequence([z.detach().float().cpu() for z in logits], batch_first=True, padding_value=-1e9)
+    padded_logits = pad_sequence(
+        [z.detach().float().cpu() for z in logits], batch_first=True, padding_value=-1e9
+    )
     padded_targets = pad_sequence([y.detach().float().cpu() for y in targets], batch_first=True)
     log_t = torch.zeros((), requires_grad=True)
-    optimizer = torch.optim.LBFGS([log_t], lr=0.25, max_iter=max_iter, line_search_fn="strong_wolfe")
+    optimizer = torch.optim.LBFGS(
+        [log_t], lr=0.25, max_iter=max_iter, line_search_fn="strong_wolfe"
+    )
 
     def closure() -> torch.Tensor:
         optimizer.zero_grad()
         temperature = log_t.exp().clamp(min=0.05, max=20.0)
-        loss = -(padded_targets * F.log_softmax(padded_logits / temperature, dim=-1)).sum(dim=-1).mean()
+        loss = (
+            -(padded_targets * F.log_softmax(padded_logits / temperature, dim=-1))
+            .sum(dim=-1)
+            .mean()
+        )
         loss.backward()
         return loss
 

@@ -4,4 +4,10 @@ from futurix_decision.rewards.log_score import LogScore
 from futurix_decision.rewards.ranked_probability import RankedProbabilityScore
 from futurix_decision.rewards.spherical import SphericalScore
 
-__all__ = ["ProperScoringRule", "BrierScore", "LogScore", "RankedProbabilityScore", "SphericalScore"]
+__all__ = [
+    "ProperScoringRule",
+    "BrierScore",
+    "LogScore",
+    "RankedProbabilityScore",
+    "SphericalScore",
+]

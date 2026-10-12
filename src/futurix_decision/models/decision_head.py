@@ -22,7 +22,9 @@ def assign_slots(options: Sequence[str], *, total_slots: int = 256, seed: int = 
 
 
 def mask_unavailable_slots(
-    logits: torch.Tensor, assigned_slots: Sequence[Sequence[int]], *,
+    logits: torch.Tensor,
+    assigned_slots: Sequence[Sequence[int]],
+    *,
     null_slot: int | None = None,
 ) -> torch.Tensor:
     """Keep assigned candidate slots and, when enabled, the reserved null slot."""

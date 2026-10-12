@@ -32,8 +32,15 @@ EXTRAS = {
     "liquid-d1": ("LiquidAI/d1-3B", "051bcc464b01b9f92942b364d9586b0ef5912432"),
 }
 EARLIER = (
-    "bosun-0.6b", "bosun-1.7b", "kev", "laya", "laya-multilingual",
-    "gliner", "clef", "clef-flash", "pplx-decider",
+    "bosun-0.6b",
+    "bosun-1.7b",
+    "kev",
+    "laya",
+    "laya-multilingual",
+    "gliner",
+    "clef",
+    "clef-flash",
+    "pplx-decider",
 )
 RAW_CONVERSIONS = {
     "qwen3.5-9b": ("Qwen/Qwen3.5-9B", "c202236235762e1c871ad0ccb60c8ee5ba337b9a"),
@@ -63,32 +70,54 @@ def _check_release(name: str, device: str, base_url: str | None, precision: str)
     )
     if name in RAW_CONVERSIONS:
         model = load_model(
-            checkpoint, convert=True, head_type="pointer", revision=revision,
-            dtype=dtype, device_map={"": device}, max_sequence_length=512,
+            checkpoint,
+            convert=True,
+            head_type="pointer",
+            revision=revision,
+            dtype=dtype,
+            device_map={"": device},
+            max_sequence_length=512,
         )
     elif name.startswith("openjev"):
         # OpenJev's SDK readout requires the publisher's calibrated helper.
         model = load_model(checkpoint, base_url=base_url) if base_url else load_model(checkpoint)
     elif name in ("decider-4b", "jpt-4b", "jpt-9b", "eikos-4b", "eikos-27b"):
         method = (
-            "from_decider" if name == "decider-4b"
-            else "from_jpt" if name.startswith("jpt") else "from_eikos"
+            "from_decider"
+            if name == "decider-4b"
+            else "from_jpt"
+            if name.startswith("jpt")
+            else "from_eikos"
         )
         model = getattr(DecisionModel, method)(
-            checkpoint, revision=revision, dtype=dtype,
-            device_map={"": device}, max_sequence_length=512,
+            checkpoint,
+            revision=revision,
+            dtype=dtype,
+            device_map={"": device},
+            max_sequence_length=512,
         )
     elif name.startswith("bosun"):
         model = load_model(
-            checkpoint, dtype=dtype, device_map={"": device},
+            checkpoint,
+            dtype=dtype,
+            device_map={"": device},
             max_sequence_length=512,
         )
     else:
         model = load_model(
-            checkpoint, device=device, revision=revision,
-            trust_remote_code=name in (
-                "clef", "clef-flash", "pplx-decider", "nox-1", "nox-2",
-                "lux-1", "lux-2", "liquid-d1",
+            checkpoint,
+            device=device,
+            revision=revision,
+            trust_remote_code=name
+            in (
+                "clef",
+                "clef-flash",
+                "pplx-decider",
+                "nox-1",
+                "nox-2",
+                "lux-1",
+                "lux-2",
+                "liquid-d1",
             ),
             **({"dtype": dtype, "merge": False} if name == "kev" else {}),
         )
@@ -106,10 +135,13 @@ def _check_release(name: str, device: str, base_url: str | None, precision: str)
 
         image_result = model.system_one(
             None,
-            {"color": {
-                "type": "choice", "instructions": "What color is the image?",
-                "criteria": {"red": "Red image", "blue": "Blue image"},
-            }},
+            {
+                "color": {
+                    "type": "choice",
+                    "instructions": "What color is the image?",
+                    "criteria": {"red": "Red image", "blue": "Blue image"},
+                }
+            },
             images=[Image.new("RGB", (64, 64), "red")],
         )
         assert set(image_result["answers"]) == {"color"}
@@ -126,7 +158,10 @@ def _check_release(name: str, device: str, base_url: str | None, precision: str)
             torch.cuda.empty_cache()
         local_model = load_model(directory, device=device, trust_remote_code=True)
         show_inference(local_model)
-        print(f"PASS: {checkpoint} reloaded from a local directory and answered all four probes", flush=True)
+        print(
+            f"PASS: {checkpoint} reloaded from a local directory and answered all four probes",
+            flush=True,
+        )
 
 
 def main() -> None:
@@ -150,11 +185,19 @@ def main() -> None:
             f"{args.model} needs at least {required_gib} GiB scratch space; "
             f"{args.scratch} has {available_gib:.1f} GiB free"
         )
-    with tempfile.TemporaryDirectory(prefix=f"futurix-check-{args.model}-", dir=args.scratch) as scratch:
+    with tempfile.TemporaryDirectory(
+        prefix=f"futurix-check-{args.model}-", dir=args.scratch
+    ) as scratch:
         environment = dict(os.environ, HF_HOME=str(Path(scratch) / "hf"))
         command = [
-            sys.executable, str(Path(__file__).resolve()), args.model,
-            "--worker", "--device", device, "--precision", args.precision,
+            sys.executable,
+            str(Path(__file__).resolve()),
+            args.model,
+            "--worker",
+            "--device",
+            device,
+            "--precision",
+            args.precision,
         ]
         if args.base_url:
             command.extend(["--base-url", args.base_url])

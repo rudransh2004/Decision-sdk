@@ -37,8 +37,17 @@ def infer_local_family(directory: Path) -> str | None:
     manifest = directory / "futurix_native.json"
     if manifest.is_file():
         family = read_checkpoint_json(manifest).get("family")
-        if family not in {"kev", "laya", "gliner", "clef", "pplx-decider",
-                          "openjev", "nox", "lux", "liquid-d1"}:
+        if family not in {
+            "kev",
+            "laya",
+            "gliner",
+            "clef",
+            "pplx-decider",
+            "openjev",
+            "nox",
+            "lux",
+            "liquid-d1",
+        }:
             raise ValueError(f"unknown native family in {manifest}: {family!r}")
         return family
     decision_config = directory / "decision_config.json"
@@ -83,16 +92,23 @@ def infer_local_family(directory: Path) -> str | None:
     if card.is_file() and "# JPT-" in card.read_text(encoding="utf-8", errors="replace")[:4096]:
         return "jpt"
     for family in FAMILIES:
-        if any(directory.name == checkpoint.rsplit("/", 1)[-1]
-               for checkpoint in family.supported_checkpoints):
-            return family.name if family.name != "encoder" else (
-                "gliner" if directory.name == "GLiNER2.5-Decide" else "laya"
+        if any(
+            directory.name == checkpoint.rsplit("/", 1)[-1]
+            for checkpoint in family.supported_checkpoints
+        ):
+            return (
+                family.name
+                if family.name != "encoder"
+                else ("gliner" if directory.name == "GLiNER2.5-Decide" else "laya")
             )
     return None
 
 
 def require_checkpoint_files(
-    directory: Path, family: str, *, source: str | None = None,
+    directory: Path,
+    family: str,
+    *,
+    source: str | None = None,
 ) -> None:
     """Check the native readout and complete local weight set before loading.
 
@@ -121,8 +137,12 @@ def require_checkpoint_files(
             index = directory / index_name
             if index.is_file():
                 files = read_checkpoint_json(index).get("weight_map")
-                if not isinstance(files, dict) or not files or not all(
-                    isinstance(filename, str) and filename for filename in files.values()
+                if (
+                    not isinstance(files, dict)
+                    or not files
+                    or not all(
+                        isinstance(filename, str) and filename for filename in files.values()
+                    )
                 ):
                     raise ValueError(f"invalid weight_map in {index}")
                 for filename in sorted(set(files.values())):
@@ -131,8 +151,12 @@ def require_checkpoint_files(
         one_of("model.safetensors", "pytorch_model.bin", "model.safetensors.index.json")
 
     if family == "clef":
-        for filename in ("config.json", "joint_schema_model.py",
-                         "joint_head_config.json", "joint_head.safetensors"):
+        for filename in (
+            "config.json",
+            "joint_schema_model.py",
+            "joint_head_config.json",
+            "joint_head.safetensors",
+        ):
             require(filename)
         one_of("tokenizer.json", "tokenizer.model", "vocab.json")
         weights()
@@ -159,7 +183,9 @@ def require_checkpoint_files(
         require("config.json")
         if (directory / "config.json").is_file():
             config = read_checkpoint_json(directory / "config.json")
-            require(str(config.get("decision_embeddings_file") or "decision_embeddings.safetensors"))
+            require(
+                str(config.get("decision_embeddings_file") or "decision_embeddings.safetensors")
+            )
             adapter = str(config.get("adapter_subfolder") or "adapter")
             tokenizer = str(config.get("tokenizer_subfolder") or "tokenizer")
             require(f"{adapter}/adapter_config.json")
@@ -207,26 +233,44 @@ def require_checkpoint_files(
             for field in ("model_config", "manifest") if version == 2 else ("model_config",):
                 filename = config.get(field)
                 if not isinstance(filename, str) or not filename:
-                    raise ValueError(f"Decision {version} checkpoint is missing {field}: {directory}")
+                    raise ValueError(
+                        f"Decision {version} checkpoint is missing {field}: {directory}"
+                    )
                 require(filename)
             head = config.get("decision_weights")
             backbone = config.get("backbone")
             tokenizer = config.get("tokenizer")
-            if not isinstance(head, dict) or not isinstance(backbone, dict) or not isinstance(tokenizer, dict):
-                raise ValueError(f"Decision {version} checkpoint is missing head/backbone/tokenizer metadata: {directory}")
+            if (
+                not isinstance(head, dict)
+                or not isinstance(backbone, dict)
+                or not isinstance(tokenizer, dict)
+            ):
+                raise ValueError(
+                    f"Decision {version} checkpoint is missing head/backbone/tokenizer metadata: {directory}"
+                )
             for field, section in (
-                ("decision_head", head), ("config", backbone), ("index", backbone),
-                ("json", tokenizer), ("config", tokenizer), ("chat_template", tokenizer),
+                ("decision_head", head),
+                ("config", backbone),
+                ("index", backbone),
+                ("json", tokenizer),
+                ("config", tokenizer),
+                ("chat_template", tokenizer),
             ):
                 filename = section.get(field)
                 if not isinstance(filename, str) or not filename:
-                    raise ValueError(f"Decision {version} checkpoint is missing {field} metadata: {directory}")
+                    raise ValueError(
+                        f"Decision {version} checkpoint is missing {field} metadata: {directory}"
+                    )
                 require(filename)
             filenames = backbone.get("weights")
-            if not isinstance(filenames, list) or not filenames or not all(
-                isinstance(filename, str) and filename for filename in filenames
+            if (
+                not isinstance(filenames, list)
+                or not filenames
+                or not all(isinstance(filename, str) and filename for filename in filenames)
             ):
-                raise ValueError(f"Decision {version} checkpoint has no backbone shard list: {directory}")
+                raise ValueError(
+                    f"Decision {version} checkpoint has no backbone shard list: {directory}"
+                )
             for filename in filenames:
                 require(filename)
             index = directory / backbone["index"]
@@ -249,9 +293,17 @@ def require_checkpoint_files(
                 require(filename)
     elif family == "liquid-d1":
         for filename in (
-            "config.json", "modeling_d1.py", "lfm2_vl.py", "runner.py",
-            "hybrid.py", "api.py", "prompt.py", "tokenizer.json",
-            "tokenizer_config.json", "processor_config.json", "chat_template.jinja",
+            "config.json",
+            "modeling_d1.py",
+            "lfm2_vl.py",
+            "runner.py",
+            "hybrid.py",
+            "api.py",
+            "prompt.py",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "processor_config.json",
+            "chat_template.jinja",
         ):
             require(filename)
         weights()

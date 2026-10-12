@@ -55,11 +55,14 @@ The *same* dataset API applies to every strategy. Example `decisions.jsonl`:
 from futurix_decision import DecisionTrainer, SFTConfig, load_model
 
 model = load_model(
-    "HuggingFaceTB/SmolLM2-135M", convert=True,
-    strategy="pointer", decision_tokens=16,
+    "HuggingFaceTB/SmolLM2-135M",
+    convert=True,
+    strategy="pointer",
+    decision_tokens=16,
 )
 trainer = DecisionTrainer(
-    model=model, dataset="decisions.jsonl",
+    model=model,
+    dataset="decisions.jsonl",
     sft_config=SFTConfig(method="full", batch_size=2),
 )
 trainer.train(stages=["decision_sft"])
@@ -71,12 +74,16 @@ To select another readout, change only the conversion call (and re-train):
 
 ```python
 bosun_style = load_model(
-    "your-org/text-causal-lm", convert=True, strategy="bosun",
+    "your-org/text-causal-lm",
+    convert=True,
+    strategy="bosun",
 )  # always adds 256 tokens; use an unquantized base
 
 fixed_codes = load_model(
-    "your-org/text-causal-lm", convert=True,
-    strategy="letter_code", decision_tokens=8,
+    "your-org/text-causal-lm",
+    convert=True,
+    strategy="letter_code",
+    decision_tokens=8,
 )  # tokenizer must have eight usable single-token codes
 ```
 

@@ -20,14 +20,28 @@ from test_decider import make_native
 def make_eikos(path: Path):
     make_native(path)
     (path / "decider_config.json").unlink()
-    (path / "decision_config.json").write_text(json.dumps({
-        "prompt_version": "letter-v1-semif", "readout": "letter-logit",
-        "max_one_pass": 100, "calib": "calib.json",
-    }))
-    (path / "calib.json").write_text(json.dumps({
-        "mode": "T1", "t_global": 1.0, "b": 0, "w": [0, 0, 0, 0],
-    }))
+    (path / "decision_config.json").write_text(
+        json.dumps(
+            {
+                "prompt_version": "letter-v1-semif",
+                "readout": "letter-logit",
+                "max_one_pass": 100,
+                "calib": "calib.json",
+            }
+        )
+    )
+    (path / "calib.json").write_text(
+        json.dumps(
+            {
+                "mode": "T1",
+                "t_global": 1.0,
+                "b": 0,
+                "w": [0, 0, 0, 0],
+            }
+        )
+    )
     from transformers import AutoTokenizer
+
     tokenizer = AutoTokenizer.from_pretrained(path)
     tokenizer.chat_template = (
         "{% for m in messages %}{{ m['role'] }}: {{ m['content'] }}\n"
@@ -51,33 +65,35 @@ class EikosTests(unittest.TestCase):
             self.assertNotIn("BQ", names)
             self.assertEqual(len(ids), 100)
             row = DecisionInput(
-                kind="noul", state={"policy": "valid"}, question="Valid?",
+                kind="noul",
+                state={"policy": "valid"},
+                question="Valid?",
                 options=["false", "true"],
             )
-            tokens, selected, order = prepare_eikos_row(
-                row, model.tokenizer, max_options=100
-            )
+            tokens, selected, order = prepare_eikos_row(row, model.tokenizer, max_options=100)
             self.assertEqual(selected, ids[:2])
             self.assertEqual(order, [1, 0])
             self.assertGreater(len(tokens), 0)
             labelled = DecisionInput(
-                state="review", question="Next?", options=["c000", "c001"],
+                state="review",
+                question="Next?",
+                options=["c000", "c001"],
                 candidate_ids=["c000", "c001"],
                 candidate_labels=["Reject", "Approve"],
                 candidate_descriptions=["No action", "Finish work"],
             )
-            with patch.object(model.tokenizer, "apply_chat_template",
-                              wraps=model.tokenizer.apply_chat_template) as render:
+            with patch.object(
+                model.tokenizer, "apply_chat_template", wraps=model.tokenizer.apply_chat_template
+            ) as render:
                 prepare_eikos_row(labelled, model.tokenizer, max_options=100)
             payload = json.loads(render.call_args.args[0][1]["content"])
-            self.assertEqual(
-                payload["options"][1]["description"], "c001: Approve — Finish work"
-            )
+            self.assertEqual(payload["options"][1]["description"], "c001: Approve — Finish work")
             inputs = [
                 row,
                 DecisionInput(state="review", question="Next?", options=["approve", "reject"]),
-                DecisionInput(kind="score", state="review", question="Rate",
-                              options=["0", "1", "2"]),
+                DecisionInput(
+                    kind="score", state="review", question="Rate", options=["0", "1", "2"]
+                ),
             ]
             expected = model.batch_decide(inputs)
             self.assertIsInstance(expected[0].decision, bool)
@@ -93,9 +109,11 @@ class EikosTests(unittest.TestCase):
                     )
             with self.assertRaisesRegex(ValueError, "at most 100 options"):
                 prepare_eikos_row(
-                    DecisionInput(state="review", question="Pick",
-                                  options=[f"option {i}" for i in range(101)]),
-                    model.tokenizer, max_options=100,
+                    DecisionInput(
+                        state="review", question="Pick", options=[f"option {i}" for i in range(101)]
+                    ),
+                    model.tokenizer,
+                    max_options=100,
                 )
 
     def test_vllm_reads_one_prefill_and_remaps_true_first(self):
@@ -114,10 +132,22 @@ class EikosTests(unittest.TestCase):
             class FakeLLM:
                 def generate(self, prompts, params, use_tqdm=False):
                     assert len(prompts) == 1
-                    return [SimpleNamespace(outputs=[SimpleNamespace(logprobs=[{
-                        token: SimpleNamespace(logprob=math.log(p))
-                        for token, p in zip(params[0].allowed_token_ids, [0.8, 0.2])
-                    }])])]
+                    return [
+                        SimpleNamespace(
+                            outputs=[
+                                SimpleNamespace(
+                                    logprobs=[
+                                        {
+                                            token: SimpleNamespace(logprob=math.log(p))
+                                            for token, p in zip(
+                                                params[0].allowed_token_ids, [0.8, 0.2]
+                                            )
+                                        }
+                                    ]
+                                )
+                            ]
+                        )
+                    ]
 
             with patch.dict(sys.modules, {"vllm": SimpleNamespace(SamplingParams=SamplingParams)}):
                 engine = VLLMEngine(output, llm=FakeLLM(), tokenizer=model.tokenizer)
@@ -137,16 +167,34 @@ class EikosTrainingTests(unittest.TestCase):
             source.mkdir()
             make_eikos(source)
             dataset = root / "rows.jsonl"
-            dataset.write_text(json.dumps(DecisionExample(
-                id="x", state="review", question="Next?",
-                options=["approve", "reject"], target="approve",
-            ).model_dump()) + "\n")
+            dataset.write_text(
+                json.dumps(
+                    DecisionExample(
+                        id="x",
+                        state="review",
+                        question="Next?",
+                        options=["approve", "reject"],
+                        target="approve",
+                    ).model_dump()
+                )
+                + "\n"
+            )
             output = root / "export"
-            main([
-                "train", "--model", str(source), "--model-format", "eikos",
-                "--dataset", str(dataset), "--output", str(output),
-                "--method", "sft",
-            ])
+            main(
+                [
+                    "train",
+                    "--model",
+                    str(source),
+                    "--model-format",
+                    "eikos",
+                    "--dataset",
+                    str(dataset),
+                    "--output",
+                    str(output),
+                    "--method",
+                    "sft",
+                ]
+            )
             self.assertIsInstance(DecisionModel.from_pretrained(output), EikosDecisionModel)
 
     def test_sft_preserves_the_trained_letter_readout(self):
@@ -157,10 +205,15 @@ class EikosTrainingTests(unittest.TestCase):
             model = DecisionModel.from_eikos(source, max_sequence_length=512)
             trainer = DecisionTrainer(
                 model=model,
-                dataset=[DecisionExample(
-                    id="x", state="review", question="Next?",
-                    options=["approve", "reject"], target="approve",
-                )],
+                dataset=[
+                    DecisionExample(
+                        id="x",
+                        state="review",
+                        question="Next?",
+                        options=["approve", "reject"],
+                        target="approve",
+                    )
+                ],
                 sft_config=SFTConfig(method="full", batch_size=1),
             )
             trainer.train(stages=["decision_sft"])

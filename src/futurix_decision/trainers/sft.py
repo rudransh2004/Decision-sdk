@@ -21,12 +21,7 @@ from futurix_decision.trainers.losses import LossMode, decision_sft_loss
 from futurix_decision.utils.logging import TrainingLogger
 
 FineTuneMethod = Literal["full", "lora", "qlora"]
-DatasetSource = (
-    str
-    | Path
-    | Mapping[str, Any]
-    | Iterable[DecisionExample | Mapping[str, Any]]
-)
+DatasetSource = str | Path | Mapping[str, Any] | Iterable[DecisionExample | Mapping[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -92,9 +87,7 @@ def _canonical_rows(source: DatasetSource) -> Iterator[DecisionExample]:
             raise ValueError(f"row {index}: expected a DecisionExample or mapping")
 
 
-def _representative_rows(
-    source: DatasetSource, *, count: int, seed: int
-) -> list[DecisionExample]:
+def _representative_rows(source: DatasetSource, *, count: int, seed: int) -> list[DecisionExample]:
     """Choose an order-independent, reproducible subset across the entire split."""
     heap: list[tuple[int, int, DecisionExample]] = []
     for index, row in enumerate(_canonical_rows(source)):
@@ -112,9 +105,7 @@ def _representative_rows(
 
 
 class _StreamingDecisions(IterableDataset):
-    def __init__(
-        self, source: DatasetSource, max_examples: int | None = None, seed: int = 42
-    ):
+    def __init__(self, source: DatasetSource, max_examples: int | None = None, seed: int = 42):
         self.source = source
         self.max_examples = max_examples
         self.seed = seed
@@ -123,9 +114,7 @@ class _StreamingDecisions(IterableDataset):
         if self.max_examples is None:
             yield from _canonical_rows(self.source)
         else:
-            yield from _representative_rows(
-                self.source, count=self.max_examples, seed=self.seed
-            )
+            yield from _representative_rows(self.source, count=self.max_examples, seed=self.seed)
 
 
 def _collate(rows: list[DecisionExample]) -> list[DecisionExample]:
@@ -166,8 +155,10 @@ class SFTTrainer:
                     "use a single-device model or a distributed training setup"
                 )
         existing_adapter = bool(getattr(backbone, "peft_config", None))
-        if self.model.prompt_format == "bosun-v3" and existing_adapter and not getattr(
-            self.model, "_bosun_continuation_prepared", False
+        if (
+            self.model.prompt_format == "bosun-v3"
+            and existing_adapter
+            and not getattr(self.model, "_bosun_continuation_prepared", False)
         ):
             if quantized:
                 raise ValueError("merge the original Bosun adapter before 4-bit continuation")
@@ -180,10 +171,10 @@ class SFTTrainer:
             self.model._bosun_continuation_prepared = True
             existing_adapter = False
         if existing_adapter and method == "full":
-            raise ValueError("cannot full-fine-tune a PEFT adapter; use its current LoRA/QLoRA method")
-        if existing_adapter and not any(
-            param.requires_grad for param in backbone.parameters()
-        ):
+            raise ValueError(
+                "cannot full-fine-tune a PEFT adapter; use its current LoRA/QLoRA method"
+            )
+        if existing_adapter and not any(param.requires_grad for param in backbone.parameters()):
             raise ValueError(
                 "the loaded PEFT adapter is frozen; reload with "
                 "DecisionModel.from_pretrained(..., trainable_adapter=True)"
@@ -214,15 +205,20 @@ class SFTTrainer:
         if not tied and self.model.decision_head is None:
             if not isinstance(output_embedding, torch.nn.Linear):
                 raise ValueError("untied output embeddings must be a linear module for LoRA")
-            names = [name for name, module in backbone.named_modules() if module is output_embedding]
+            names = [
+                name for name, module in backbone.named_modules() if module is output_embedding
+            ]
             if len(names) != 1:
                 raise ValueError("could not identify the LM's output projection")
             # The new decision rows in an untied output projection must be
             # learnable and must be retained with the adapter.
             modules_to_save = names
         trainable_indices = (
-            self.model._token_ids if self.model.decision_head is None else
-            [self.model._marker_id] if self.model._marker_id is not None else None
+            self.model._token_ids
+            if self.model.decision_head is None
+            else [self.model._marker_id]
+            if self.model._marker_id is not None
+            else None
         )
         adapter = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
@@ -266,7 +262,9 @@ class SFTTrainer:
             collate_fn=_collate,
         )
 
-    def compute_loss(self, batch: DecisionBatch, examples: Sequence[DecisionExample]) -> torch.Tensor:
+    def compute_loss(
+        self, batch: DecisionBatch, examples: Sequence[DecisionExample]
+    ) -> torch.Tensor:
         return decision_sft_loss(
             batch,
             examples,

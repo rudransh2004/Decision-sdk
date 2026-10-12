@@ -58,12 +58,17 @@ def token_budget_batches(
             prompt, _ = model._prompt_and_slots(row, None)
         elif model.prompt_format == "bosun-v3":
             prompt, _ = format_bosun_prompt(
-                row, model.tokenizer, decision_tokens=model.decision_tokens,
-                seed=model.seed, prompt_schema=model.prompt_schema,
+                row,
+                model.tokenizer,
+                decision_tokens=model.decision_tokens,
+                seed=model.seed,
+                prompt_schema=model.prompt_schema,
             )
         else:
             prompt, _ = format_decision_prompt(
-                row, decision_tokens=model.decision_tokens, seed=model.seed,
+                row,
+                decision_tokens=model.decision_tokens,
+                seed=model.seed,
             )
         length = len(model.tokenizer.encode(prompt, add_special_tokens=True))
         if pending and (
@@ -157,7 +162,9 @@ def evaluate(
                         saved = json.loads(line)
                     except (json.JSONDecodeError, UnicodeDecodeError) as error:
                         if stream.read(1):
-                            raise ValueError("evaluation journal has a corrupt nonfinal row") from error
+                            raise ValueError(
+                                "evaluation journal has a corrupt nonfinal row"
+                            ) from error
                         # An interrupted append can leave only the last row
                         # incomplete. Keep every preceding complete response.
                         stream.truncate(position)
@@ -196,27 +203,43 @@ def evaluate(
         for examples in batches:
             if isinstance(model, DecisionModel):
                 predictions = (
-                    (row, torch.softmax(batch.logits[i, slots].float() / model.temperature, dim=-1).cpu())
+                    (
+                        row,
+                        torch.softmax(
+                            batch.logits[i, slots].float() / model.temperature, dim=-1
+                        ).cpu(),
+                    )
                     for subset, batch in _inference_batches(model, examples)
                     for i, (row, slots) in enumerate(zip(subset, batch.slots))
                 )
             else:
                 decisions = model.batch_decide(examples)
                 predictions = (
-                    (row, torch.tensor(
-                        [result.probabilities[option] for option in row.options],
-                        dtype=torch.float32,
-                    ))
+                    (
+                        row,
+                        torch.tensor(
+                            [result.probabilities[option] for option in row.options],
+                            dtype=torch.float32,
+                        ),
+                    )
                     for row, result in zip(examples, decisions)
                 )
             for row, p in predictions:
                 y = torch.tensor(row.target_distribution(), dtype=torch.float32)
                 record(row, p, y)
                 if stream is not None:
-                    stream.write(json.dumps({
-                        "id": row.id, "options": row.options,
-                        "probabilities": p.tolist(), "target": y.tolist(),
-                    }, allow_nan=False) + "\n")
+                    stream.write(
+                        json.dumps(
+                            {
+                                "id": row.id,
+                                "options": row.options,
+                                "probabilities": p.tolist(),
+                                "target": y.tolist(),
+                            },
+                            allow_nan=False,
+                        )
+                        + "\n"
+                    )
             if stream is not None:
                 stream.flush()
             if progress_every and len(predicted) >= next_progress:

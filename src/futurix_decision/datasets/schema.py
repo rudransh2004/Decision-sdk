@@ -86,7 +86,9 @@ class DecisionInput(BaseModel):
             values = getattr(self, name)
             if values is not None and len(values) != len(self.options):
                 raise ValueError(f"{name} must align with options")
-        if self.candidate_ids is not None and len(set(self.candidate_ids)) != len(self.candidate_ids):
+        if self.candidate_ids is not None and len(set(self.candidate_ids)) != len(
+            self.candidate_ids
+        ):
             raise ValueError("candidate_ids must be unique")
         if self.kind == "noul" and self.options != ["false", "true"]:
             if not self.preserve_order or self.candidate_ids is None or len(self.options) != 2:
@@ -145,7 +147,9 @@ class DecisionExample(DecisionInput):
                 raise ValueError("target probabilities must be finite and in [0, 1]")
             if not math.isclose(sum(values), 1.0, abs_tol=1e-5, rel_tol=0):
                 raise ValueError("target probabilities must sum to 1")
-            return values + [0.0] if include_abstain and len(values) == len(self.options) else values
+            return (
+                values + [0.0] if include_abstain and len(values) == len(self.options) else values
+            )
 
         label = self.target
         if isinstance(label, bool):

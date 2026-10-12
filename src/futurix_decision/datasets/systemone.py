@@ -15,7 +15,9 @@ from typing import Any
 def _description(value: Any) -> str:
     if value is None:
         return ""
-    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return (
+        value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    )
 
 
 def expand_systemone_row(row: Mapping[str, Any], *, index: int) -> Iterator[dict[str, Any]]:
@@ -84,7 +86,9 @@ def expand_systemone_row(row: Mapping[str, Any], *, index: int) -> Iterator[dict
             elif "target" in target:
                 target = target["target"]
         if kind == "score" and isinstance(target, float) and not target.is_integer():
-            raise ValueError("score training needs a level label or a distribution, not a mean score")
+            raise ValueError(
+                "score training needs a level label or a distribution, not a mean score"
+            )
         instructions = question.get("instructions") or question_id
         yield {
             "id": f"{group_id}:{question_id}",

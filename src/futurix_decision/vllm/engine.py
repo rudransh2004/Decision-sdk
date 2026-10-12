@@ -55,7 +55,11 @@ class VLLMEngine:
         self.max_sequence_length = int(metadata.get("max_sequence_length", 1024))
         self.prompt_format = metadata.get("prompt_format", "futurix")
         self.prompt_schema = metadata.get("prompt_schema", BOSUN_PROMPT_SCHEMA)
-        if not 2 <= self.decision_tokens <= 256 or not math.isfinite(self.temperature) or self.temperature <= 0:
+        if (
+            not 2 <= self.decision_tokens <= 256
+            or not math.isfinite(self.temperature)
+            or self.temperature <= 0
+        ):
             raise ValueError("invalid decision token count or calibration temperature")
         self.tokenizer = tokenizer or AutoTokenizer.from_pretrained(str(checkpoint))
         if self.prompt_format == DECIDER_FORMAT:
@@ -86,7 +90,9 @@ class VLLMEngine:
             try:
                 from vllm import LLM
             except ImportError as exc:
-                raise ImportError("vLLM serving requires pip install futurix-decision[vllm]") from exc
+                raise ImportError(
+                    "vLLM serving requires pip install futurix-decision[vllm]"
+                ) from exc
             # Current GPU workers compute top-k logprobs and do not honor
             # logprob_token_ids. Restricted processed logits make top-k cover
             # *every* candidate without transferring the full LM vocabulary.
@@ -135,17 +141,22 @@ class VLLMEngine:
             else:
                 if self.prompt_format == "bosun-v3":
                     prompt, slots = format_bosun_prompt(
-                        example, self.tokenizer, decision_tokens=self.decision_tokens,
-                        seed=self.seed, prompt_schema=self.prompt_schema,
+                        example,
+                        self.tokenizer,
+                        decision_tokens=self.decision_tokens,
+                        seed=self.seed,
+                        prompt_schema=self.prompt_schema,
                     )
                 else:
                     prompt, slots = format_decision_prompt(
                         example, decision_tokens=self.decision_tokens, seed=self.seed
                     )
-                prepared = [(
-                    self.tokenizer.encode(prompt, add_special_tokens=True),
-                    [self._token_ids[slot] for slot in slots],
-                )]
+                prepared = [
+                    (
+                        self.tokenizer.encode(prompt, add_special_tokens=True),
+                        [self._token_ids[slot] for slot in slots],
+                    )
+                ]
                 orders.append(list(range(len(example.options))))
             group_sizes.append(len(prepared))
             for ids, selected_ids in prepared:
@@ -174,26 +185,28 @@ class VLLMEngine:
             row_probabilities = []
             score_log_fits = []
             for selected_ids, generated in zip(
-                slots_list[cursor:cursor + count], output[cursor:cursor + count]
+                slots_list[cursor : cursor + count], output[cursor : cursor + count]
             ):
                 token_logprobs = generated.outputs[0].logprobs
                 if not token_logprobs:
                     raise ValueError("vLLM returned no decision logprobs")
                 temp = (
-                    self.type_temperatures[row.kind] * (
-                        self.temperature if row.kind != "score" else 1.0
-                    )
-                    if self.prompt_format == DECIDER_FORMAT else self.temperature
+                    self.type_temperatures[row.kind]
+                    * (self.temperature if row.kind != "score" else 1.0)
+                    if self.prompt_format == DECIDER_FORMAT
+                    else self.temperature
                 )
                 row_probabilities.append(
-                    probabilities_from_logprobs(
-                        token_logprobs[0], selected_ids, temperature=temp
-                    )
+                    probabilities_from_logprobs(token_logprobs[0], selected_ids, temperature=temp)
                 )
                 if self.prompt_format == DECIDER_FORMAT and row.kind == "score":
                     scores = [
-                        float(getattr(token_logprobs[0][token_id], "logprob",
-                                      token_logprobs[0][token_id])) / temp
+                        float(
+                            getattr(
+                                token_logprobs[0][token_id], "logprob", token_logprobs[0][token_id]
+                            )
+                        )
+                        / temp
                         for token_id in selected_ids
                     ]
                     peak = max(scores)
@@ -203,10 +216,7 @@ class VLLMEngine:
             cursor += count
             if self.prompt_format == DECIDER_FORMAT and row.kind == "score":
                 highest = max(score_log_fits)
-                fits = [
-                    math.exp((value - highest) / self.temperature)
-                    for value in score_log_fits
-                ]
+                fits = [math.exp((value - highest) / self.temperature) for value in score_log_fits]
                 total = sum(fits)
                 probabilities = [fit / total for fit in fits]
             else:
@@ -243,7 +253,10 @@ class VLLMEngine:
         return self.batch_decide([example], confidence_threshold=confidence_threshold)[0]
 
     def choice(
-        self, *, state: State, choices: Sequence[str],
+        self,
+        *,
+        state: State,
+        choices: Sequence[str],
         question: str = "Which option should be selected?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
@@ -253,7 +266,10 @@ class VLLMEngine:
         )
 
     def noul(
-        self, *, state: State, question: str = "Is this true?",
+        self,
+        *,
+        state: State,
+        question: str = "Is this true?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
         return self.decide(
@@ -262,13 +278,19 @@ class VLLMEngine:
         )
 
     def score(
-        self, *, state: State, question: str = "What score should be assigned?",
-        min_score: int = 0, max_score: int = 5,
+        self,
+        *,
+        state: State,
+        question: str = "What score should be assigned?",
+        min_score: int = 0,
+        max_score: int = 5,
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
         return self.decide(
             DecisionInput(
-                kind="score", state=state, question=question,
+                kind="score",
+                state=state,
+                question=question,
                 options=[str(level) for level in range(min_score, max_score + 1)],
             ),
             confidence_threshold=confidence_threshold,

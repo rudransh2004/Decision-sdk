@@ -51,7 +51,10 @@ def normalize_decision(row: Mapping[str, Any], *, index: int = 0) -> DecisionExa
         row.get("source") in ("openjev_v2", "yuri_v3")
         and isinstance(target, list)
         and len(target) == len(options)
-        and all(isinstance(value, (int, float)) and math.isfinite(value) and value >= 0 for value in target)
+        and all(
+            isinstance(value, (int, float)) and math.isfinite(value) and value >= 0
+            for value in target
+        )
     ):
         total = sum(target)
         if total > 0 and abs(total - 1) <= len(target) * 0.0000501:
@@ -129,7 +132,9 @@ def _rows(
         try:
             from datasets import load_dataset
         except ImportError as exc:
-            raise ImportError("Hugging Face loading requires pip install futurix-decision[datasets]") from exc
+            raise ImportError(
+                "Hugging Face loading requires pip install futurix-decision[datasets]"
+            ) from exc
         options = {"revision": revision} if revision is not None else {}
         return load_dataset(str(source), split=split, streaming=streaming, **options)
     return source

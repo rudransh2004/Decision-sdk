@@ -17,8 +17,7 @@ from futurix_decision.models.decision_head import decision_token
 
 BOSUN_PROMPT_SCHEMA = "bosun-decision-prompt-v3-stable-slots"
 BOSUN_SYSTEM_PROMPT = (
-    "Choose exactly one supplied decision token. Return only that token. "
-    "Do not explain the answer."
+    "Choose exactly one supplied decision token. Return only that token. Do not explain the answer."
 )
 BOSUN_ABSTAIN_SYSTEM_PROMPT = (
     "Choose exactly one candidate decision token, or <|decision_255|> if none applies. "
@@ -59,20 +58,22 @@ def format_bosun_prompt(
     criteria: list[dict[str, str | int]] = []
     for slot, candidate_index in enumerate(permutation):
         slots[candidate_index] = slot
-        criteria.append({
-            "t": decision_token(slot),
-            "o": candidate_index,
-            "n": (
-                example.candidate_labels[candidate_index]
-                if example.candidate_labels is not None
-                else example.options[candidate_index]
-            ),
-            "d": (
-                example.candidate_descriptions[candidate_index]
-                if example.candidate_descriptions is not None
-                else ""
-            ),
-        })
+        criteria.append(
+            {
+                "t": decision_token(slot),
+                "o": candidate_index,
+                "n": (
+                    example.candidate_labels[candidate_index]
+                    if example.candidate_labels is not None
+                    else example.options[candidate_index]
+                ),
+                "d": (
+                    example.candidate_descriptions[candidate_index]
+                    if example.candidate_descriptions is not None
+                    else ""
+                ),
+            }
+        )
 
     description_fields: list[str] | None = None
     parsed_descriptions: list[dict[str, Any]] = []
@@ -93,7 +94,12 @@ def format_bosun_prompt(
     if description_fields is not None and len(parsed_descriptions) == count:
         fields = ["t", "o", "n", *description_fields]
         rows = [
-            [criterion["t"], criterion["o"], criterion["n"], *(parsed[key] for key in description_fields)]
+            [
+                criterion["t"],
+                criterion["o"],
+                criterion["n"],
+                *(parsed[key] for key in description_fields),
+            ]
             for criterion, parsed in zip(criteria, parsed_descriptions, strict=True)
         ]
     else:

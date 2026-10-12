@@ -27,12 +27,14 @@ SYSTEM = (
     "Apply the supplied criterion to the supplied evidence. Choose exactly one listed option. "
     "Respond with only its uppercase letter, with no explanation or reasoning."
 )
-_SPLIT = frozenset((
-    "BQ BZ CJ CQ CZ DQ DZ EJ EY FJ FQ FV FZ GJ GK GQ GZ HJ IY JF JG JH JL JN JQ JW JX JY JZ "
-    "KJ KQ KX KZ LH LJ LQ LW LX LZ OJ OQ OY OZ PQ PZ QD QF QI QJ QK QO QV QW QX QY QZ "
-    "RQ RZ TJ TQ UJ UO UQ UW VH VJ VQ VU VW VX VY VZ WJ WQ WU WV WY WZ XG XJ XK XN XO "
-    "XQ XU XV XW XZ YB YD YF YH YI YJ YK YQ YR YU YV YX ZB ZC ZD ZG ZJ ZK ZL ZM ZP ZQ ZS ZT ZU ZV"
-).split())
+_SPLIT = frozenset(
+    (
+        "BQ BZ CJ CQ CZ DQ DZ EJ EY FJ FQ FV FZ GJ GK GQ GZ HJ IY JF JG JH JL JN JQ JW JX JY JZ "
+        "KJ KQ KX KZ LH LJ LQ LW LX LZ OJ OQ OY OZ PQ PZ QD QF QI QJ QK QO QV QW QX QY QZ "
+        "RQ RZ TJ TQ UJ UO UQ UW VH VJ VQ VU VW VX VY VZ WJ WQ WU WV WY WZ XG XJ XK XN XO "
+        "XQ XU XV XW XZ YB YD YF YH YI YJ YK YQ YR YU YV YX ZB ZC ZD ZG ZJ ZK ZL ZM ZP ZQ ZS ZT ZU ZV"
+    ).split()
+)
 _LABEL_CACHE: weakref.WeakKeyDictionary[Any, tuple[list[str], list[int]]] = (
     weakref.WeakKeyDictionary()
 )
@@ -43,8 +45,7 @@ def eikos_label_table(tokenizer: Any, width: int) -> tuple[list[str], list[int]]
     if cached is not None and len(cached[1]) >= width:
         return cached[0][:width], cached[1][:width]
     labels = list(string.ascii_uppercase) + [
-        a + b for a in string.ascii_uppercase for b in string.ascii_uppercase
-        if a + b not in _SPLIT
+        a + b for a in string.ascii_uppercase for b in string.ascii_uppercase if a + b not in _SPLIT
     ]
     selected = labels[:width]
     ids = [tokenizer.encode(label, add_special_tokens=False) for label in selected]
@@ -78,18 +79,21 @@ def prepare_eikos_row(
         name = example.options[original]
         if example.kind == "noul":
             description = (
-                example.candidate_descriptions[original]
-                if example.candidate_descriptions else None
+                example.candidate_descriptions[original] if example.candidate_descriptions else None
             ) or (
                 example.candidate_labels[original]
-                if example.candidate_labels else "yes" if name == "true" else "no"
+                if example.candidate_labels
+                else "yes"
+                if name == "true"
+                else "no"
             )
         elif example.kind == "score":
             description = (
                 example.candidate_descriptions[original]
                 if example.candidate_descriptions and example.candidate_descriptions[original]
                 else example.candidate_labels[original]
-                if example.candidate_labels else name
+                if example.candidate_labels
+                else name
             )
             name = str(position)
         else:
@@ -99,11 +103,16 @@ def prepare_eikos_row(
             if example.candidate_descriptions and example.candidate_descriptions[original]:
                 parts.append(example.candidate_descriptions[original])
             description = " — ".join(parts) if parts else name
-        options.append({
-            "letter": labels[position], "description": f"{name}: {description}",
-        })
+        options.append(
+            {
+                "letter": labels[position],
+                "description": f"{name}: {description}",
+            }
+        )
     payload = {
-        "evidence": example.state, "criterion": example.question, "options": options,
+        "evidence": example.state,
+        "criterion": example.question,
+        "options": options,
     }
     prompt = tokenizer.apply_chat_template(
         [
@@ -114,7 +123,7 @@ def prepare_eikos_row(
         add_generation_prompt=True,
         enable_thinking=False,
     )
-    return tokenizer.encode(prompt, add_special_tokens=False), ids[:len(order)], order
+    return tokenizer.encode(prompt, add_special_tokens=False), ids[: len(order)], order
 
 
 def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> int:
@@ -124,8 +133,12 @@ def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> int:
         for key in ("revision", "token", "cache_dir", "local_files_only")
         if key in hub_kwargs
     }
-    config_path = path / "decision_config.json" if path.is_dir() else Path(
-        hf_hub_download(repo_id=str(checkpoint), filename="decision_config.json", **downloader)
+    config_path = (
+        path / "decision_config.json"
+        if path.is_dir()
+        else Path(
+            hf_hub_download(repo_id=str(checkpoint), filename="decision_config.json", **downloader)
+        )
     )
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if (
@@ -135,8 +148,10 @@ def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> int:
         or config.get("calib") != "calib.json"
     ):
         raise ValueError("only Eikos 4B/27B SemIf one-pass decision releases are supported")
-    calib_path = path / "calib.json" if path.is_dir() else Path(
-        hf_hub_download(repo_id=str(checkpoint), filename="calib.json", **downloader)
+    calib_path = (
+        path / "calib.json"
+        if path.is_dir()
+        else Path(hf_hub_download(repo_id=str(checkpoint), filename="calib.json", **downloader))
     )
     calibration = json.loads(calib_path.read_text(encoding="utf-8"))
     if (
@@ -154,7 +169,10 @@ def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> int:
 
 class EikosDecisionModel(DecisionModel):
     def __init__(self, backbone: torch.nn.Module, tokenizer: Any, **kwargs: Any) -> None:
-        if kwargs.get("prompt_format", FORMAT) != FORMAT or kwargs.get("head_type", "tokens") != "tokens":
+        if (
+            kwargs.get("prompt_format", FORMAT) != FORMAT
+            or kwargs.get("head_type", "tokens") != "tokens"
+        ):
             raise ValueError("Eikos requires its SemIf prompt and existing letter readout")
         kwargs["prompt_format"] = FORMAT
         super().__init__(backbone, tokenizer, **kwargs)
@@ -172,8 +190,12 @@ class EikosDecisionModel(DecisionModel):
 
     @classmethod
     def from_native(
-        cls, checkpoint: str | Path, *, max_sequence_length: int = 32768,
-        seed: int = 0, **hf_kwargs: Any
+        cls,
+        checkpoint: str | Path,
+        *,
+        max_sequence_length: int = 32768,
+        seed: int = 0,
+        **hf_kwargs: Any,
     ) -> EikosDecisionModel:
         if str(checkpoint) not in SOURCES and not Path(checkpoint).is_dir():
             raise ValueError("supported Eikos releases are caiovicentino1/Eikos-4B and Eikos-27B")
@@ -186,10 +208,15 @@ class EikosDecisionModel(DecisionModel):
         tokenizer = AutoTokenizer.from_pretrained(str(checkpoint), **tokenizer_kwargs)
         backbone = AutoModelForCausalLM.from_pretrained(str(checkpoint), **hf_kwargs)
         return cls(
-            backbone, tokenizer, decision_tokens=width,
-            max_sequence_length=max_sequence_length, seed=seed,
-            base_checkpoint=str(checkpoint), base_model_revision=hf_kwargs.get("revision"),
-            source_checkpoint=str(checkpoint), source_revision=hf_kwargs.get("revision"),
+            backbone,
+            tokenizer,
+            decision_tokens=width,
+            max_sequence_length=max_sequence_length,
+            seed=seed,
+            base_checkpoint=str(checkpoint),
+            base_model_revision=hf_kwargs.get("revision"),
+            source_checkpoint=str(checkpoint),
+            source_revision=hf_kwargs.get("revision"),
         )
 
     def forward_decisions(
@@ -198,21 +225,22 @@ class EikosDecisionModel(DecisionModel):
         if not examples:
             raise ValueError("examples must not be empty")
         prepared = [
-            prepare_eikos_row(e, self.tokenizer, max_options=self.decision_tokens)
-            for e in examples
+            prepare_eikos_row(e, self.tokenizer, max_options=self.decision_tokens) for e in examples
         ]
         longest = max(len(ids) for ids, _, _ in prepared)
         if longest > self.max_sequence_length:
             raise ValueError("prompt exceeds max_sequence_length; increase the limit")
         device = next(self.backbone.parameters()).device
         ids = torch.full(
-            (len(prepared), longest), self.tokenizer.pad_token_id,
-            dtype=torch.long, device=device,
+            (len(prepared), longest),
+            self.tokenizer.pad_token_id,
+            dtype=torch.long,
+            device=device,
         )
         mask = torch.zeros_like(ids)
         for index, (tokens, _, _) in enumerate(prepared):
-            ids[index, -len(tokens):] = torch.tensor(tokens, device=device)
-            mask[index, -len(tokens):] = 1
+            ids[index, -len(tokens) :] = torch.tensor(tokens, device=device)
+            mask[index, -len(tokens) :] = 1
         output = self.backbone(input_ids=ids, attention_mask=mask, logits_to_keep=1)
         logits = output.logits[:, -1, :]
         results = logits.new_full(

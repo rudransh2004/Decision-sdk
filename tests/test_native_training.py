@@ -39,10 +39,13 @@ class NativeTrainingTests(unittest.TestCase):
                 tuned = model.finetune([GROUP], output)
                 self.assertEqual(tuned.family, "laya")
                 self.assertEqual(tuned.training_report["train_items"], 1)
-                self.assertEqual(json.loads((output / "futurix_native.json").read_text())["family"], "laya")
+                self.assertEqual(
+                    json.loads((output / "futurix_native.json").read_text())["family"], "laya"
+                )
                 self.assertTrue((output / "model.safetensors").is_file())
                 configured = model.finetune(
-                    [GROUP], Path(temp) / "laya-configured",
+                    [GROUP],
+                    Path(temp) / "laya-configured",
                     config=NativeSFTConfig(epochs=1, batch_size=2, train_backbone=False),
                 )
                 self.assertEqual(configured.family, "laya")
@@ -90,10 +93,15 @@ class NativeTrainingTests(unittest.TestCase):
         training = types.ModuleType("gliner2.training.trainer")
         training.ExtractorTrainer = Trainer
         training.TrainingConfig = Config
-        with patch.dict(sys.modules, {
-            "gliner2": package, "gliner2.classification": classification,
-            "gliner2.training": native_train, "gliner2.training.trainer": training,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "gliner2": package,
+                "gliner2.classification": classification,
+                "gliner2.training": native_train,
+                "gliner2.training.trainer": training,
+            },
+        ):
             model = NativeDecisionModel.from_runtime("fastino/GLiNER2.5-Decide", "gliner", object())
             with tempfile.TemporaryDirectory() as temp:
                 with self.assertRaisesRegex(ValueError, "only accepts hard labels"):
@@ -103,13 +111,17 @@ class NativeTrainingTests(unittest.TestCase):
                 self.assertEqual(tuned.family, "gliner")
                 self.assertTrue((output / "final" / "futurix_native.json").is_file())
                 tuned = model.finetune(
-                    [GROUP], Path(temp) / "configured", target_policy="argmax",
+                    [GROUP],
+                    Path(temp) / "configured",
+                    target_policy="argmax",
                     config=NativeSFTConfig(epochs=1, batch_size=2),
                 )
                 self.assertEqual(tuned.family, "gliner")
                 with self.assertRaisesRegex(ValueError, "readout-only"):
                     model.finetune(
-                        [GROUP], Path(temp) / "unsupported", target_policy="argmax",
+                        [GROUP],
+                        Path(temp) / "unsupported",
+                        target_policy="argmax",
                         config=NativeSFTConfig(train_backbone=False),
                     )
 
@@ -117,7 +129,8 @@ class NativeTrainingTests(unittest.TestCase):
         class Checkpoint:
             def __init__(self, source):
                 self.meta = types.SimpleNamespace(
-                    base="Qwen/Qwen3.5-9B-Base", base_revision="b" * 40,
+                    base="Qwen/Qwen3.5-9B-Base",
+                    base_revision="b" * 40,
                 )
 
             def load(self, device, opts):
@@ -133,13 +146,19 @@ class NativeTrainingTests(unittest.TestCase):
         checkpoint.Checkpoint = Checkpoint
         checkpoint.LoadOptions = LoadOptions
         with patch.dict(sys.modules, {"kev": package, "kev.checkpoint": checkpoint}):
+
             def run(command, check):
                 self.assertEqual(command[:3], [sys.executable, "-m", "kev.train"])
                 self.assertEqual(command[command.index("--base") + 1], "Qwen/Qwen3.5-9B-Base")
-                self.assertEqual(command[command.index("--init_from") + 1], "jaredpalmer/kev-9b@" + "a" * 40)
+                self.assertEqual(
+                    command[command.index("--init_from") + 1], "jaredpalmer/kev-9b@" + "a" * 40
+                )
                 self.assertEqual(command[command.index("--base_revision") + 1], "b" * 40)
                 self.assertEqual(command[command.index("--epochs") + 1], "2")
-                rows = [json.loads(line) for line in Path(command[command.index("--data") + 1]).read_text().splitlines()]
+                rows = [
+                    json.loads(line)
+                    for line in Path(command[command.index("--data") + 1]).read_text().splitlines()
+                ]
                 self.assertEqual(rows[0]["questions"]["action"]["target"]["reject"], 0.8)
                 self.assertEqual(rows[0]["questions"]["rating"]["label"], 2)
                 output = Path(command[command.index("--out") + 1])
@@ -149,7 +168,9 @@ class NativeTrainingTests(unittest.TestCase):
                 (output / "adapter_model.safetensors").write_bytes(b"native adapter")
 
             with patch("futurix_decision.trainers.native.subprocess.run", side_effect=run):
-                model = NativeDecisionModel.from_runtime("jaredpalmer/kev-9b", "kev", (object(), object()))
+                model = NativeDecisionModel.from_runtime(
+                    "jaredpalmer/kev-9b", "kev", (object(), object())
+                )
                 model.source_revision = "a" * 40
                 with tempfile.TemporaryDirectory() as temp:
                     tuned = model.finetune([GROUP], Path(temp) / "kev-out", config={"epochs": 2})
@@ -174,7 +195,9 @@ class NativeTrainingTests(unittest.TestCase):
                 path = Path(path)
                 path.mkdir()
                 (path / "readout.safetensors").write_bytes(b"native readout")
-                (path / "decision_config.json").write_text('{"attention_mode":"noncausal_full_attention"}')
+                (path / "decision_config.json").write_text(
+                    '{"attention_mode":"noncausal_full_attention"}'
+                )
                 (path / "config.json").write_text("{}")
                 (path / "model.safetensors").write_bytes(b"native backbone")
                 (path / "tokenizer.json").write_text("{}")
@@ -186,19 +209,27 @@ class NativeTrainingTests(unittest.TestCase):
         with patch.dict(sys.modules, {"autojev": autojev, "autojev.model": module}):
             native = PplxModel()
             model = NativeDecisionModel.from_runtime(
-                "perplexity-ai/pplx-decider-v1.1-27b", "pplx-decider", native,
+                "perplexity-ai/pplx-decider-v1.1-27b",
+                "pplx-decider",
+                native,
             )
             model.source_revision = "a" * 40
-            training_rows = [{
-                "state": "A ticket", "question": "Which team?",
-                "options": ["billing", "other"], "target": "billing",
-            }]
+            training_rows = [
+                {
+                    "state": "A ticket",
+                    "question": "Which team?",
+                    "options": ["billing", "other"],
+                    "target": "billing",
+                }
+            ]
             with tempfile.TemporaryDirectory() as temp:
                 with patch("futurix_decision.models.native._requires_transformers"):
                     tuned = model.finetune(
-                        training_rows, Path(temp) / "pplx-out",
-                        config=NativeSFTConfig(epochs=2, batch_size=1, learning_rate=0.1,
-                                               train_backbone=False),
+                        training_rows,
+                        Path(temp) / "pplx-out",
+                        config=NativeSFTConfig(
+                            epochs=2, batch_size=1, learning_rate=0.1, train_backbone=False
+                        ),
                     )
                 self.assertLess(native.readout[1].item(), 1)
                 self.assertEqual(tuned.source_revision, "a" * 40)
@@ -245,20 +276,32 @@ class NativeTrainingTests(unittest.TestCase):
             native = JointModel()
             processor = Processor()
             model = NativeDecisionModel.from_runtime(
-                "Cloudflare/clef-flash", "clef", (module, native, processor),
+                "Cloudflare/clef-flash",
+                "clef",
+                (module, native, processor),
             )
             model.source_revision = "b" * 40
-            data = [{
-                "state": "Refund needed", "question": "Which team?",
-                "options": ["technical", "billing"], "target": [0.2, 0.8],
-            }]
+            data = [
+                {
+                    "state": "Refund needed",
+                    "question": "Which team?",
+                    "options": ["technical", "billing"],
+                    "target": [0.2, 0.8],
+                }
+            ]
             with patch(
                 "futurix_decision.trainers.native.NativeDecisionModel.from_pretrained",
                 return_value=model,
             ):
-                tuned = model.finetune(data, root / "out", config=NativeSFTConfig(
-                    epochs=2, learning_rate=0.1, train_backbone=False,
-                ))
+                tuned = model.finetune(
+                    data,
+                    root / "out",
+                    config=NativeSFTConfig(
+                        epochs=2,
+                        learning_rate=0.1,
+                        train_backbone=False,
+                    ),
+                )
             self.assertGreater(native.head.weight[0, 0].item(), 0)
             self.assertFalse(native.language_model.weight.requires_grad)
             self.assertEqual(tuned.training_report["train_items"], 1)

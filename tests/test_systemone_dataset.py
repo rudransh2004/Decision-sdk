@@ -15,15 +15,18 @@ GROUP = {
     "state": [{"role": "user", "content": "Invoice expired"}],
     "questions": {
         "action": {
-            "type": "choice", "instructions": "Next action?",
+            "type": "choice",
+            "instructions": "Next action?",
             "criteria": {"approve": "Complete", "reject": "Stop", "escalate": "Ask manager"},
         },
         "valid": {
-            "type": "noul", "instructions": "Is it valid?",
+            "type": "noul",
+            "instructions": "Is it valid?",
             "criteria": {"false": "Expired certificate", "true": "Current certificate"},
         },
         "rating": {
-            "type": "score", "instructions": "Rate compliance",
+            "type": "score",
+            "instructions": "Rate compliance",
             "criteria": ["low", "medium", "high"],
         },
     },
@@ -39,17 +42,26 @@ class DatasetInterchangeTests(unittest.TestCase):
     def test_systemone_preserves_order_descriptions_and_grouping(self):
         rows = load_decisions(GROUP)
         self.assertEqual([row.question_id for row in rows], ["action", "valid", "rating"])
-        self.assertEqual([row.id for row in rows], [
-            "ticket-7:action", "ticket-7:valid", "ticket-7:rating",
-        ])
+        self.assertEqual(
+            [row.id for row in rows],
+            [
+                "ticket-7:action",
+                "ticket-7:valid",
+                "ticket-7:rating",
+            ],
+        )
         self.assertTrue(all(row.group_id == "ticket-7" for row in rows))
         self.assertEqual(rows[0].options, ["approve", "reject", "escalate"])
         self.assertEqual(rows[0].candidate_descriptions[1], "Stop")
         self.assertEqual(rows[0].target_distribution(), [0.1, 0.8, 0.1])
         self.assertEqual(rows[1].target_distribution(), [1.0, 0.0])
-        self.assertEqual(rows[1].candidate_descriptions, [
-            "Expired certificate", "Current certificate",
-        ])
+        self.assertEqual(
+            rows[1].candidate_descriptions,
+            [
+                "Expired certificate",
+                "Current certificate",
+            ],
+        )
         self.assertEqual(rows[2].candidate_descriptions, ["low", "medium", "high"])
         self.assertEqual(rows[2].target_distribution(), [0.0, 0.0, 1.0])
 
@@ -57,7 +69,9 @@ class DatasetInterchangeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "train.jsonl"
             hf_row = {
-                "input": "A refund request", "query": "Next?", "choices": ["approve", "reject"],
+                "input": "A refund request",
+                "query": "Next?",
+                "choices": ["approve", "reject"],
                 "label": 1,
             }
             path.write_text(json.dumps(GROUP) + "\n" + json.dumps(hf_row) + "\n")
@@ -65,9 +79,7 @@ class DatasetInterchangeTests(unittest.TestCase):
         memory = list(_canonical_rows([GROUP, hf_row]))
         evaluation = list(iter_examples([GROUP, hf_row]))
         self.assertEqual(len(disk), len(memory))
-        self.assertEqual([row.question_id for row in disk], [
-            row.question_id for row in evaluation
-        ])
+        self.assertEqual([row.question_id for row in disk], [row.question_id for row in evaluation])
         self.assertEqual(disk[-1].target_distribution(), [0.0, 1.0])
         model = tiny_model()
         self.assertEqual(evaluate(model, [GROUP, hf_row], batch_size=2)["count"], 4)
@@ -95,7 +107,8 @@ class DatasetInterchangeTests(unittest.TestCase):
             },
         }
         row = {
-            "state": {"ticket": 17}, "questions": {"route": native},
+            "state": {"ticket": 17},
+            "questions": {"route": native},
             "targets": {"route": "billing"},
         }
         example = load_decisions(row)[0]
@@ -103,6 +116,7 @@ class DatasetInterchangeTests(unittest.TestCase):
         self.assertEqual(example.options, ["billing", "support"])
         self.assertEqual(example.candidate_descriptions[0], '{"sla": 2, "team": "Finance"}')
         from futurix_decision.models.native import _question
+
         self.assertEqual(_question(example), native)
 
     def test_image_references_survive_for_supported_native_models(self):
@@ -115,13 +129,15 @@ class DatasetInterchangeTests(unittest.TestCase):
 
     def test_grouped_rows_train_the_existing_futurix_head(self):
         trainer = DecisionTrainer(
-            model=tiny_model(), dataset=[GROUP],
+            model=tiny_model(),
+            dataset=[GROUP],
             sft_config=SFTConfig(epochs=1, batch_size=1, max_examples=3),
         )
         self.assertEqual(len(trainer.train()), 3)
         with self.assertRaisesRegex(ValueError, "text-only"):
             DecisionTrainer(
-                model=tiny_model(), dataset=[{**GROUP, "images": ["./invoice.png"]}],
+                model=tiny_model(),
+                dataset=[{**GROUP, "images": ["./invoice.png"]}],
                 sft_config=SFTConfig(epochs=1, batch_size=1),
             ).train()
 

@@ -44,10 +44,13 @@ def main() -> None:
             sys.executable,
             str(Path(__file__).with_name("test_released_decisions.py")),
             args.model,
-            "--device", args.device,
-            "--max-examples", str(args.max_examples),
+            "--device",
+            args.device,
+            "--max-examples",
+            str(args.max_examples),
             "--train",
-            "--output", str(directory / "export"),
+            "--output",
+            str(directory / "export"),
         ]
         if args.dataset is not None:
             command.extend(["--dataset", str(args.dataset)])
@@ -56,7 +59,9 @@ def main() -> None:
             flush=True,
         )
         subprocess.run(command, env=environment, check=True)
-    print(f"SDK smoke test passed for {args.model}; only temporary weights were removed", flush=True)
+    print(
+        f"SDK smoke test passed for {args.model}; only temporary weights were removed", flush=True
+    )
 
 
 if __name__ == "__main__":

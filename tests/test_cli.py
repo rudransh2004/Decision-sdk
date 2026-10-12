@@ -23,8 +23,11 @@ class CLITests(unittest.TestCase):
             tiny_model().save_pretrained(base)
             data = root / "decisions.jsonl"
             data.write_text(
-                "\n".join(json.dumps(row.model_dump()) for row in
-                          [example("approve", "one"), example([0.3, 0.7], "two")]) + "\n",
+                "\n".join(
+                    json.dumps(row.model_dump())
+                    for row in [example("approve", "one"), example([0.3, 0.7], "two")]
+                )
+                + "\n",
                 encoding="utf-8",
             )
             config = root / "config.yaml"
@@ -86,11 +89,16 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             base, output, data, heldout = (
-                root / "base", root / "final", root / "train.jsonl", root / "calibration.jsonl"
+                root / "base",
+                root / "final",
+                root / "train.jsonl",
+                root / "calibration.jsonl",
             )
             tiny_model().save_pretrained(base)
             data.write_text(json.dumps(example([0.7, 0.3]).model_dump()) + "\n", encoding="utf-8")
-            heldout.write_text(json.dumps(example([0.7, 0.3], "heldout").model_dump()) + "\n", encoding="utf-8")
+            heldout.write_text(
+                json.dumps(example([0.7, 0.3], "heldout").model_dump()) + "\n", encoding="utf-8"
+            )
             config = root / "all.yaml"
             config.write_text(
                 f"model:\n  name: {base}\ndataset: {data}\noutput: {output}\n"
@@ -111,8 +119,11 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             base, output, data, heldout, stages = (
-                root / "base", root / "final", root / "train.jsonl",
-                root / "calibration.jsonl", root / "stages",
+                root / "base",
+                root / "final",
+                root / "train.jsonl",
+                root / "calibration.jsonl",
+                root / "stages",
             )
             tiny_model().save_pretrained(base)
             data.write_text(json.dumps(example([0.8, 0.2], "one").model_dump()) + "\n")
@@ -127,10 +138,16 @@ class CLITests(unittest.TestCase):
             )
             with contextlib.redirect_stdout(io.StringIO()):
                 main(["train", "--config", str(config), "--stages", "decision_sft"])
-                main([
-                    "train", "--config", str(config), "--resume",
-                    "--calibration-dataset", str(heldout),
-                ])
+                main(
+                    [
+                        "train",
+                        "--config",
+                        str(config),
+                        "--resume",
+                        "--calibration-dataset",
+                        str(heldout),
+                    ]
+                )
             progress = json.loads((stages / "progress.json").read_text())
             self.assertEqual(progress["completed_stages"], ["decision_sft", "calibration", "rlcd"])
             self.assertEqual(
@@ -151,10 +168,21 @@ class CLITests(unittest.TestCase):
             tiny_untied_model().save_pretrained(base)
             data.write_text(json.dumps(example().model_dump()) + "\n", encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()):
-                main([
-                    "train", "--model", str(base), "--dataset", str(data), "--output", str(output),
-                    "--method", "sft", "--finetune-method", "qlora",
-                ])
+                main(
+                    [
+                        "train",
+                        "--model",
+                        str(base),
+                        "--dataset",
+                        str(data),
+                        "--output",
+                        str(output),
+                        "--method",
+                        "sft",
+                        "--finetune-method",
+                        "qlora",
+                    ]
+                )
             self.assertTrue((output / "config.json").is_file())
             self.assertFalse((output / "adapter_config.json").exists())
 

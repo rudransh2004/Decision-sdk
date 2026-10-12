@@ -59,7 +59,11 @@ def decision_sft_loss(
     _check_smoothing(label_smoothing)
     if mode not in ("auto", "hard", "soft"):
         raise ValueError("mode must be auto, hard, or soft")
-    if batch.logits.ndim != 2 or len(examples) != batch.logits.shape[0] or len(batch.slots) != len(examples):
+    if (
+        batch.logits.ndim != 2
+        or len(examples) != batch.logits.shape[0]
+        or len(batch.slots) != len(examples)
+    ):
         raise ValueError("batch size does not match examples")
     losses = []
     for row, (example, slots) in enumerate(zip(examples, batch.slots)):
@@ -75,7 +79,5 @@ def decision_sft_loss(
             losses.append(hard_cross_entropy(logits, label, label_smoothing=label_smoothing))
         else:
             distribution = torch.tensor([target], device=logits.device)
-            losses.append(
-                soft_cross_entropy(logits, distribution, label_smoothing=label_smoothing)
-            )
+            losses.append(soft_cross_entropy(logits, distribution, label_smoothing=label_smoothing))
     return torch.stack(losses).mean()

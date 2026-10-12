@@ -15,6 +15,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class ModelFamily:
     """Flags apply to implemented variants within the family, not every Hub ID."""
+
     name: str
     checkpoints: tuple[str, ...]
     supported_checkpoints: tuple[str, ...] = ()
@@ -33,52 +34,103 @@ FAMILIES = (
         "bosun",
         ("Hanno-Labs/bosun-v3.1-1.7b", "Hanno-Labs/bosun-v3.1-0.6b"),
         supported_checkpoints=("Hanno-Labs/bosun-v3.1-1.7b", "Hanno-Labs/bosun-v3.1-0.6b"),
-        inference=True, training=True, vllm_export=True,
+        inference=True,
+        training=True,
+        vllm_export=True,
     ),
-    ModelFamily("kev", (
-        "jaredpalmer/kev-27b", "jaredpalmer/kev-9b",
-        "jaredpalmer/kev-4b", "jaredpalmer/kev-0.8b",
-    ), supported_checkpoints=("jaredpalmer/kev-9b",), inference=True, training=True),
-    ModelFamily("clef", (
-        "Cloudflare/clef", "Cloudflare/clef-flash", "Cloudflare/clef-omni",
-    ), supported_checkpoints=("Cloudflare/clef", "Cloudflare/clef-flash"),
-                inference=True, training=True),
-    ModelFamily("pplx-decider", ("perplexity-ai/pplx-decider-v1.1-27b",),
-                supported_checkpoints=("perplexity-ai/pplx-decider-v1.1-27b",),
-                inference=True, training=True),
     ModelFamily(
-        "jpt", ("kirp/jpt-9b", "kirp/jpt-4b", "kirp/jpt-35b-a3b"),
+        "kev",
+        (
+            "jaredpalmer/kev-27b",
+            "jaredpalmer/kev-9b",
+            "jaredpalmer/kev-4b",
+            "jaredpalmer/kev-0.8b",
+        ),
+        supported_checkpoints=("jaredpalmer/kev-9b",),
+        inference=True,
+        training=True,
+    ),
+    ModelFamily(
+        "clef",
+        (
+            "Cloudflare/clef",
+            "Cloudflare/clef-flash",
+            "Cloudflare/clef-omni",
+        ),
+        supported_checkpoints=("Cloudflare/clef", "Cloudflare/clef-flash"),
+        inference=True,
+        training=True,
+    ),
+    ModelFamily(
+        "pplx-decider",
+        ("perplexity-ai/pplx-decider-v1.1-27b",),
+        supported_checkpoints=("perplexity-ai/pplx-decider-v1.1-27b",),
+        inference=True,
+        training=True,
+    ),
+    ModelFamily(
+        "jpt",
+        ("kirp/jpt-9b", "kirp/jpt-4b", "kirp/jpt-35b-a3b"),
         supported_checkpoints=("kirp/jpt-4b", "kirp/jpt-9b"),
-        inference=True, training=True, vllm_export=True,
+        inference=True,
+        training=True,
+        vllm_export=True,
     ),
     ModelFamily(
-        "eikos", ("caiovicentino1/Eikos-27B", "caiovicentino1/Eikos-4B"),
+        "eikos",
+        ("caiovicentino1/Eikos-27B", "caiovicentino1/Eikos-4B"),
         supported_checkpoints=("caiovicentino1/Eikos-4B", "caiovicentino1/Eikos-27B"),
-        inference=True, training=True, vllm_export=True,
+        inference=True,
+        training=True,
+        vllm_export=True,
     ),
-    ModelFamily("openjev", ("openjev/openjev", "openjev/OpenJev-Flash-9B"),
-                supported_checkpoints=("openjev/openjev", "openjev/OpenJev-Flash-9B"),
-                inference=True),
     ModelFamily(
-        "decider", ("Mapika/decider-4b",),
-        supported_checkpoints=("Mapika/decider-4b",),
-        inference=True, training=True, vllm_export=True,
+        "openjev",
+        ("openjev/openjev", "openjev/OpenJev-Flash-9B"),
+        supported_checkpoints=("openjev/openjev", "openjev/OpenJev-Flash-9B"),
+        inference=True,
     ),
-    ModelFamily("liquid-d1", ("LiquidAI/d1-3B", "LiquidAI/d1-omni-600M"),
-                supported_checkpoints=("LiquidAI/d1-3B",), inference=True),
-    ModelFamily("nox", ("vllm-sr/Decision-1.0-Nox-4B", "vllm-sr/Decision-2.0-Nox-4B"),
-                supported_checkpoints=("vllm-sr/Decision-1.0-Nox-4B",
-                                       "vllm-sr/Decision-2.0-Nox-4B"), inference=True),
-    ModelFamily("lux", ("vllm-sr/Decision-1.0-Lux-9B", "vllm-sr/Decision-2.0-Lux-9B"),
-                supported_checkpoints=("vllm-sr/Decision-1.0-Lux-9B",
-                                       "vllm-sr/Decision-2.0-Lux-9B"), inference=True),
-    ModelFamily("encoder", (
-        "convaiinnovations/laya", "convaiinnovations/laya-multilingual",
-        "fastino/GLiNER2.5-Decide",
-    ), supported_checkpoints=(
-        "convaiinnovations/laya", "convaiinnovations/laya-multilingual",
-        "fastino/GLiNER2.5-Decide",
-    ), inference=True, training=True),
+    ModelFamily(
+        "decider",
+        ("Mapika/decider-4b",),
+        supported_checkpoints=("Mapika/decider-4b",),
+        inference=True,
+        training=True,
+        vllm_export=True,
+    ),
+    ModelFamily(
+        "liquid-d1",
+        ("LiquidAI/d1-3B", "LiquidAI/d1-omni-600M"),
+        supported_checkpoints=("LiquidAI/d1-3B",),
+        inference=True,
+    ),
+    ModelFamily(
+        "nox",
+        ("vllm-sr/Decision-1.0-Nox-4B", "vllm-sr/Decision-2.0-Nox-4B"),
+        supported_checkpoints=("vllm-sr/Decision-1.0-Nox-4B", "vllm-sr/Decision-2.0-Nox-4B"),
+        inference=True,
+    ),
+    ModelFamily(
+        "lux",
+        ("vllm-sr/Decision-1.0-Lux-9B", "vllm-sr/Decision-2.0-Lux-9B"),
+        supported_checkpoints=("vllm-sr/Decision-1.0-Lux-9B", "vllm-sr/Decision-2.0-Lux-9B"),
+        inference=True,
+    ),
+    ModelFamily(
+        "encoder",
+        (
+            "convaiinnovations/laya",
+            "convaiinnovations/laya-multilingual",
+            "fastino/GLiNER2.5-Decide",
+        ),
+        supported_checkpoints=(
+            "convaiinnovations/laya",
+            "convaiinnovations/laya-multilingual",
+            "fastino/GLiNER2.5-Decide",
+        ),
+        inference=True,
+        training=True,
+    ),
 )
 
 
@@ -116,8 +168,13 @@ def reject_native_checkpoint(checkpoint: str | Path, metadata: dict) -> None:
     if path.is_dir() and any(
         (path / filename).is_file()
         for filename in (
-            "decider_config.json", "joint_head.safetensors", "readout.safetensors",
-            "head.pt", "judge_config.json", "rl_agent_config.json", "quyet_config.json",
+            "decider_config.json",
+            "joint_head.safetensors",
+            "readout.safetensors",
+            "head.pt",
+            "judge_config.json",
+            "rl_agent_config.json",
+            "quyet_config.json",
         )
     ):
         raise ValueError(
@@ -125,9 +182,11 @@ def reject_native_checkpoint(checkpoint: str | Path, metadata: dict) -> None:
             "the generic LM loader would replace its trained decision contract"
         )
     card = path / "README.md"
-    if path.is_dir() and card.is_file() and "# JPT-" in card.read_text(
-        encoding="utf-8", errors="replace"
-    )[:4096]:
+    if (
+        path.is_dir()
+        and card.is_file()
+        and "# JPT-" in card.read_text(encoding="utf-8", errors="replace")[:4096]
+    ):
         raise ValueError(
             "local JPT checkpoint requires DecisionModel.from_jpt to preserve its letter readout"
         )

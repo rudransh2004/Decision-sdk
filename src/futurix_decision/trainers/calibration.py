@@ -22,10 +22,13 @@ class CalibrationConfig(SFTConfig):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        if any(
-            not math.isfinite(value) or value < 0
-            for value in (self.ce_weight, self.brier_weight)
-        ) or self.ce_weight + self.brier_weight <= 0:
+        if (
+            any(
+                not math.isfinite(value) or value < 0
+                for value in (self.ce_weight, self.brier_weight)
+            )
+            or self.ce_weight + self.brier_weight <= 0
+        ):
             raise ValueError("calibration loss weights must be non-negative and nonzero in total")
 
 
@@ -42,7 +45,9 @@ class CalibrationTrainer(SFTTrainer):
             logits = batch.logits[row, slots].float()
             target = torch.tensor(example.target_distribution(), device=logits.device)
             if self.config.label_smoothing:
-                target = (1 - self.config.label_smoothing) * target + self.config.label_smoothing / len(slots)
+                target = (
+                    1 - self.config.label_smoothing
+                ) * target + self.config.label_smoothing / len(slots)
             p = torch.softmax(logits, dim=-1)
             ce = -(target * F.log_softmax(logits, dim=-1)).sum()
             brier = (p - target).square().sum()

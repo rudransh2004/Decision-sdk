@@ -24,9 +24,12 @@ def answer_codes(tokenizer: Any, count: int) -> tuple[list[str], list[int]]:
     prefix = (
         tokenizer.apply_chat_template(
             [{"role": "user", "content": "Choose an option."}],
-            tokenize=False, add_generation_prompt=True, enable_thinking=False,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
         )
-        if getattr(tokenizer, "chat_template", None) else "[assistant]\n"
+        if getattr(tokenizer, "chat_template", None)
+        else "[assistant]\n"
     )
     prefix_ids = tokenizer.encode(prefix, add_special_tokens=False)
     codes: list[str] = []
@@ -38,7 +41,8 @@ def answer_codes(tokenizer: Any, count: int) -> tuple[list[str], list[int]]:
     for code in candidates:
         ids = tokenizer.encode(code, add_special_tokens=False)
         if (
-            len(ids) == 1 and ids[0] != tokenizer.unk_token_id
+            len(ids) == 1
+            and ids[0] != tokenizer.unk_token_id
             and ids[0] not in token_ids
             and tokenizer.encode(prefix + code, add_special_tokens=False) == prefix_ids + ids
         ):
@@ -62,7 +66,8 @@ def format_letter_code_prompt(
     if len(example.options) > len(codes):
         raise ValueError("more options supplied than letter-code answer codes")
     state = (
-        example.state if isinstance(example.state, str)
+        example.state
+        if isinstance(example.state, str)
         else json.dumps(example.state, ensure_ascii=False, sort_keys=True)
     )
     lines = []
@@ -74,9 +79,9 @@ def format_letter_code_prompt(
             if example.candidate_labels and example.candidate_labels[index]
             else option
         )
-        lines.append(f"{codes[index]}: {option}" + (
-            f" — {description}" if description != option else ""
-        ))
+        lines.append(
+            f"{codes[index]}: {option}" + (f" — {description}" if description != option else "")
+        )
     options_text = "\n".join(lines)
     question = (
         f"State:\n{state}\n\nQuestion:\n{example.question}"
@@ -90,7 +95,9 @@ def format_letter_code_prompt(
     if getattr(tokenizer, "chat_template", None):
         prompt = tokenizer.apply_chat_template(
             [{"role": "system", "content": system}, {"role": "user", "content": question}],
-            tokenize=False, add_generation_prompt=True, enable_thinking=False,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
         )
     else:
         prompt = f"[system]\n{system}\n[user]\n{question}\n[assistant]\n"
@@ -148,7 +155,8 @@ def enable_qwen_noncausal_attention(backbone: nn.Module) -> None:
         if padding is None:
             padding = torch.ones(embedded.shape[:2], dtype=torch.bool, device=embedded.device)
         if (
-            not isinstance(padding, torch.Tensor) or padding.ndim != 2
+            not isinstance(padding, torch.Tensor)
+            or padding.ndim != 2
             or padding.shape != embedded.shape[:2]
             or not padding.bool().any(dim=-1).all()
         ):
@@ -156,7 +164,9 @@ def enable_qwen_noncausal_attention(backbone: nn.Module) -> None:
         kwargs["attention_mask"] = {
             "full_attention": padding[:, None, None, :].bool(),
             "linear_attention": create_recurrent_attention_mask(
-                config=module.config, inputs_embeds=embedded, attention_mask=padding,
+                config=module.config,
+                inputs_embeds=embedded,
+                attention_mask=padding,
             ),
         }
         return args, kwargs

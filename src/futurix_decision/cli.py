@@ -75,8 +75,11 @@ def _train(args: argparse.Namespace) -> None:
         stages = args.stages.split(",")
     else:
         stages = [
-            name for name, key in (
-                ("decision_sft", "sft"), ("calibration", "calibration"), ("rlcd", "rlcd")
+            name
+            for name, key in (
+                ("decision_sft", "sft"),
+                ("calibration", "calibration"),
+                ("rlcd", "rlcd"),
             )
             if config.get("training", {}).get(key, {}).get("enabled", False)
         ] or ["decision_sft"]
@@ -93,7 +96,7 @@ def _train(args: argparse.Namespace) -> None:
             raise ValueError("resume stages differ from the completed stage prefix")
         previous_history = progress["history"]
         checkpoint = progress["checkpoint"]
-        stages = stages[len(completed):]
+        stages = stages[len(completed) :]
         if not stages:
             raise ValueError("all configured stages have already completed")
     selected_method = args.finetune_method or next(
@@ -120,27 +123,38 @@ def _train(args: argparse.Namespace) -> None:
         raise ValueError("raw-model conversion requires a fresh run with --model-format standard")
     if source_format == "native":
         if args.resume or stages != ["decision_sft"] or args.finetune_method:
-            raise ValueError("native fine-tuning supports a fresh decision_sft run; use publisher config for other recipes")
+            raise ValueError(
+                "native fine-tuning supports a fresh decision_sft run; use publisher config for other recipes"
+            )
         if args.calibration_dataset or args.validation_dataset or args.log_jsonl or checkpoint_dir:
-            raise ValueError("native trainers manage their own checkpoints/calibration; use the Python API for customization")
+            raise ValueError(
+                "native trainers manage their own checkpoints/calibration; use the Python API for customization"
+            )
         native = load_model(
-            checkpoint, revision=revision, trust_remote_code=args.trust_remote_code,
+            checkpoint,
+            revision=revision,
+            trust_remote_code=args.trust_remote_code,
             device="cuda:0" if args.gpu is not None else "cpu",
             family=args.native_family,
         )
         rows = (
-            islice(_source(dataset), args.max_examples) if args.max_examples is not None else dataset
+            islice(_source(dataset), args.max_examples)
+            if args.max_examples is not None
+            else dataset
         )
         tuned = native.finetune(rows, output)
-        print(json.dumps({
-            "output": str(output), "family": tuned.family,
-            "train_items": tuned.training_report["train_items"],
-        }))
+        print(
+            json.dumps(
+                {
+                    "output": str(output),
+                    "family": tuned.family,
+                    "train_items": tuned.training_report["train_items"],
+                }
+            )
+        )
         return
     if args.resume:
-        model = DecisionModel.from_pretrained(
-            checkpoint, trainable_adapter=True, **device_kwargs
-        )
+        model = DecisionModel.from_pretrained(checkpoint, trainable_adapter=True, **device_kwargs)
         if model.prompt_format != progress["prompt_format"]:
             raise ValueError("resumed checkpoint prompt format differs from progress metadata")
         if model.head_type != progress.get("head_type", "tokens"):
@@ -158,10 +172,15 @@ def _train(args: argparse.Namespace) -> None:
         model = DecisionModel.from_bosun(checkpoint, **bosun_kwargs)
     else:
         if source_format in ("decider", "jpt", "eikos"):
-            if model_section.get("head_type", "tokens") != "tokens" or model_section.get("head_config"):
-                raise ValueError("native letter models use their trained readout, not a new decision head")
+            if model_section.get("head_type", "tokens") != "tokens" or model_section.get(
+                "head_config"
+            ):
+                raise ValueError(
+                    "native letter models use their trained readout, not a new decision head"
+                )
             expected_format = {
-                "decider": "decider-v2.1", "jpt": "jpt-llm2jev-chat",
+                "decider": "decider-v2.1",
+                "jpt": "jpt-llm2jev-chat",
                 "eikos": "eikos-letter-v1-semif",
             }[source_format]
             if source_format == "eikos" and "decision_tokens" in model_section:
@@ -171,7 +190,8 @@ def _train(args: argparse.Namespace) -> None:
             if model_section.get("prompt_format", expected_format) != expected_format:
                 raise ValueError(f"{source_format} requires its native prompt")
             load_kwargs = {
-                key: load_kwargs[key] for key in ("max_sequence_length", "seed")
+                key: load_kwargs[key]
+                for key in ("max_sequence_length", "seed")
                 if key in load_kwargs
             } | device_kwargs
             if source_format == "jpt" and "temperature" in model_section:
@@ -191,7 +211,9 @@ def _train(args: argparse.Namespace) -> None:
                     bnb_4bit_quant_type="nf4",
                     bnb_4bit_compute_dtype=torch.bfloat16,
                 ),
-                device_map={"": 0 if args.gpu is not None else int(os.environ.get("LOCAL_RANK", 0))},
+                device_map={
+                    "": 0 if args.gpu is not None else int(os.environ.get("LOCAL_RANK", 0))
+                },
             )
         if conversion:
             if args.trust_remote_code:
@@ -201,9 +223,12 @@ def _train(args: argparse.Namespace) -> None:
             model = load_model(checkpoint, convert=True, strategy=conversion, **load_kwargs)
         else:
             model = (
-                DecisionModel.from_decider(checkpoint, **load_kwargs) if source_format == "decider"
-                else DecisionModel.from_jpt(checkpoint, **load_kwargs) if source_format == "jpt"
-                else DecisionModel.from_eikos(checkpoint, **load_kwargs) if source_format == "eikos"
+                DecisionModel.from_decider(checkpoint, **load_kwargs)
+                if source_format == "decider"
+                else DecisionModel.from_jpt(checkpoint, **load_kwargs)
+                if source_format == "jpt"
+                else DecisionModel.from_eikos(checkpoint, **load_kwargs)
+                if source_format == "eikos"
                 else DecisionModel.from_pretrained(checkpoint, **load_kwargs)
             )
     method = args.finetune_method
@@ -239,10 +264,16 @@ def _train(args: argparse.Namespace) -> None:
         trainer.select_best(metric=args.selection_metric)
     trainer.export(output, merge_lora=True, safetensors=True)
     if trainer._active and trainer._active._accelerator.is_main_process:
-        print(json.dumps({
-            "output": str(output), "stages": list(trainer.history),
-            "selected_stage": trainer.selected_stage, "temperature": trainer.model.temperature,
-        }))
+        print(
+            json.dumps(
+                {
+                    "output": str(output),
+                    "stages": list(trainer.history),
+                    "selected_stage": trainer.selected_stage,
+                    "temperature": trainer.model.temperature,
+                }
+            )
+        )
 
 
 def _evaluate(args: argparse.Namespace) -> None:
@@ -262,9 +293,13 @@ def _evaluate(args: argparse.Namespace) -> None:
         dataset = islice(dataset, args.max_rows)
     if args.backend == "vllm":
         if args.model_format == "native":
-            raise ValueError("native decision heads need the publisher runtime; OpenJev uses --native-base-url")
+            raise ValueError(
+                "native decision heads need the publisher runtime; OpenJev uses --native-base-url"
+            )
         if args.revision:
-            raise ValueError("--revision is for PyTorch upstream loading; export a pinned model for vLLM")
+            raise ValueError(
+                "--revision is for PyTorch upstream loading; export a pinned model for vLLM"
+            )
         if args.model_format == "bosun":
             raise ValueError("export the pinned Bosun checkpoint before vLLM evaluation")
         from futurix_decision.vllm import VLLMEngine
@@ -279,9 +314,12 @@ def _evaluate(args: argparse.Namespace) -> None:
     else:
         if args.model_format == "native":
             model = load_model(
-                args.model, device="cuda:0" if args.gpu is not None else "cpu",
-                revision=args.revision, trust_remote_code=args.trust_remote_code,
-                base_url=args.native_base_url, family=args.native_family,
+                args.model,
+                device="cuda:0" if args.gpu is not None else "cpu",
+                revision=args.revision,
+                trust_remote_code=args.trust_remote_code,
+                base_url=args.native_base_url,
+                family=args.native_family,
             )
         elif args.model_format == "bosun":
             model = DecisionModel.from_bosun(args.model, **device_kwargs)
@@ -294,17 +332,26 @@ def _evaluate(args: argparse.Namespace) -> None:
         else:
             model = DecisionModel.from_pretrained(args.model, **device_kwargs)
     result = evaluate(
-        model, dataset, batch_size=args.batch_size, progress_every=args.progress_every,
+        model,
+        dataset,
+        batch_size=args.batch_size,
+        progress_every=args.progress_every,
         predictions_output=args.predictions_output,
         resume=args.resume_evaluation,
-        run_id=json.dumps({
-            "model": args.model, "model_format": args.model_format,
-            "dataset": args.dataset, "split": args.split, "max_rows": args.max_rows,
-            **({"revision": args.revision} if args.revision else {}),
-            **({"dataset_revision": args.dataset_revision} if args.dataset_revision else {}),
-            **({"backend": args.backend} if args.backend != "transformers" else {}),
-            **({"skip_rows": args.skip_rows} if args.skip_rows else {}),
-        }, sort_keys=True),
+        run_id=json.dumps(
+            {
+                "model": args.model,
+                "model_format": args.model_format,
+                "dataset": args.dataset,
+                "split": args.split,
+                "max_rows": args.max_rows,
+                **({"revision": args.revision} if args.revision else {}),
+                **({"dataset_revision": args.dataset_revision} if args.dataset_revision else {}),
+                **({"backend": args.backend} if args.backend != "transformers" else {}),
+                **({"skip_rows": args.skip_rows} if args.skip_rows else {}),
+            },
+            sort_keys=True,
+        ),
         max_batch_tokens=None if args.model_format == "native" else args.max_batch_tokens,
     )
     if args.metrics_output:
@@ -316,7 +363,9 @@ def _evaluate(args: argparse.Namespace) -> None:
 
 def _export(args: argparse.Namespace) -> None:
     if args.model_format == "native":
-        raise ValueError("native publisher artifacts are exported by load_model(...).finetune(dataset, output)")
+        raise ValueError(
+            "native publisher artifacts are exported by load_model(...).finetune(dataset, output)"
+        )
     device_kwargs = _select_gpu(args.gpu)
     if args.model_format == "bosun":
         model = DecisionModel.from_bosun(args.model, revision=args.revision, **device_kwargs)
@@ -341,7 +390,8 @@ def _export(args: argparse.Namespace) -> None:
             json.dumps(
                 {"exported_from": args.model, "created_at": datetime.now(timezone.utc).isoformat()},
                 indent=2,
-            ) + "\n",
+            )
+            + "\n",
             encoding="utf-8",
         )
     print(str(output))
@@ -356,7 +406,9 @@ def _serve(args: argparse.Namespace) -> None:
 
     if args.backend == "vllm":
         if args.model_format == "native":
-            raise ValueError("native decision heads need the publisher runtime, not the generic vLLM engine")
+            raise ValueError(
+                "native decision heads need the publisher runtime, not the generic vLLM engine"
+            )
         from futurix_decision.vllm import VLLMEngine
 
         engine = VLLMEngine(args.model)
@@ -365,18 +417,26 @@ def _serve(args: argparse.Namespace) -> None:
             import torch
 
             native_device = (
-                "cuda" if torch.cuda.is_available() else "cpu"
-            ) if args.device == "auto" else args.device
+                ("cuda" if torch.cuda.is_available() else "cpu")
+                if args.device == "auto"
+                else args.device
+            )
             engine = load_model(
-                args.model, base_url=args.native_base_url, family=args.native_family,
-                revision=args.revision, trust_remote_code=args.trust_remote_code,
+                args.model,
+                base_url=args.native_base_url,
+                family=args.native_family,
+                revision=args.revision,
+                trust_remote_code=args.trust_remote_code,
                 device=native_device,
             )
         else:
             engine = (
-                DecisionModel.from_decider(args.model) if args.model_format == "decider"
-                else DecisionModel.from_jpt(args.model) if args.model_format == "jpt"
-                else DecisionModel.from_eikos(args.model) if args.model_format == "eikos"
+                DecisionModel.from_decider(args.model)
+                if args.model_format == "decider"
+                else DecisionModel.from_jpt(args.model)
+                if args.model_format == "jpt"
+                else DecisionModel.from_eikos(args.model)
+                if args.model_format == "eikos"
                 else DecisionModel.from_pretrained(args.model)
             )
         if args.device != "cpu" and args.model_format != "native":
@@ -404,21 +464,32 @@ def main(argv: list[str] | None = None) -> None:
     train.add_argument("--stages", help="Comma-separated ordered stage names")
     train.add_argument("--finetune-method", choices=("full", "lora", "qlora"))
     train.add_argument("--log-jsonl")
-    train.add_argument("--model-format", choices=("standard", "bosun", "decider", "jpt", "eikos", "native"))
     train.add_argument(
-        "--convert-strategy", choices=("pointer", "bosun", "letter_code"),
+        "--model-format", choices=("standard", "bosun", "decider", "jpt", "eikos", "native")
+    )
+    train.add_argument(
+        "--convert-strategy",
+        choices=("pointer", "bosun", "letter_code"),
         type=lambda value: "letter_code" if value == "pplx" else value,
         help="Convert a raw model before training; letter_code supports RLCD",
     )
-    train.add_argument("--decision-tokens", type=int, help="Number of available decision codes/slots for a raw conversion")
+    train.add_argument(
+        "--decision-tokens",
+        type=int,
+        help="Number of available decision codes/slots for a raw conversion",
+    )
     train.add_argument("--revision", help="Pinned upstream model revision")
     train.add_argument("--trust-remote-code", action="store_true")
     train.add_argument("--native-family", help="Native family for a local publisher checkpoint")
     train.add_argument("--gpu", type=int, help="Physical GPU index; isolates this SDK process")
     train.add_argument("--checkpoint-dir", help="Save a reloadable checkpoint after each stage")
-    train.add_argument("--resume", action="store_true", help="Continue from checkpoint-dir/progress.json")
+    train.add_argument(
+        "--resume", action="store_true", help="Continue from checkpoint-dir/progress.json"
+    )
     train.add_argument("--max-examples", type=int, help="Limit training rows per stage for a pilot")
-    train.add_argument("--selection-metric", choices=("accuracy", "nll", "last"), default="accuracy")
+    train.add_argument(
+        "--selection-metric", choices=("accuracy", "nll", "last"), default="accuracy"
+    )
     train.set_defaults(run=_train)
     evaluation = commands.add_parser("evaluate", help="Report held-out decision metrics")
     evaluation.add_argument("--model", required=True)
@@ -426,33 +497,55 @@ def main(argv: list[str] | None = None) -> None:
     evaluation.add_argument("--split", default="test_set_30k")
     evaluation.add_argument("--dataset-revision", help="Pinned Hugging Face dataset commit")
     evaluation.add_argument("--batch-size", type=int, default=16)
-    evaluation.add_argument("--model-format", choices=("standard", "bosun", "decider", "jpt", "eikos", "native"), default="standard")
-    evaluation.add_argument("--revision", help="Pinned upstream model revision for PyTorch evaluation")
+    evaluation.add_argument(
+        "--model-format",
+        choices=("standard", "bosun", "decider", "jpt", "eikos", "native"),
+        default="standard",
+    )
+    evaluation.add_argument(
+        "--revision", help="Pinned upstream model revision for PyTorch evaluation"
+    )
     evaluation.add_argument("--trust-remote-code", action="store_true")
-    evaluation.add_argument("--native-base-url", help="Publisher System One server (not generic vLLM)")
-    evaluation.add_argument("--native-family", help="Native family for a local publisher checkpoint")
+    evaluation.add_argument(
+        "--native-base-url", help="Publisher System One server (not generic vLLM)"
+    )
+    evaluation.add_argument(
+        "--native-family", help="Native family for a local publisher checkpoint"
+    )
     evaluation.add_argument("--backend", choices=("transformers", "vllm"), default="transformers")
     evaluation.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.75)
     evaluation.add_argument("--gpu", type=int)
     evaluation.add_argument("--max-rows", type=int)
-    evaluation.add_argument("--skip-rows", type=int, default=0, help="Skip rows before a diagnostic slice")
+    evaluation.add_argument(
+        "--skip-rows", type=int, default=0, help="Skip rows before a diagnostic slice"
+    )
     evaluation.add_argument("--metrics-output")
     evaluation.add_argument("--max-sequence-length", type=int)
     evaluation.add_argument("--progress-every", type=int, default=1000)
-    evaluation.add_argument("--predictions-output", help="Append per-row results for resumable evaluation")
+    evaluation.add_argument(
+        "--predictions-output", help="Append per-row results for resumable evaluation"
+    )
     evaluation.add_argument("--resume-evaluation", action="store_true")
     evaluation.add_argument("--max-batch-tokens", type=int, default=16384)
     evaluation.set_defaults(run=_evaluate)
     export = commands.add_parser("export", help="Export a full Hugging Face checkpoint")
     export.add_argument("--model", required=True)
     export.add_argument("--output", required=True)
-    export.add_argument("--model-format", choices=("standard", "bosun", "decider", "jpt", "eikos", "native"), default="standard")
+    export.add_argument(
+        "--model-format",
+        choices=("standard", "bosun", "decider", "jpt", "eikos", "native"),
+        default="standard",
+    )
     export.add_argument("--revision", help="Pinned upstream Bosun revision")
     export.add_argument("--gpu", type=int)
     export.set_defaults(run=_export)
     serve = commands.add_parser("serve", help="Start the FastAPI decision server")
     serve.add_argument("--model", required=True)
-    serve.add_argument("--model-format", choices=("standard", "decider", "jpt", "eikos", "native"), default="standard")
+    serve.add_argument(
+        "--model-format",
+        choices=("standard", "decider", "jpt", "eikos", "native"),
+        default="standard",
+    )
     serve.add_argument("--native-base-url", help="Publisher System One server (not generic vLLM)")
     serve.add_argument("--native-family", help="Native family for a local publisher checkpoint")
     serve.add_argument("--revision", help="Immutable upstream model revision")

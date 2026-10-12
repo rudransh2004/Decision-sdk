@@ -43,7 +43,9 @@ class DecisionRequest(BaseModel):
         # Kind-specific endpoints supply their kind after request parsing.
         # Still validate state/question here even if a choice has no options.
         if self.kind == "choice" and self.choices is None:
-            DecisionInput(kind="noul", state=self.state, question=self.question, options=["false", "true"])
+            DecisionInput(
+                kind="noul", state=self.state, question=self.question, options=["false", "true"]
+            )
         else:
             self.to_input()
         return self
@@ -57,7 +59,9 @@ class DecisionRequest(BaseModel):
             options = ["false", "true"]
         else:
             options = [str(level) for level in range(self.min_score, self.max_score + 1)]
-        return DecisionInput(kind=self.kind, state=self.state, question=self.question, options=options)
+        return DecisionInput(
+            kind=self.kind, state=self.state, question=self.question, options=options
+        )
 
 
 class DecisionResponse(BaseModel):

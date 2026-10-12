@@ -13,10 +13,19 @@ class LoggingTests(unittest.TestCase):
             logger = TrainingLogger(jsonl=str(path))
             logger.log(
                 {
-                    "step": 1, "loss": 0.3, "rl_loss": 0.1, "sft_loss": 0.2,
-                    "kl_loss": 0.0, "mean_reward": -0.1, "reward_std": 0.05,
-                    "entropy": 0.7, "accuracy": 0.6, "nll": 0.8,
-                    "brier": 0.2, "ece": 0.1, "mean_confidence": 0.65,
+                    "step": 1,
+                    "loss": 0.3,
+                    "rl_loss": 0.1,
+                    "sft_loss": 0.2,
+                    "kl_loss": 0.0,
+                    "mean_reward": -0.1,
+                    "reward_std": 0.05,
+                    "entropy": 0.7,
+                    "accuracy": 0.6,
+                    "nll": 0.8,
+                    "brier": 0.2,
+                    "ece": 0.1,
+                    "mean_confidence": 0.65,
                 }
             )
             logger.close()

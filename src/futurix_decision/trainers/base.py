@@ -80,21 +80,26 @@ class DecisionTrainer:
         self, *, stages: Sequence[str] = ("decision_sft",)
     ) -> list[dict[str, float | int]] | dict[str, list[dict[str, float | int]]]:
         stages = list(stages)
-        if not stages or len(set(stages)) != len(stages) or any(
-            stage not in ("decision_sft", "calibration", "rlcd") for stage in stages
+        if (
+            not stages
+            or len(set(stages)) != len(stages)
+            or any(stage not in ("decision_sft", "calibration", "rlcd") for stage in stages)
         ):
             raise ValueError("stages must be unique entries from decision_sft, calibration, rlcd")
         if len(stages) > 1 and isinstance(self.dataset, Iterator):
             raise ValueError("multi-stage training requires a re-iterable dataset or path")
         if (
-            "calibration" in stages and "rlcd" in stages
+            "calibration" in stages
+            and "rlcd" in stages
             and isinstance(self.calibration_dataset, Iterator)
         ):
             raise ValueError("calibration_dataset must be re-iterable for post-RLCD refitting")
         if len(stages) > 1 and isinstance(self.validation_dataset, Iterator):
             raise ValueError("validation_dataset must be re-iterable across stages")
         if "calibration" in stages and self._heldout() is None:
-            raise ValueError("provide a separate calibration_dataset for held-out temperature fitting")
+            raise ValueError(
+                "provide a separate calibration_dataset for held-out temperature fitting"
+            )
         for stage in stages:
             if stage == "decision_sft":
                 current = self.sft
@@ -124,7 +129,12 @@ class DecisionTrainer:
                     wandb_project=self.sft_config.wandb_project,
                 )
                 reference_model = self.reference_model
-                if reference_model is None and config.kl_beta and self.checkpoint_dir and self.history:
+                if (
+                    reference_model is None
+                    and config.kl_beta
+                    and self.checkpoint_dir
+                    and self.history
+                ):
                     # Reload the completed previous stage instead of
                     # deepcopying a model with PEFT/Accelerate device hooks.
                     # PyTorch 2.11 cannot deepcopy some of those hook handles.
@@ -132,8 +142,7 @@ class DecisionTrainer:
                     if previous.is_dir():
                         device = next(self.model.backbone.parameters()).device
                         load_kwargs = (
-                            {"device_map": {"": device.index or 0}}
-                            if device.type == "cuda" else {}
+                            {"device_map": {"": device.index or 0}} if device.type == "cuda" else {}
                         )
                         reference_model = DecisionModel.from_pretrained(previous, **load_kwargs)
                 current = RLCDTrainer(
@@ -170,12 +179,16 @@ class DecisionTrainer:
             root.mkdir(parents=True, exist_ok=True)
             destination = root / stage
             if destination.exists():
-                raise FileExistsError(f"refusing to overwrite existing stage checkpoint: {destination}")
+                raise FileExistsError(
+                    f"refusing to overwrite existing stage checkpoint: {destination}"
+                )
             with tempfile.TemporaryDirectory(dir=root, prefix=f".{stage}-") as temporary:
                 self.model.save_pretrained(temporary)
                 os.replace(temporary, destination)
             state = {
-                "dataset": str(self.dataset) if isinstance(self.dataset, (str, Path)) else "<in-memory>",
+                "dataset": str(self.dataset)
+                if isinstance(self.dataset, (str, Path))
+                else "<in-memory>",
                 "dataset_revision": self.dataset_revision,
                 "completed_stages": list(self.history),
                 "checkpoint": str(destination.resolve()),
@@ -185,8 +198,12 @@ class DecisionTrainer:
                 "head_type": self.model.head_type,
             }
             with tempfile.NamedTemporaryFile(
-                mode="w", dir=root, prefix=".progress-", suffix=".json",
-                encoding="utf-8", delete=False,
+                mode="w",
+                dir=root,
+                prefix=".progress-",
+                suffix=".json",
+                encoding="utf-8",
+                delete=False,
             ) as output:
                 json.dump(state, output, indent=2, allow_nan=False)
                 output.write("\n")
@@ -208,17 +225,19 @@ class DecisionTrainer:
         self.selected_stage = max(
             self.validation_metrics,
             key=lambda stage: (
-                self.validation_metrics[stage]["accuracy"],
-                -self.validation_metrics[stage]["nll"],
-            ) if metric == "accuracy" else (
-                -self.validation_metrics[stage]["nll"],
-                self.validation_metrics[stage]["accuracy"],
+                (
+                    self.validation_metrics[stage]["accuracy"],
+                    -self.validation_metrics[stage]["nll"],
+                )
+                if metric == "accuracy"
+                else (
+                    -self.validation_metrics[stage]["nll"],
+                    self.validation_metrics[stage]["accuracy"],
+                )
             ),
         )
         if self.selected_stage != list(self.history)[-1]:
-            self.model = DecisionModel.from_pretrained(
-                self.checkpoint_dir / self.selected_stage
-            )
+            self.model = DecisionModel.from_pretrained(self.checkpoint_dir / self.selected_stage)
         return self.selected_stage
 
     def export(
@@ -237,19 +256,23 @@ class DecisionTrainer:
                     self.model.save_pretrained(directory, safe_serialization=safetensors)
                     merged = DecisionModel.from_pretrained(directory)
                     merged.save_pretrained(output, safe_serialization=safetensors)
-            elif getattr(self.model.backbone, "peft_config", None) and not merge_lora and not quantized:
+            elif (
+                getattr(self.model.backbone, "peft_config", None)
+                and not merge_lora
+                and not quantized
+            ):
                 if not self.model.base_checkpoint:
                     raise ValueError("unmerged LoRA needs a recoverable base checkpoint")
                 self.model.backbone.save_pretrained(output, safe_serialization=safetensors)
                 self.model.tokenizer.save_pretrained(output)
-                self.model._save_decision_metadata(
-                    output, adapter_base=self.model.base_checkpoint
-                )
+                self.model._save_decision_metadata(output, adapter_base=self.model.base_checkpoint)
             else:
                 self.model.save_pretrained(output, safe_serialization=safetensors)
             metadata = {
                 "created_at": datetime.now(timezone.utc).isoformat(),
-                "dataset": str(self.dataset) if isinstance(self.dataset, (str, Path)) else "<in-memory>",
+                "dataset": str(self.dataset)
+                if isinstance(self.dataset, (str, Path))
+                else "<in-memory>",
                 "dataset_revision": self.dataset_revision,
                 "model_source": self.model.source_checkpoint,
                 "source_revision": self.model.source_revision,
@@ -259,7 +282,9 @@ class DecisionTrainer:
                 "head_config": self.model.head_config,
                 "stages": list(self.history),
                 "sft_config": asdict(self.sft_config),
-                "calibration_config": asdict(self.calibration_config) if self.calibration_config else None,
+                "calibration_config": asdict(self.calibration_config)
+                if self.calibration_config
+                else None,
                 "rlcd_config": asdict(self.rlcd_config) if self.rlcd_config else None,
                 "history": self.history,
                 "validation_metrics": self.validation_metrics,

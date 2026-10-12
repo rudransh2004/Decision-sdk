@@ -38,8 +38,12 @@ def format_decision_prompt(
 
 
 def _candidate_order(
-    example: DecisionInput, max_options: int, seed: int, assignment_seed: int | None,
-    *, reject_marker: bool = True,
+    example: DecisionInput,
+    max_options: int,
+    seed: int,
+    assignment_seed: int | None,
+    *,
+    reject_marker: bool = True,
 ) -> tuple[str, str, list[str], list[int], list[int]]:
     if not 2 <= len(example.options) <= max_options:
         raise ValueError("number of options must be between 2 and max_options")
@@ -91,7 +95,11 @@ def format_tokenized_head_prompt(
     and candidate endpoints are reconstructed when a trained checkpoint reloads.
     """
     state, question, choices, order, slots = _candidate_order(
-        example, max_options, seed, assignment_seed, reject_marker=False,
+        example,
+        max_options,
+        seed,
+        assignment_seed,
+        reject_marker=False,
     )
     ids = tokenizer.encode(
         f"State: {state}\nQuestion: {question}\nCandidates:\n",

@@ -92,13 +92,20 @@ def _source(checkpoint: str | Path) -> tuple[str, str]:
 
 
 def _pinned_remote(
-    revision: str | None, trust_remote_code: bool, family: str, *, local: bool = False,
+    revision: str | None,
+    trust_remote_code: bool,
+    family: str,
+    *,
+    local: bool = False,
 ) -> None:
-    if not trust_remote_code or (not local and (
-        revision is None or len(revision) != 40 or any(
-            digit not in "0123456789abcdefABCDEF" for digit in revision
+    if not trust_remote_code or (
+        not local
+        and (
+            revision is None
+            or len(revision) != 40
+            or any(digit not in "0123456789abcdefABCDEF" for digit in revision)
         )
-    )):
+    ):
         raise ValueError(
             f"{family} runs publisher code: pass trust_remote_code=True"
             + ("" if local else " and an immutable 40-character revision from the model card")
@@ -107,7 +114,9 @@ def _pinned_remote(
 
 
 def _missing(package: str, extra: str) -> ImportError:
-    return ImportError(f"{package} is required: install futurix-decision[{extra}] in a compatible environment")
+    return ImportError(
+        f"{package} is required: install futurix-decision[{extra}] in a compatible environment"
+    )
 
 
 def _require_hub_files(name: str, family: str, revision: str | None, *filenames: str) -> None:
@@ -140,6 +149,7 @@ def _requires_transformers(extra: str, minimum: tuple[int, int]) -> None:
 def _images_for_native(images: Sequence[Any], family: str) -> list[Any]:
     if family in ("clef", "liquid-d1"):
         from transformers.image_utils import load_image
+
         return [load_image(image) if isinstance(image, str) else image for image in images]
     return list(images)
 
@@ -150,9 +160,7 @@ def _verify_openjev(client: Any, checkpoint: str) -> None:
     info = response.json()
     expected = checkpoint.rsplit("/", 1)[-1].lower()
     served = str(info.get("model_dir", "")).lower()
-    temperature, noul_temperature = (
-        (1.07, 1.074766) if "Flash" in checkpoint else (0.85, 1.829074)
-    )
+    temperature, noul_temperature = (1.07, 1.074766) if "Flash" in checkpoint else (0.85, 1.829074)
     flags = info.get("flags", {})
     if not isinstance(flags, Mapping) or (
         served != expected
@@ -182,19 +190,24 @@ def _question(example: DecisionInput) -> dict[str, Any]:
             if len(criteria) != len(example.options):
                 raise ValueError("native score criteria count differs from canonical options")
             return question
-        if example.kind == "noul" and (criteria is None or (
-            isinstance(criteria, Mapping) and not (set(criteria) - {"false", "true"})
-        )):
+        if example.kind == "noul" and (
+            criteria is None
+            or (isinstance(criteria, Mapping) and not (set(criteria) - {"false", "true"}))
+        ):
             if set(example.options) != {"false", "true"}:
                 raise ValueError("native noul readouts require explicit false/true candidate IDs")
             return question
     if example.kind == "noul":
         if set(example.options) != {"false", "true"}:
             raise ValueError("native noul readouts require explicit false/true candidate IDs")
-        criteria = {
-            key: example.candidate_descriptions[example.options.index(key)]
-            for key in ("false", "true")
-        } if example.candidate_descriptions else None
+        criteria = (
+            {
+                key: example.candidate_descriptions[example.options.index(key)]
+                for key in ("false", "true")
+            }
+            if example.candidate_descriptions
+            else None
+        )
     elif example.kind == "score":
         if example.preserve_order or any(
             int(option) != index + int(example.options[0])
@@ -211,17 +224,27 @@ def _question(example: DecisionInput) -> dict[str, Any]:
         criteria = {}
         for i, name in enumerate(example.options):
             label = example.candidate_labels[i] if example.candidate_labels else name
-            description = example.candidate_descriptions[i] if example.candidate_descriptions else ""
-            criteria[name] = f"{label}: {description}" if description and label != name else (
-                description or (label if label != name else None)
+            description = (
+                example.candidate_descriptions[i] if example.candidate_descriptions else ""
             )
-    return {"type": example.kind, "instructions": example.question, **(
-        {"criteria": criteria} if criteria is not None else {}
-    )}
+            criteria[name] = (
+                f"{label}: {description}"
+                if description and label != name
+                else (description or (label if label != name else None))
+            )
+    return {
+        "type": example.kind,
+        "instructions": example.question,
+        **({"criteria": criteria} if criteria is not None else {}),
+    }
 
 
-def _result(example: DecisionInput, answer: Mapping[str, Any], latency_ms: float,
-            confidence_threshold: float | None) -> DecisionResult:
+def _result(
+    example: DecisionInput,
+    answer: Mapping[str, Any],
+    latency_ms: float,
+    confidence_threshold: float | None,
+) -> DecisionResult:
     if answer.get("type") not in (None, example.kind):
         raise ValueError("publisher returned the wrong decision type")
     if example.kind == "noul":
@@ -232,11 +255,19 @@ def _result(example: DecisionInput, answer: Mapping[str, Any], latency_ms: float
     else:
         values = answer.get("probabilities")
         if not isinstance(values, Mapping):
-            raise ValueError("publisher must return per-option probabilities (not only a label/mean)")
-        keys = [str(i) for i in range(len(example.options))] if example.kind == "score" else example.options
+            raise ValueError(
+                "publisher must return per-option probabilities (not only a label/mean)"
+            )
+        keys = (
+            [str(i) for i in range(len(example.options))]
+            if example.kind == "score"
+            else example.options
+        )
         if set(values) != set(keys):
             raise ValueError(f"publisher returned different option IDs: {set(values) ^ set(keys)}")
-        probabilities = dict(zip(example.options, (float(values[key]) for key in keys), strict=True))
+        probabilities = dict(
+            zip(example.options, (float(values[key]) for key in keys), strict=True)
+        )
     if any(not math.isfinite(value) or value < 0 or value > 1 for value in probabilities.values()):
         raise ValueError("publisher returned invalid probabilities")
     total = sum(probabilities.values())
@@ -253,21 +284,27 @@ def _result(example: DecisionInput, answer: Mapping[str, Any], latency_ms: float
         elif example.kind == "score":
             decision = int(winner)
     return DecisionResult(
-        decision=decision, confidence=confidence, probabilities=probabilities,
-        abstained=abstained, latency_ms=latency_ms,
+        decision=decision,
+        confidence=confidence,
+        probabilities=probabilities,
+        abstained=abstained,
+        latency_ms=latency_ms,
     )
 
 
 def _pplx_answer(example: DecisionInput, values: Sequence[float]) -> dict[str, Any]:
     keys = (
-        ["false", "true"] if example.kind == "noul"
-        else [str(i) for i in range(len(example.options))] if example.kind == "score"
+        ["false", "true"]
+        if example.kind == "noul"
+        else [str(i) for i in range(len(example.options))]
+        if example.kind == "score"
         else example.options
     )
     if len(values) != len(keys):
         raise ValueError("PPLX returned a different number of option probabilities")
     return {
-        "type": example.kind, "probabilities": dict(zip(keys, values, strict=True)),
+        "type": example.kind,
+        "probabilities": dict(zip(keys, values, strict=True)),
         **({"noul": values[1]} if example.kind == "noul" else {}),
     }
 
@@ -280,18 +317,36 @@ class NativeDecisionModel:
     arbitrary generative vLLM endpoint.
     """
 
-    def __init__(self, checkpoint: str, family: str, runtime: Any, backend: str,
-                 *, source_revision: str | None = None) -> None:
-        self.checkpoint, self.family, self.runtime, self.backend = checkpoint, family, runtime, backend
+    def __init__(
+        self,
+        checkpoint: str,
+        family: str,
+        runtime: Any,
+        backend: str,
+        *,
+        source_revision: str | None = None,
+    ) -> None:
+        self.checkpoint, self.family, self.runtime, self.backend = (
+            checkpoint,
+            family,
+            runtime,
+            backend,
+        )
         self.source_revision = source_revision
         self.capabilities = NativeCapabilities(
-            inference=True, training=family in _TRAINABLE and backend != "http",
+            inference=True,
+            training=family in _TRAINABLE and backend != "http",
             vllm_inference=family == "openjev" and backend == "http",
             native_readout={
-                "kev": "pointer", "laya": "encoder", "gliner": "schema-encoder",
-                "clef": "joint-schema", "pplx-decider": "noncausal-readout",
-                "openjev": "letter-logprobs", "nox": "candidate-head",
-                "lux": "candidate-head", "liquid-d1": "verbalizer",
+                "kev": "pointer",
+                "laya": "encoder",
+                "gliner": "schema-encoder",
+                "clef": "joint-schema",
+                "pplx-decider": "noncausal-readout",
+                "openjev": "letter-logprobs",
+                "nox": "candidate-head",
+                "lux": "candidate-head",
+                "liquid-d1": "verbalizer",
             }[family],
         )
         # Required by the existing evaluation/journal interface.
@@ -299,9 +354,15 @@ class NativeDecisionModel:
         self.temperature = 1.0  # The publisher has already applied its own calibration.
 
     @classmethod
-    def from_runtime(cls, checkpoint: str, family: str, runtime: Any,
-                     *, backend: str = "systemone",
-                     source_revision: str | None = None) -> NativeDecisionModel:
+    def from_runtime(
+        cls,
+        checkpoint: str,
+        family: str,
+        runtime: Any,
+        *,
+        backend: str = "systemone",
+        source_revision: str | None = None,
+    ) -> NativeDecisionModel:
         """Inject an already loaded native model/server for custom loading and tests."""
         if family not in set(_NATIVE.values()):
             raise ValueError(f"unknown selected native family: {family}")
@@ -309,10 +370,17 @@ class NativeDecisionModel:
 
     @classmethod
     def from_pretrained(
-        cls, checkpoint: str | Path, *, base_url: str | None = None,
-        client: Any | None = None, device: str = "cpu", revision: str | None = None,
-        trust_remote_code: bool = False, family: str | None = None,
-        api_key: str | None = None, verify_server: bool = True,
+        cls,
+        checkpoint: str | Path,
+        *,
+        base_url: str | None = None,
+        client: Any | None = None,
+        device: str = "cpu",
+        revision: str | None = None,
+        trust_remote_code: bool = False,
+        family: str | None = None,
+        api_key: str | None = None,
+        verify_server: bool = True,
         **native_kwargs: Any,
     ) -> NativeDecisionModel:
         resolved, local = checkpoint_source(checkpoint)
@@ -341,7 +409,8 @@ class NativeDecisionModel:
             except ImportError as exc:
                 raise _missing("httpx", "native-http") from exc
             runtime = client or httpx.Client(
-                base_url=base_url, timeout=60.0,
+                base_url=base_url,
+                timeout=60.0,
                 headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             )
             if family == "openjev" and verify_server:
@@ -381,22 +450,30 @@ class NativeDecisionModel:
             tokenizer, model = Checkpoint(source).load(device, LoadOptions(**native_kwargs))
             runtime = (tokenizer, model)
         elif family == "openjev":
-            raise ValueError("OpenJev's supported decision readout needs its vLLM System One helper; pass base_url")
+            raise ValueError(
+                "OpenJev's supported decision readout needs its vLLM System One helper; pass base_url"
+            )
         elif family == "clef":
             _pinned_remote(revision, trust_remote_code, family, local=local)
             _requires_transformers("clef", (5, 10))
             from huggingface_hub import snapshot_download
+
             if not local:
                 _require_hub_files(
-                    name, family, revision,
-                    "joint_schema_model.py", "joint_head_config.json", "joint_head.safetensors",
+                    name,
+                    family,
+                    revision,
+                    "joint_schema_model.py",
+                    "joint_head_config.json",
+                    "joint_head.safetensors",
                 )
             directory = Path(name) if local else Path(snapshot_download(name, revision=revision))
             require_checkpoint_files(directory, family, source=name)
             source = directory / "joint_schema_model.py"
-            module_name = "futurix_native_clef_" + hashlib.sha256(
-                str(source.resolve()).encode()
-            ).hexdigest()[:16]
+            module_name = (
+                "futurix_native_clef_"
+                + hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:16]
+            )
             spec = importlib.util.spec_from_file_location(module_name, source)
             assert spec and spec.loader
             module = importlib.util.module_from_spec(spec)
@@ -419,8 +496,11 @@ class NativeDecisionModel:
                     "PPLX; a Transformers causal model cannot restore its readout"
                 ) from exc
             from huggingface_hub import snapshot_download
+
             if not local:
-                _require_hub_files(name, family, revision, "decision_config.json", "readout.safetensors")
+                _require_hub_files(
+                    name, family, revision, "decision_config.json", "readout.safetensors"
+                )
             directory = Path(name) if local else Path(snapshot_download(name, revision=revision))
             require_checkpoint_files(directory, family, source=name)
             runtime = PplxModel(checkpoint=directory, train=False, device=device, **native_kwargs)
@@ -446,13 +526,17 @@ class NativeDecisionModel:
         if self.family in ("kev", "pplx-decider") and len(example.options) > 255:
             raise ValueError(f"{self.family} native readout supports at most 255 options")
         question = _question(example)
-        payload = {"model": self.checkpoint, "state": example.state,
-                   "questions": {"decision": question}}
+        payload = {
+            "model": self.checkpoint,
+            "state": example.state,
+            "questions": {"decision": question},
+        }
         if example.images:
             if self.family not in ("clef", "pplx-decider", "liquid-d1"):
                 raise ValueError(f"{self.family} does not expose an image decision path here")
             payload["images"] = (
-                example.images if self.backend == "http"
+                example.images
+                if self.backend == "http"
                 else _images_for_native(example.images, self.family)
             )
         if self.backend == "http":
@@ -463,33 +547,48 @@ class NativeDecisionModel:
             output = self.runtime.predict(example.state, payload["questions"])
         elif self.family == "gliner":
             from gliner2.classification import ClassificationSchema
+
             labels = {
                 option: (
                     example.candidate_descriptions[i]
-                    if example.candidate_descriptions and example.candidate_descriptions[i] else None
+                    if example.candidate_descriptions and example.candidate_descriptions[i]
+                    else None
                 )
                 for i, option in enumerate(example.options)
             }
-            schema = ClassificationSchema().single(
-                "decision", labels, instruction=example.question
+            schema = ClassificationSchema().single("decision", labels, instruction=example.question)
+            text = (
+                example.state
+                if isinstance(example.state, str)
+                else json.dumps(example.state, ensure_ascii=False)
             )
-            text = example.state if isinstance(example.state, str) else json.dumps(example.state, ensure_ascii=False)
             result = self.runtime.classify(text, schema)
             if not result["decision"].exclusive:
                 raise ValueError("GLiNER returned a multi-label rather than exclusive decision")
             keys = example.options
             if example.kind == "score":
-                values = dict(zip((str(i) for i in range(len(keys))),
-                                  (result.probabilities("decision")[key] for key in keys), strict=True))
+                values = dict(
+                    zip(
+                        (str(i) for i in range(len(keys))),
+                        (result.probabilities("decision")[key] for key in keys),
+                        strict=True,
+                    )
+                )
             else:
                 values = dict(result.probabilities("decision"))
-            output = {"answers": {"decision": {
-                "type": example.kind, "probabilities": values,
-                **({"noul": values["true"]} if example.kind == "noul" else {}),
-            }}}
+            output = {
+                "answers": {
+                    "decision": {
+                        "type": example.kind,
+                        "probabilities": values,
+                        **({"noul": values["true"]} if example.kind == "noul" else {}),
+                    }
+                }
+            }
         elif self.family == "kev":
             from kev.api import SystemOneRequest, to_answers, to_record
             from kev.model import admit
+
             tokenizer, model = self.runtime
             request = SystemOneRequest.model_validate(payload)
             record, metadata = to_record(request)
@@ -500,14 +599,20 @@ class NativeDecisionModel:
             module, model, processor = self.runtime
             output = module.systemone(model, processor, payload)
         elif self.family == "pplx-decider":
-            values = self.runtime.predict([{
-                "state": example.state, "question": question,
-                **({"images": payload["images"]} if example.images else {}),
-            }])[0]
+            values = self.runtime.predict(
+                [
+                    {
+                        "state": example.state,
+                        "question": question,
+                        **({"images": payload["images"]} if example.images else {}),
+                    }
+                ]
+            )[0]
             output = {"answers": {"decision": _pplx_answer(example, values)}}
         else:
             output = self.runtime.system_one(
-                state=example.state, questions=payload["questions"],
+                state=example.state,
+                questions=payload["questions"],
                 **({"images": payload["images"]} if example.images else {}),
             )
         if not isinstance(output, Mapping) or not isinstance(output.get("answers"), Mapping):
@@ -518,8 +623,11 @@ class NativeDecisionModel:
         return answer
 
     def system_one(
-        self, state: Any, questions: Mapping[str, Mapping[str, Any]],
-        *, images: Sequence[Any] | None = None,
+        self,
+        state: Any,
+        questions: Mapping[str, Mapping[str, Any]],
+        *,
+        images: Sequence[Any] | None = None,
     ) -> dict[str, Any]:
         """Answer several native typed questions over the same state in one call.
 
@@ -533,8 +641,7 @@ class NativeDecisionModel:
         payload = {"model": self.checkpoint, "state": state, "questions": dict(questions)}
         if images:
             payload["images"] = (
-                list(images) if self.backend == "http"
-                else _images_for_native(images, self.family)
+                list(images) if self.backend == "http" else _images_for_native(images, self.family)
             )
         if self.backend == "http":
             response = self.runtime.post("/v1/systemone", json=payload)
@@ -545,43 +652,54 @@ class NativeDecisionModel:
         elif self.family == "kev":
             from kev.api import SystemOneRequest, to_answers, to_record
             from kev.model import admit
+
             tokenizer, model = self.runtime
             record, metadata = to_record(SystemOneRequest.model_validate(payload))
             encoded = admit(model, tokenizer, record)
-            output = {"answers": to_answers(
-                [prob.tolist() for prob in model.probs(encoded)], metadata,
-            )}
+            output = {
+                "answers": to_answers(
+                    [prob.tolist() for prob in model.probs(encoded)],
+                    metadata,
+                )
+            }
         elif self.family == "clef":
             module, model, processor = self.runtime
             output = module.systemone(model, processor, payload)
         elif self.family == "pplx-decider":
             from autojev.model import answer as native_answer
+
             records = [
-                {"state": state, "question": question, **(
-                    {"images": payload["images"]} if images else {}
-                )}
+                {
+                    "state": state,
+                    "question": question,
+                    **({"images": payload["images"]} if images else {}),
+                }
                 for question in questions.values()
             ]
             probabilities = self.runtime.predict(records)
             if len(probabilities) != len(questions):
                 raise ValueError("PPLX returned a different number of answers")
-            output = {"answers": {
-                qid: native_answer(question, values)
-                for (qid, question), values in zip(questions.items(), probabilities, strict=True)
-            }}
+            output = {
+                "answers": {
+                    qid: native_answer(question, values)
+                    for (qid, question), values in zip(
+                        questions.items(), probabilities, strict=True
+                    )
+                }
+            }
         elif self.family == "gliner":
             from gliner2.classification import ClassificationSchema
+
             schema = ClassificationSchema()
             for qid, question in questions.items():
                 kind = question.get("type")
                 criteria = question.get("criteria")
                 if kind == "noul":
-                    if criteria is not None and (not isinstance(criteria, Mapping)
-                                                 or set(criteria) - {"false", "true"}):
+                    if criteria is not None and (
+                        not isinstance(criteria, Mapping) or set(criteria) - {"false", "true"}
+                    ):
                         raise ValueError("noul criteria must be a false/true mapping")
-                    labels = {
-                        key: (criteria or {}).get(key) for key in ("false", "true")
-                    }
+                    labels = {key: (criteria or {}).get(key) for key in ("false", "true")}
                 elif kind == "score" and isinstance(criteria, list):
                     labels = {str(i): description for i, description in enumerate(criteria)}
                 elif kind == "choice" and isinstance(criteria, Mapping):
@@ -600,16 +718,19 @@ class NativeDecisionModel:
                 if question["type"] == "noul":
                     answer = {"type": "noul", "noul": probs["true"]}
                 elif question["type"] == "score":
-                    answer = {"type": "score", "score": sum(
-                        int(key) * value for key, value in probs.items()
-                    ), "probabilities": probs}
+                    answer = {
+                        "type": "score",
+                        "score": sum(int(key) * value for key, value in probs.items()),
+                        "probabilities": probs,
+                    }
                 else:
                     answer = {"type": "choice", "choice": winner, "probabilities": probs}
                 answers[qid] = answer
             output = {"answers": answers}
         else:
             output = self.runtime.system_one(
-                state=state, questions=payload["questions"],
+                state=state,
+                questions=payload["questions"],
                 **({"images": payload["images"]} if images else {}),
             )
         if not isinstance(output, Mapping) or not isinstance(output.get("answers"), Mapping):
@@ -618,19 +739,22 @@ class NativeDecisionModel:
             raise ValueError("native model answered a different set of question IDs")
         return dict(output)
 
-    def decide(self, example: DecisionInput, *,
-               confidence_threshold: float | None = None) -> DecisionResult:
+    def decide(
+        self, example: DecisionInput, *, confidence_threshold: float | None = None
+    ) -> DecisionResult:
         if confidence_threshold is not None and (
             not math.isfinite(confidence_threshold) or not 0 <= confidence_threshold <= 1
         ):
             raise ValueError("confidence_threshold must be between 0 and 1")
         started = time.perf_counter()
         answer = self._predict(example)
-        return _result(example, answer, (time.perf_counter() - started) * 1000,
-                       confidence_threshold)
+        return _result(
+            example, answer, (time.perf_counter() - started) * 1000, confidence_threshold
+        )
 
-    def batch_decide(self, examples: Sequence[DecisionInput], *,
-                     confidence_threshold: float | None = None) -> list[DecisionResult]:
+    def batch_decide(
+        self, examples: Sequence[DecisionInput], *, confidence_threshold: float | None = None
+    ) -> list[DecisionResult]:
         if not examples:
             return []
         if confidence_threshold is not None and (
@@ -641,10 +765,14 @@ class NativeDecisionModel:
             if any(len(row.options) > 255 for row in examples):
                 raise ValueError("PPLX native readout supports at most 255 options")
             started = time.perf_counter()
-            rows = [{
-                "state": row.state, "question": _question(row),
-                **({"images": row.images} if row.images else {}),
-            } for row in examples]
+            rows = [
+                {
+                    "state": row.state,
+                    "question": _question(row),
+                    **({"images": row.images} if row.images else {}),
+                }
+                for row in examples
+            ]
             predictions = self.runtime.predict(rows)
             if len(predictions) != len(examples):
                 raise ValueError("PPLX returned a different batch size")
@@ -653,7 +781,11 @@ class NativeDecisionModel:
                 _result(row, _pplx_answer(row, values), latency, confidence_threshold)
                 for row, values in zip(examples, predictions, strict=True)
             ]
-        if self.backend == "local" and self.family == "laya" and hasattr(self.runtime, "predict_batch"):
+        if (
+            self.backend == "local"
+            and self.family == "laya"
+            and hasattr(self.runtime, "predict_batch")
+        ):
             grouped: dict[str, list[tuple[int, DecisionInput]]] = {}
             for index, row in enumerate(examples):
                 if row.images:
@@ -679,28 +811,58 @@ class NativeDecisionModel:
         # Other native readouts can have heterogeneous schemas and runtimes.
         return [self.decide(row, confidence_threshold=confidence_threshold) for row in examples]
 
-    def choice(self, *, state: State, choices: Sequence[str],
-               question: str = "Which option should be selected?",
-               confidence_threshold: float | None = None) -> DecisionResult:
-        return self.decide(DecisionInput(state=state, question=question, options=list(choices)),
-                           confidence_threshold=confidence_threshold)
+    def choice(
+        self,
+        *,
+        state: State,
+        choices: Sequence[str],
+        question: str = "Which option should be selected?",
+        confidence_threshold: float | None = None,
+    ) -> DecisionResult:
+        return self.decide(
+            DecisionInput(state=state, question=question, options=list(choices)),
+            confidence_threshold=confidence_threshold,
+        )
 
-    def noul(self, *, state: State, question: str = "Is this true?",
-             confidence_threshold: float | None = None) -> DecisionResult:
-        return self.decide(DecisionInput(
-            kind="noul", state=state, question=question, options=["false", "true"],
-        ), confidence_threshold=confidence_threshold)
+    def noul(
+        self,
+        *,
+        state: State,
+        question: str = "Is this true?",
+        confidence_threshold: float | None = None,
+    ) -> DecisionResult:
+        return self.decide(
+            DecisionInput(
+                kind="noul",
+                state=state,
+                question=question,
+                options=["false", "true"],
+            ),
+            confidence_threshold=confidence_threshold,
+        )
 
-    def score(self, *, state: State, question: str = "What score should be assigned?",
-              min_score: int = 0, max_score: int = 5,
-              confidence_threshold: float | None = None) -> DecisionResult:
-        return self.decide(DecisionInput(
-            kind="score", state=state, question=question,
-            options=[str(level) for level in range(min_score, max_score + 1)],
-        ), confidence_threshold=confidence_threshold)
+    def score(
+        self,
+        *,
+        state: State,
+        question: str = "What score should be assigned?",
+        min_score: int = 0,
+        max_score: int = 5,
+        confidence_threshold: float | None = None,
+    ) -> DecisionResult:
+        return self.decide(
+            DecisionInput(
+                kind="score",
+                state=state,
+                question=question,
+                options=[str(level) for level in range(min_score, max_score + 1)],
+            ),
+            confidence_threshold=confidence_threshold,
+        )
 
-    def finetune(self, dataset: Any, output_dir: str | Path, *,
-                 config: Any | None = None, **kwargs: Any) -> NativeDecisionModel:
+    def finetune(
+        self, dataset: Any, output_dir: str | Path, *, config: Any | None = None, **kwargs: Any
+    ) -> NativeDecisionModel:
         """Train and reload in the publisher format; unsupported paths fail before loading data."""
         if not self.capabilities.training:
             raise NotImplementedError(
@@ -709,16 +871,22 @@ class NativeDecisionModel:
             )
         if self.family in ("clef", "pplx-decider"):
             _pinned_remote(
-                self.source_revision, True, self.family,
+                self.source_revision,
+                True,
+                self.family,
                 local=Path(self.checkpoint).is_dir(),
             )
         from futurix_decision.trainers.native import finetune_native
+
         return finetune_native(self, dataset, output_dir, config=config, **kwargs)
 
 
 def load_model(
-    checkpoint: str | Path, *, convert: bool = False,
-    family: str | None = None, **kwargs: Any,
+    checkpoint: str | Path,
+    *,
+    convert: bool = False,
+    family: str | None = None,
+    **kwargs: Any,
 ) -> Any:
     """Load a known Hub release on demand or an existing local decision checkpoint.
 
@@ -740,8 +908,10 @@ def load_model(
     name, local = checkpoint_source(ALIASES.get(original, original))
     path = Path(name)
     registered = None if local else identify_family(name)
-    identified = infer_local_family(path) if local else (
-        _NATIVE.get(name) or (registered.name if registered else None)
+    identified = (
+        infer_local_family(path)
+        if local
+        else (_NATIVE.get(name) or (registered.name if registered else None))
     )
     if identified == "encoder":  # Hub catalogue groups two different publisher runtimes.
         identified = _NATIVE.get(name)
@@ -753,6 +923,7 @@ def load_model(
             raise ValueError("already trained Futurix checkpoints do not need conversion")
         if not local:
             from futurix_decision.utils.config import load_decision_config
+
             metadata = load_decision_config(name, **kwargs)
             if not metadata:
                 raise FileNotFoundError(
@@ -764,19 +935,27 @@ def load_model(
             require_checkpoint_files(path, "futurix")
             metadata = read_checkpoint_json(path / "decision_config.json")
             if metadata.get("source_checkpoint") in (
-                "Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B-Base",
+                "Qwen/Qwen3.5-9B",
+                "Qwen/Qwen3.5-9B-Base",
             ):
                 _requires_transformers("qwen3.5", (5, 17))
         from futurix_decision.models.decision_model import DecisionModel
+
         return DecisionModel.from_pretrained(name, **kwargs)
-    if family == "bosun" and (local or name in (
-        "Hanno-Labs/bosun-v3.1-0.6b", "Hanno-Labs/bosun-v3.1-1.7b",
-    )):
+    if family == "bosun" and (
+        local
+        or name
+        in (
+            "Hanno-Labs/bosun-v3.1-0.6b",
+            "Hanno-Labs/bosun-v3.1-1.7b",
+        )
+    ):
         if convert:
             raise ValueError("Bosun v3.1 already contains a trained decision head")
         if local:
             require_checkpoint_files(path, "bosun")
         from futurix_decision.models.decision_model import DecisionModel
+
         return DecisionModel.from_bosun(name, **kwargs)
     if family in ("decider", "jpt", "eikos") and (
         local or (registered is not None and registered.supports(name, "inference"))
@@ -786,30 +965,41 @@ def load_model(
         if local:
             require_checkpoint_files(path, family)
         from futurix_decision.models.decision_model import DecisionModel
+
         return getattr(DecisionModel, f"from_{family}")(name, **kwargs)
     if name in ("Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B-Base"):
         if not convert:
-            raise ValueError("Qwen3.5-9B is not decision-trained; pass convert=True and train before inference")
+            raise ValueError(
+                "Qwen3.5-9B is not decision-trained; pass convert=True and train before inference"
+            )
         _requires_transformers("qwen3.5", (5, 17))
         from futurix_decision.models.decision_model import DecisionModel
+
         if strategy == "bosun":
             if kwargs.pop("head_type", "tokens") != "tokens":
                 raise ValueError("strategy='bosun' requires head_type='tokens'")
             if kwargs.get("decision_tokens", 256) != 256:
                 raise ValueError("strategy='bosun' requires exactly 256 decision tokens")
             quantization = kwargs.get("quantization_config")
-            if getattr(quantization, "load_in_4bit", False) or getattr(quantization, "load_in_8bit", False):
+            if getattr(quantization, "load_in_4bit", False) or getattr(
+                quantization, "load_in_8bit", False
+            ):
                 raise ValueError("Bosun token rows must be added before quantizing the base")
             return DecisionModel.from_pretrained(
-                name, head_type="tokens", prompt_format="bosun-v3",
-                bosun_template_fallback=True, train_backbone=kwargs.pop("train_backbone", True),
+                name,
+                head_type="tokens",
+                prompt_format="bosun-v3",
+                bosun_template_fallback=True,
+                train_backbone=kwargs.pop("train_backbone", True),
                 **kwargs,
             )
         if strategy == "letter_code":
             if kwargs.pop("head_type", "letter_code") != "letter_code":
                 raise ValueError("strategy='letter_code' requires head_type='letter_code'")
             return DecisionModel.from_pretrained(
-                name, head_type="letter_code", head_prompt_version="letter-code-v1",
+                name,
+                head_type="letter_code",
+                head_prompt_version="letter-code-v1",
                 decision_tokens=kwargs.pop("decision_tokens", 255),
                 train_backbone=kwargs.pop("train_backbone", True),
                 attention_mode=kwargs.pop("attention_mode", "noncausal_full_attention"),
@@ -827,42 +1017,55 @@ def load_model(
                 "its native readout. Load it through its supported importer instead"
             )
         if not local and name.count("/") != 1:
-            raise ValueError("convert=True needs an existing local directory or a Hugging Face model ID")
+            raise ValueError(
+                "convert=True needs an existing local directory or a Hugging Face model ID"
+            )
         from futurix_decision.models.decision_model import DecisionModel
         from futurix_decision.utils.config import load_decision_config
 
         metadata = load_decision_config(name, **kwargs)
         if metadata.get("architecture") == "futurix-decision":
-            raise ValueError("this is already a trained Futurix decision checkpoint; omit convert=True")
+            raise ValueError(
+                "this is already a trained Futurix decision checkpoint; omit convert=True"
+            )
         reject_native_checkpoint(name, metadata)
         if not local and kwargs.get("trust_remote_code"):
             _pinned_remote(kwargs.get("revision"), True, "conversion")
         from transformers import AutoConfig
 
         config_kwargs = {
-            key: kwargs[key] for key in (
-                "revision", "token", "trust_remote_code", "cache_dir", "local_files_only"
-            ) if key in kwargs
+            key: kwargs[key]
+            for key in ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
+            if key in kwargs
         }
         config = AutoConfig.from_pretrained(name, **config_kwargs)
         architectures = getattr(config, "architectures", None) or ()
         selected = strategy or "pointer"
         qwen_multimodal = (
-            selected == "letter_code" and getattr(config, "model_type", None) == "qwen3_5"
+            selected == "letter_code"
+            and getattr(config, "model_type", None) == "qwen3_5"
             and getattr(config, "vision_config", None) is not None
         )
         if getattr(config, "is_encoder_decoder", False) or (
             getattr(config, "vision_config", None) and not qwen_multimodal
         ):
-            raise ValueError("conversion supports text-only causal LMs, not seq2seq or multimodal models")
-        if architectures and not any(
-            architecture.endswith(("ForCausalLM", "LMHeadModel"))
-            for architecture in architectures
-        ) and not (qwen_multimodal and "Qwen3_5ForConditionalGeneration" in architectures):
+            raise ValueError(
+                "conversion supports text-only causal LMs, not seq2seq or multimodal models"
+            )
+        if (
+            architectures
+            and not any(
+                architecture.endswith(("ForCausalLM", "LMHeadModel"))
+                for architecture in architectures
+            )
+            and not (qwen_multimodal and "Qwen3_5ForConditionalGeneration" in architectures)
+        ):
             raise ValueError(
                 f"{name} does not declare a text causal LM architecture: {architectures}"
             )
-        required_head = {"bosun": "tokens", "pointer": "pointer", "letter_code": "letter_code"}[selected]
+        required_head = {"bosun": "tokens", "pointer": "pointer", "letter_code": "letter_code"}[
+            selected
+        ]
         head_type = kwargs.pop("head_type", required_head)
         if head_type != required_head:
             raise ValueError(f"strategy={selected!r} requires head_type={required_head!r}")
@@ -870,7 +1073,9 @@ def load_model(
             if kwargs.get("decision_tokens", 256) != 256:
                 raise ValueError("strategy='bosun' requires exactly 256 decision tokens")
             quantization = kwargs.get("quantization_config")
-            if getattr(quantization, "load_in_4bit", False) or getattr(quantization, "load_in_8bit", False):
+            if getattr(quantization, "load_in_4bit", False) or getattr(
+                quantization, "load_in_8bit", False
+            ):
                 raise ValueError("Bosun token rows must be added before quantizing the base")
         train_backbone = kwargs.pop("train_backbone", selected != "pointer")
         if not isinstance(train_backbone, bool):
@@ -880,30 +1085,41 @@ def load_model(
                 _requires_transformers("qwen3.5", (5, 17))
             attention_mode = kwargs.pop(
                 "attention_mode",
-                "noncausal_full_attention" if getattr(config, "model_type", None) == "qwen3_5" else "causal",
+                "noncausal_full_attention"
+                if getattr(config, "model_type", None) == "qwen3_5"
+                else "causal",
             )
             if attention_mode != "causal" and getattr(config, "model_type", None) != "qwen3_5":
                 raise ValueError("noncausal letter-code attention needs a Qwen3.5-family backbone")
             if kwargs.get("decision_tokens", 255) > 255:
                 raise ValueError("letter-code readout supports at most 255 answer codes")
             return DecisionModel.from_pretrained(
-                name, head_type="letter_code", head_prompt_version="letter-code-v1",
+                name,
+                head_type="letter_code",
+                head_prompt_version="letter-code-v1",
                 decision_tokens=kwargs.pop("decision_tokens", 255),
-                attention_mode=attention_mode, multimodal_loader=qwen_multimodal,
-                train_backbone=train_backbone, **kwargs,
+                attention_mode=attention_mode,
+                multimodal_loader=qwen_multimodal,
+                train_backbone=train_backbone,
+                **kwargs,
             )
         return DecisionModel.from_pretrained(
-            name, head_type=head_type,
+            name,
+            head_type=head_type,
             **(
                 {"prompt_format": "bosun-v3", "bosun_template_fallback": True}
-                if selected == "bosun" else {"head_prompt_version": "span-v1"}
+                if selected == "bosun"
+                else {"head_prompt_version": "span-v1"}
             ),
-            train_backbone=train_backbone, **kwargs,
+            train_backbone=train_backbone,
+            **kwargs,
         )
     if family is None and not local and name.count("/") == 1:
         from futurix_decision.utils.config import load_decision_config
+
         if load_decision_config(name, **kwargs).get("architecture") == "futurix-decision":
             from futurix_decision.models.decision_model import DecisionModel
+
             return DecisionModel.from_pretrained(name, **kwargs)
     if local and family is None:
         raise ValueError(

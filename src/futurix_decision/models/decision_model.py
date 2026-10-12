@@ -58,9 +58,7 @@ class DecisionBatch:
 
     def assigned_logits(self, row: int) -> torch.Tensor:
         """Candidate-order logits, with the learned abstain logit last if enabled."""
-        indices = self.slots[row] + (
-            [self.null_slot] if self.null_slot is not None else []
-        )
+        indices = self.slots[row] + ([self.null_slot] if self.null_slot is not None else [])
         return self.logits[row, indices]
 
 
@@ -102,14 +100,24 @@ class DecisionModel:
             raise ValueError("temperature must be finite and positive")
         if max_sequence_length <= 0:
             raise ValueError("max_sequence_length must be positive")
-        if prompt_format not in ("futurix", "bosun-v3", "decider-v2.1", "jpt-llm2jev-chat", "eikos-letter-v1-semif"):
+        if prompt_format not in (
+            "futurix",
+            "bosun-v3",
+            "decider-v2.1",
+            "jpt-llm2jev-chat",
+            "eikos-letter-v1-semif",
+        ):
             raise ValueError("unsupported decision prompt format")
         if prompt_format == "bosun-v3" and decision_tokens != 256:
             raise ValueError("Bosun v3 requires exactly 256 decision tokens")
         if head_type != "tokens" and prompt_format != "futurix":
-            raise ValueError("custom heads require prompt_format='futurix', not Bosun's token contract")
+            raise ValueError(
+                "custom heads require prompt_format='futurix', not Bosun's token contract"
+            )
         if prompt_format == "decider-v2.1" and type(self) is DecisionModel:
-            raise ValueError("decider-v2.1 requires DeciderDecisionModel to preserve its letter readout")
+            raise ValueError(
+                "decider-v2.1 requires DeciderDecisionModel to preserve its letter readout"
+            )
         if prompt_format == "jpt-llm2jev-chat" and type(self) is DecisionModel:
             raise ValueError("JPT requires JPTDecisionModel to preserve its chat-letter readout")
         if prompt_format == "eikos-letter-v1-semif" and type(self) is DecisionModel:
@@ -143,7 +151,8 @@ class DecisionModel:
         ):
             raise ValueError("Bosun chat-template fallback requires prompt_format='bosun-v3'")
         if not isinstance(learn_abstain, bool) or (
-            learn_abstain and not (
+            learn_abstain
+            and not (
                 head_type == "pointer" or (head_type == "tokens" and prompt_format == "bosun-v3")
             )
         ):
@@ -187,8 +196,7 @@ class DecisionModel:
             self._token_ids = self._register_decision_tokens()
         else:
             marker_id = (
-                self._register_candidate_marker()
-                if head_prompt_version == "marker-v1" else None
+                self._register_candidate_marker() if head_prompt_version == "marker-v1" else None
             )
             if marker_id is None:
                 if self.tokenizer.pad_token is None:
@@ -223,9 +231,9 @@ class DecisionModel:
         existing = getattr(tokenizer, "additional_special_tokens", None)
         if existing is None:  # Transformers 5 uses extra_special_tokens.
             existing = getattr(tokenizer, "extra_special_tokens", [])
-        tokenizer.add_special_tokens({
-            "additional_special_tokens": list(dict.fromkeys(existing + [CANDIDATE_MARKER]))
-        })
+        tokenizer.add_special_tokens(
+            {"additional_special_tokens": list(dict.fromkeys(existing + [CANDIDATE_MARKER]))}
+        )
         if tokenizer.pad_token is None:
             if tokenizer.eos_token is None:
                 raise ValueError("tokenizer needs a pad or EOS token for batch inference")
@@ -357,7 +365,10 @@ class DecisionModel:
             from futurix_decision.models.eikos import EikosDecisionModel
 
             cls = EikosDecisionModel
-        if decision_config.get("prompt_format") == "decider-v2.1" and "type_temperatures" not in decision_config:
+        if (
+            decision_config.get("prompt_format") == "decider-v2.1"
+            and "type_temperatures" not in decision_config
+        ):
             raise ValueError("decider-v2.1 checkpoint is missing type-specific calibration")
         stored_head_type = decision_config.get("head_type")
         if stored_head_type == "pplx":
@@ -368,36 +379,45 @@ class DecisionModel:
             raise ValueError("cannot override the saved checkpoint's decision head type")
         if "head_config" in decision_config and head_config is not None:
             if dict(head_config) != decision_config["head_config"]:
-                raise ValueError("cannot override the saved checkpoint's decision head configuration")
+                raise ValueError(
+                    "cannot override the saved checkpoint's decision head configuration"
+                )
         stored_prompt_version = decision_config.get("head_prompt_version")
         if stored_prompt_version == "pplx-v1":
             stored_prompt_version = "letter-code-v1"
         if head_prompt_version == "pplx-v1":
             head_prompt_version = "letter-code-v1"
         if (
-            stored_prompt_version is not None and head_prompt_version is not None
+            stored_prompt_version is not None
+            and head_prompt_version is not None
             and head_prompt_version != stored_prompt_version
         ):
             raise ValueError("cannot override the saved checkpoint's candidate prompt version")
         stored_train_backbone = decision_config.get("train_backbone")
         if (
-            stored_train_backbone is not None and train_backbone is not None
+            stored_train_backbone is not None
+            and train_backbone is not None
             and train_backbone != stored_train_backbone
         ):
             raise ValueError("cannot override the saved checkpoint's backbone training policy")
         stored_bosun_fallback = decision_config.get("bosun_template_fallback")
         if (
-            stored_bosun_fallback is not None and bosun_template_fallback is not None
+            stored_bosun_fallback is not None
+            and bosun_template_fallback is not None
             and bosun_template_fallback != stored_bosun_fallback
         ):
             raise ValueError("cannot override the saved checkpoint's Bosun chat-template fallback")
         stored_learn_abstain = decision_config.get("learn_abstain", False)
         if (
             decision_config.get("architecture") == "futurix-decision"
-            and learn_abstain is not None and learn_abstain != stored_learn_abstain
+            and learn_abstain is not None
+            and learn_abstain != stored_learn_abstain
         ):
             raise ValueError("cannot override the saved checkpoint's abstain readout")
-        for key, override in (("attention_mode", attention_mode), ("multimodal_loader", multimodal_loader)):
+        for key, override in (
+            ("attention_mode", attention_mode),
+            ("multimodal_loader", multimodal_loader),
+        ):
             if key in decision_config and override is not None and override != decision_config[key]:
                 raise ValueError(f"cannot override the saved checkpoint's {key}")
         tokenizer_kwargs = {
@@ -410,20 +430,31 @@ class DecisionModel:
         base_checkpoint = (
             decision_config.get("base_checkpoint")
             if adapter
-            else str(path.resolve()) if path.is_dir() else str(checkpoint)
+            else str(path.resolve())
+            if path.is_dir()
+            else str(checkpoint)
         )
         if adapter and not base_checkpoint:
-            raise ValueError("adapter checkpoint is missing base_checkpoint in decision_config.json")
+            raise ValueError(
+                "adapter checkpoint is missing base_checkpoint in decision_config.json"
+            )
         qwen35_base = str(checkpoint) in (
-            "Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B-Base",
+            "Qwen/Qwen3.5-9B",
+            "Qwen/Qwen3.5-9B-Base",
         ) or decision_config.get("source_checkpoint") in (
-            "Qwen/Qwen3.5-9B", "Qwen/Qwen3.5-9B-Base",
+            "Qwen/Qwen3.5-9B",
+            "Qwen/Qwen3.5-9B-Base",
         )
         use_multimodal = (
-            multimodal_loader if multimodal_loader is not None
+            multimodal_loader
+            if multimodal_loader is not None
             else decision_config.get("multimodal_loader", False)
         )
-        if decision_config.get("prompt_format") == "jpt-llm2jev-chat" or qwen35_base or use_multimodal:
+        if (
+            decision_config.get("prompt_format") == "jpt-llm2jev-chat"
+            or qwen35_base
+            or use_multimodal
+        ):
             try:
                 from transformers import AutoModelForMultimodalLM
             except ImportError as exc:
@@ -461,25 +492,33 @@ class DecisionModel:
             base_checkpoint=base_checkpoint,
             source_checkpoint=decision_config.get("source_checkpoint", str(checkpoint)),
             source_revision=hf_kwargs.get("revision", decision_config.get("source_revision")),
-            base_model_revision=decision_config.get("base_model_revision", hf_kwargs.get("revision")),
+            base_model_revision=decision_config.get(
+                "base_model_revision", hf_kwargs.get("revision")
+            ),
             prompt_format=prompt_format
             if prompt_format is not None
             else decision_config.get("prompt_format", "futurix"),
             prompt_schema=decision_config.get("prompt_schema", BOSUN_PROMPT_SCHEMA),
             head_type=head_type or stored_head_type or "tokens",
-            head_config=head_config if head_config is not None else decision_config.get("head_config"),
+            head_config=head_config
+            if head_config is not None
+            else decision_config.get("head_config"),
             head_prompt_version=head_prompt_version or stored_prompt_version or "marker-v1",
             train_backbone=(
-                train_backbone if train_backbone is not None else
-                stored_train_backbone if stored_train_backbone is not None else True
+                train_backbone
+                if train_backbone is not None
+                else stored_train_backbone
+                if stored_train_backbone is not None
+                else True
             ),
             bosun_template_fallback=(
-                bosun_template_fallback if bosun_template_fallback is not None else
-                stored_bosun_fallback if stored_bosun_fallback is not None else False
+                bosun_template_fallback
+                if bosun_template_fallback is not None
+                else stored_bosun_fallback
+                if stored_bosun_fallback is not None
+                else False
             ),
-            learn_abstain=(
-                learn_abstain if learn_abstain is not None else stored_learn_abstain
-            ),
+            learn_abstain=(learn_abstain if learn_abstain is not None else stored_learn_abstain),
             attention_mode=resolved_attention,
             multimodal_loader=use_multimodal,
             **(
@@ -498,7 +537,9 @@ class DecisionModel:
             try:
                 from peft import PeftModel
             except ImportError as exc:
-                raise ImportError("adapter loading needs pip install futurix-decision[train]") from exc
+                raise ImportError(
+                    "adapter loading needs pip install futurix-decision[train]"
+                ) from exc
             model.backbone = PeftModel.from_pretrained(
                 model.backbone, str(checkpoint), is_trainable=trainable_adapter
             )
@@ -532,23 +573,30 @@ class DecisionModel:
         """
         source, local = checkpoint_source(checkpoint)
         revision = revision or BOSUN_RELEASES.get(source)
-        if (not local and revision is None) or (revision is not None and (
-            len(revision) != 40 or any(
-                digit not in "0123456789abcdefABCDEF" for digit in revision
+        if (not local and revision is None) or (
+            revision is not None
+            and (
+                len(revision) != 40
+                or any(digit not in "0123456789abcdefABCDEF" for digit in revision)
             )
-        )):
+        ):
             raise ValueError("pin the Bosun repository to a full 40-character commit revision")
         if local:
             require_checkpoint_files(Path(source), "bosun")
         package = AutoModelForCausalLM.from_pretrained(
-            source, trust_remote_code=True, **({"revision": revision} if revision else {}), **hf_kwargs
+            source,
+            trust_remote_code=True,
+            **({"revision": revision} if revision else {}),
+            **hf_kwargs,
         )
         if (
             getattr(package.config, "prompt_schema", None) != BOSUN_PROMPT_SCHEMA
             or getattr(package.config, "decision_token_count", None) != 256
             or getattr(package.config, "null_token_index", None) != 255
         ):
-            raise ValueError("checkpoint does not implement the supported Bosun v3 decision contract")
+            raise ValueError(
+                "checkpoint does not implement the supported Bosun v3 decision contract"
+            )
         if package.tokenizer is None:
             raise ValueError("Bosun checkpoint did not load its tokenizer")
         return cls(
@@ -575,9 +623,7 @@ class DecisionModel:
         return DeciderDecisionModel.from_native(checkpoint, **hf_kwargs)
 
     @classmethod
-    def from_jpt(
-        cls, checkpoint: str | Path = "kirp/jpt-4b", **hf_kwargs: Any
-    ) -> DecisionModel:
+    def from_jpt(cls, checkpoint: str | Path = "kirp/jpt-4b", **hf_kwargs: Any) -> DecisionModel:
         """Load JPT's full multimodal backbone for SDK text-decision scoring."""
         from futurix_decision.models.jpt import JPTDecisionModel
 
@@ -600,7 +646,10 @@ class DecisionModel:
             if getattr(self.backbone, "is_loaded_in_4bit", False):
                 if not self.base_checkpoint:
                     raise ValueError("a 4-bit adapter needs a recoverable base_checkpoint")
-                if Path(self.base_checkpoint).is_dir() and Path(self.base_checkpoint).resolve() == path.resolve():
+                if (
+                    Path(self.base_checkpoint).is_dir()
+                    and Path(self.base_checkpoint).resolve() == path.resolve()
+                ):
                     raise ValueError("QLoRA adapter output cannot overwrite its base checkpoint")
                 adapter_base = self.base_checkpoint
             else:
@@ -611,9 +660,7 @@ class DecisionModel:
         self.tokenizer.save_pretrained(path)
         self._save_decision_metadata(path, adapter_base=adapter_base)
 
-    def _save_decision_metadata(
-        self, path: str | Path, *, adapter_base: str | None = None
-    ) -> None:
+    def _save_decision_metadata(self, path: str | Path, *, adapter_base: str | None = None) -> None:
         """Write head weights and metadata alongside an already saved backbone."""
         path = Path(path)
         if self.decision_head is not None:
@@ -644,9 +691,17 @@ class DecisionModel:
                     "max_sequence_length": self.max_sequence_length,
                     "prompt_format": self.prompt_format,
                     "prompt_schema": self.prompt_schema,
-                    **({"source_checkpoint": self.source_checkpoint} if self.source_checkpoint else {}),
+                    **(
+                        {"source_checkpoint": self.source_checkpoint}
+                        if self.source_checkpoint
+                        else {}
+                    ),
                     **({"source_revision": self.source_revision} if self.source_revision else {}),
-                    **({"base_model_revision": self.base_model_revision} if self.base_model_revision else {}),
+                    **(
+                        {"base_model_revision": self.base_model_revision}
+                        if self.base_model_revision
+                        else {}
+                    ),
                     "supported_types": ["choice", "noul", "score"],
                     **({"base_checkpoint": adapter_base} if adapter_base else {}),
                 },
@@ -664,8 +719,10 @@ class DecisionModel:
             return format_letter_code_prompt(example, self.tokenizer, self.head_config["codes"])
         if self.decision_head is not None:
             return format_head_prompt(
-                example, max_options=self.decision_tokens,
-                seed=self.seed, assignment_seed=assignment_seed,
+                example,
+                max_options=self.decision_tokens,
+                seed=self.seed,
+                assignment_seed=assignment_seed,
             )
         if self.prompt_format == "bosun-v3":
             return format_bosun_prompt(
@@ -702,7 +759,11 @@ class DecisionModel:
             raise ValueError("system_one needs at least one question")
         examples = []
         for question_id, question in questions.items():
-            if not isinstance(question_id, str) or not question_id or not isinstance(question, Mapping):
+            if (
+                not isinstance(question_id, str)
+                or not question_id
+                or not isinstance(question, Mapping)
+            ):
                 raise ValueError("system_one questions must be named mappings")
             kind = question.get("type", "choice")
             criteria = question.get("criteria")
@@ -715,33 +776,49 @@ class DecisionModel:
                 descriptions = [(criteria or {}).get(name) for name in names]
             elif kind in ("choice", "score"):
                 if isinstance(criteria, Mapping):
-                    keys = sorted(criteria, key=lambda key: int(key)) if kind == "score" else list(criteria)
+                    keys = (
+                        sorted(criteria, key=lambda key: int(key))
+                        if kind == "score"
+                        else list(criteria)
+                    )
                     names = [str(key) for key in keys]
                     descriptions = [criteria[key] for key in keys]
                 elif isinstance(criteria, Sequence) and not isinstance(criteria, (str, bytes)):
-                    names = [str(i) for i in range(len(criteria))] if kind == "score" else list(criteria)
+                    names = (
+                        [str(i) for i in range(len(criteria))]
+                        if kind == "score"
+                        else list(criteria)
+                    )
                     descriptions = list(criteria) if kind == "score" else [None] * len(names)
                 else:
                     raise ValueError(f"{kind} question needs criteria options")
             else:
                 raise ValueError(f"unsupported system_one question type: {kind!r}")
-            examples.append(DecisionInput(
-                kind=kind, state=state,
-                question=question.get("instructions") or question_id,
-                options=names,
-                candidate_descriptions=[
-                    value if isinstance(value, str) else (
-                        "" if value is None else json.dumps(value, ensure_ascii=False, sort_keys=True)
-                    )
-                    for value in descriptions
-                ],
-            ))
+            examples.append(
+                DecisionInput(
+                    kind=kind,
+                    state=state,
+                    question=question.get("instructions") or question_id,
+                    options=names,
+                    candidate_descriptions=[
+                        value
+                        if isinstance(value, str)
+                        else (
+                            ""
+                            if value is None
+                            else json.dumps(value, ensure_ascii=False, sort_keys=True)
+                        )
+                        for value in descriptions
+                    ],
+                )
+            )
         answers = {}
         for question_id, example, result in zip(
             questions, examples, self.batch_decide(examples), strict=True
         ):
             answer: dict[str, Any] = {
-                "type": example.kind, "probabilities": result.probabilities,
+                "type": example.kind,
+                "probabilities": result.probabilities,
             }
             if example.kind == "choice":
                 answer["choice"] = result.decision
@@ -749,8 +826,7 @@ class DecisionModel:
                 answer["noul"] = result.probabilities["true"]
             else:
                 answer["score"] = sum(
-                    int(level) * probability
-                    for level, probability in result.probabilities.items()
+                    int(level) * probability for level, probability in result.probabilities.items()
                 )
             answers[question_id] = answer
         return {"answers": answers}
@@ -797,8 +873,11 @@ class DecisionModel:
         if self.decision_head is not None and self.head_prompt_version == "span-v1":
             prepared = [
                 format_tokenized_head_prompt(
-                    row, self.tokenizer, max_options=self.decision_tokens,
-                    seed=self.seed, assignment_seed=assignment_seed,
+                    row,
+                    self.tokenizer,
+                    max_options=self.decision_tokens,
+                    seed=self.seed,
+                    assignment_seed=assignment_seed,
                 )
                 for row in examples
             ]
@@ -811,10 +890,11 @@ class DecisionModel:
             )
             attention_mask = torch.zeros_like(input_ids)
             for row, (tokens, _, _) in enumerate(prepared):
-                input_ids[row, :len(tokens)] = torch.tensor(tokens, dtype=torch.long)
-                attention_mask[row, :len(tokens)] = 1
+                input_ids[row, : len(tokens)] = torch.tensor(tokens, dtype=torch.long)
+                attention_mask[row, : len(tokens)] = 1
             encoded: Mapping[str, torch.Tensor] = {
-                "input_ids": input_ids, "attention_mask": attention_mask,
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
             }
         else:
             prompts_and_slots = [self._prompt_and_slots(row, assignment_seed) for row in examples]
@@ -835,16 +915,22 @@ class DecisionModel:
             hidden = self._candidate_hidden_states(encoded)
             if next(self.decision_head.parameters()).device != hidden.device:
                 if self.backbone.training:
-                    raise ValueError("training a device-dispatched decision head needs a single execution device")
+                    raise ValueError(
+                        "training a device-dispatched decision head needs a single execution device"
+                    )
                 self.decision_head.to(hidden.device)
             # Letter-code inputs are left-padded; the final hidden state sees
             # the complete state, question, and presented answer-code table.
             scores = self.decision_head(hidden[:, -1])
-            available = torch.arange(
-                self.decision_tokens, device=scores.device,
-            )[None, :] < torch.tensor(
-                [len(row.options) for row in examples], device=scores.device
-            )[:, None]
+            available = (
+                torch.arange(
+                    self.decision_tokens,
+                    device=scores.device,
+                )[None, :]
+                < torch.tensor([len(row.options) for row in examples], device=scores.device)[
+                    :, None
+                ]
+            )
             if not torch.isfinite(scores[available]).all():
                 raise ValueError("letter-code readout produced non-finite candidate logits")
             return DecisionBatch(scores.masked_fill(~available, float("-inf")), slots)
@@ -855,11 +941,15 @@ class DecisionModel:
                 # Preserve the published marker-v1 forward contract for
                 # already exported pointer-head checkpoints.
                 hidden = self.backbone(
-                    **encoded, output_hidden_states=True, logits_to_keep=1,
+                    **encoded,
+                    output_hidden_states=True,
+                    logits_to_keep=1,
                 ).hidden_states[-1]
             if next(self.decision_head.parameters()).device != hidden.device:
                 if self.backbone.training:
-                    raise ValueError("training a device-dispatched pointer head needs a single execution device")
+                    raise ValueError(
+                        "training a device-dispatched pointer head needs a single execution device"
+                    )
                 self.decision_head.to(hidden.device)
             sizes = [len(row.options) for row in examples]
             max_options = max(sizes)
@@ -871,7 +961,9 @@ class DecisionModel:
                 if endpoints is not None:
                     markers = torch.tensor(endpoints[row], device=hidden.device)
                 else:
-                    markers = encoded["input_ids"][row].eq(self._marker_id).nonzero(as_tuple=True)[0]
+                    markers = (
+                        encoded["input_ids"][row].eq(self._marker_id).nonzero(as_tuple=True)[0]
+                    )
                     if markers.numel() != count:
                         raise ValueError("each option must have exactly one candidate marker")
                 candidates[row, :count] = hidden[row, markers]
@@ -883,9 +975,7 @@ class DecisionModel:
                 raise ValueError("decision head must return one logit per supplied option")
             if not torch.isfinite(decision_logits[available]).all():
                 raise ValueError("decision head produced non-finite logits")
-            return DecisionBatch(
-                decision_logits.masked_fill(~available, float("-inf")), slots
-            )
+            return DecisionBatch(decision_logits.masked_fill(~available, float("-inf")), slots)
         output = self.backbone(
             **encoded, **({"logits_to_keep": 1} if self.prompt_format == "bosun-v3" else {})
         )
@@ -898,9 +988,7 @@ class DecisionModel:
                 else encoded["attention_mask"].sum(dim=1) - 1
             )
         )
-        last_logits = output.logits[
-            torch.arange(len(examples), device=device), last_positions
-        ]
+        last_logits = output.logits[torch.arange(len(examples), device=device), last_positions]
         token_ids = torch.tensor(self._token_ids, device=device)
         decision_logits = last_logits.index_select(dim=-1, index=token_ids)
         return DecisionBatch(mask_unavailable_slots(decision_logits, slots), slots)
@@ -957,7 +1045,9 @@ class DecisionModel:
         question: str = "Which option should be selected?",
         confidence_threshold: float | None = None,
     ) -> DecisionResult:
-        example = DecisionInput(kind="choice", state=state, question=question, options=list(choices))
+        example = DecisionInput(
+            kind="choice", state=state, question=question, options=list(choices)
+        )
         return self._infer([example], [confidence_threshold])[0]
 
     def noul(

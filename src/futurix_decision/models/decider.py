@@ -63,7 +63,7 @@ def letter_table(tokenizer: Any, width: int = MAX_OPTIONS) -> tuple[list[str], l
             f"decider-v2.1 needs {width} distinct existing letter tokens; "
             f"tokenizer only provides {len(ids)}"
         )
-    if names[:min(width, 10)] != list("ABCDEFGHIJ")[:min(width, 10)]:
+    if names[: min(width, 10)] != list("ABCDEFGHIJ")[: min(width, 10)]:
         raise ValueError("decider-v2.1's trained A-J option labels are unavailable")
     _LABEL_CACHE[tokenizer] = names, ids
     return names, ids
@@ -96,14 +96,14 @@ def _option_text(example: DecisionInput, position: int) -> str:
             raise ValueError("decider-v2.1 noul requires literal true/false options")
         name = "yes" if example.options[position] == "true" else "no"
         description = (
-            example.candidate_descriptions[position]
-            if example.candidate_descriptions else None
-        ) or (
-            example.candidate_labels[position]
-            if example.candidate_labels else None
-        )
+            example.candidate_descriptions[position] if example.candidate_descriptions else None
+        ) or (example.candidate_labels[position] if example.candidate_labels else None)
         return f"{name}: {description}" if description else name
-    name = example.candidate_labels[position] if example.candidate_labels else example.options[position]
+    name = (
+        example.candidate_labels[position]
+        if example.candidate_labels
+        else example.options[position]
+    )
     description = (
         example.candidate_descriptions[position] if example.candidate_descriptions else None
     )
@@ -144,18 +144,23 @@ def prepare_decider_rows(
                 example.candidate_descriptions[index]
                 if example.candidate_descriptions and example.candidate_descriptions[index]
                 else example.candidate_labels[index]
-                if example.candidate_labels else level
+                if example.candidate_labels
+                else level
             )
             text = re.sub(r"^\s*-?\d+\s*:\s*", "", text)
-            specs.append((
-                f"{example.question}\nProposed answer: {text}\nDoes the proposed answer fit?",
-                ["no", "yes"],
-            ))
+            specs.append(
+                (
+                    f"{example.question}\nProposed answer: {text}\nDoes the proposed answer fit?",
+                    ["no", "yes"],
+                )
+            )
     else:
-        specs.append((
-            example.question,
-            [_option_text(example, index) for index in option_order],
-        ))
+        specs.append(
+            (
+                example.question,
+                [_option_text(example, index) for index in option_order],
+            )
+        )
 
     rows = []
     for question, options in specs:
@@ -173,21 +178,25 @@ def prepare_decider_rows(
                 ids.append(token_ids[i])
                 ids += tokenizer.encode(f") {option}", add_special_tokens=False)
         ids += tokenizer.encode("\nAnswer: (", add_special_tokens=False)
-        rows.append(DeciderRow(ids, token_ids[:len(options)]))
+        rows.append(DeciderRow(ids, token_ids[: len(options)]))
     return rows
 
 
 def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> dict[str, Any]:
     path = Path(checkpoint)
-    filename = path / "decider_config.json" if path.is_dir() else Path(
-        hf_hub_download(
-            repo_id=str(checkpoint),
-            filename="decider_config.json",
-            **{
-                key: hub_kwargs[key]
-                for key in ("revision", "token", "cache_dir", "local_files_only")
-                if key in hub_kwargs
-            },
+    filename = (
+        path / "decider_config.json"
+        if path.is_dir()
+        else Path(
+            hf_hub_download(
+                repo_id=str(checkpoint),
+                filename="decider_config.json",
+                **{
+                    key: hub_kwargs[key]
+                    for key in ("revision", "token", "cache_dir", "local_files_only")
+                    if key in hub_kwargs
+                },
+            )
         )
     )
     config = json.loads(filename.read_text(encoding="utf-8"))
@@ -198,7 +207,9 @@ def _native_config(checkpoint: str | Path, **hub_kwargs: Any) -> dict[str, Any]:
         or config.get("isolated_levels") is not True
         or config.get("max_options") != MAX_OPTIONS
     ):
-        raise ValueError("only the Mapika decider-4b v2.1 plain, isolated-score contract is supported")
+        raise ValueError(
+            "only the Mapika decider-4b v2.1 plain, isolated-score contract is supported"
+        )
     return config
 
 
@@ -224,7 +235,9 @@ class DeciderDecisionModel(DecisionModel):
             not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0
             for value in self.type_temperatures.values()
         ):
-            raise ValueError("decider-v2.1 requires positive finite temperatures for each decision kind")
+            raise ValueError(
+                "decider-v2.1 requires positive finite temperatures for each decision kind"
+            )
         super().__init__(backbone, tokenizer, **kwargs)
 
     def _register_decision_tokens(self) -> list[int]:
@@ -240,16 +253,21 @@ class DeciderDecisionModel(DecisionModel):
 
     @classmethod
     def from_native(
-        cls, checkpoint: str | Path, *, max_sequence_length: int = 32768,
-        seed: int = 0, **hf_kwargs: Any
+        cls,
+        checkpoint: str | Path,
+        *,
+        max_sequence_length: int = 32768,
+        seed: int = 0,
+        **hf_kwargs: Any,
     ) -> DeciderDecisionModel:
         if str(checkpoint) == "Mapika/decider-4b" or (
-            Path(checkpoint).is_dir()
-            and (Path(checkpoint) / "decider_config.json").is_file()
+            Path(checkpoint).is_dir() and (Path(checkpoint) / "decider_config.json").is_file()
         ):
             config = _native_config(checkpoint, **hf_kwargs)
         else:
-            raise ValueError("only Mapika/decider-4b or a local copy of its v2.1 release is supported")
+            raise ValueError(
+                "only Mapika/decider-4b or a local copy of its v2.1 release is supported"
+            )
         tok_kwargs = {
             key: hf_kwargs[key]
             for key in ("revision", "token", "trust_remote_code", "cache_dir", "local_files_only")
@@ -285,18 +303,30 @@ class DeciderDecisionModel(DecisionModel):
             )
             if assignment_seed is not None and example.kind != "score":
                 identity = json.dumps(
-                    [self.seed, assignment_seed, example.kind, example.state,
-                     example.question, example.options], sort_keys=True, ensure_ascii=False
+                    [
+                        self.seed,
+                        assignment_seed,
+                        example.kind,
+                        example.state,
+                        example.question,
+                        example.options,
+                    ],
+                    sort_keys=True,
+                    ensure_ascii=False,
                 )
                 row_seed = int.from_bytes(
                     hashlib.sha256(identity.encode("utf-8")).digest()[:8], "big"
                 )
                 random.Random(row_seed).shuffle(order)
             orders.append(order)
-            groups.append(prepare_decider_rows(
-                example, self.tokenizer, decision_tokens=self.decision_tokens,
-                option_order=order,
-            ))
+            groups.append(
+                prepare_decider_rows(
+                    example,
+                    self.tokenizer,
+                    decision_tokens=self.decision_tokens,
+                    option_order=order,
+                )
+            )
         flat = [row for group in groups for row in group]
         longest = max(len(row.input_ids) for row in flat)
         if longest > self.max_sequence_length:
@@ -327,7 +357,7 @@ class DeciderDecisionModel(DecisionModel):
                     )
                     fits.append(torch.log_softmax(selected.float() / temperature, dim=0)[1])
                     cursor += 1
-                results[index, :len(group)] = torch.stack(fits)
+                results[index, : len(group)] = torch.stack(fits)
             else:
                 row = group[0]
                 selected = logits[cursor].index_select(
@@ -337,9 +367,7 @@ class DeciderDecisionModel(DecisionModel):
                 cursor += 1
         return DecisionBatch(results, [list(range(len(example.options))) for example in examples])
 
-    def _save_decision_metadata(
-        self, path: str | Path, *, adapter_base: str | None = None
-    ) -> None:
+    def _save_decision_metadata(self, path: str | Path, *, adapter_base: str | None = None) -> None:
         super()._save_decision_metadata(path, adapter_base=adapter_base)
         filename = Path(path) / "decision_config.json"
         config = json.loads(filename.read_text(encoding="utf-8"))

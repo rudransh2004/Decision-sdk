@@ -31,41 +31,70 @@ def make_native(path: Path) -> None:
     labels = list(string.ascii_uppercase) + [
         a + b for a in string.ascii_uppercase for b in string.ascii_uppercase
     ]
-    words = ["[UNK]", "[EOS]", "Context", "Question", "Options", "Answer",
-             "no", "yes", "approve", "reject", "rate", "one", "two", "three"]
+    words = [
+        "[UNK]",
+        "[EOS]",
+        "Context",
+        "Question",
+        "Options",
+        "Answer",
+        "no",
+        "yes",
+        "approve",
+        "reject",
+        "rate",
+        "one",
+        "two",
+        "three",
+    ]
     vocab = {word: index for index, word in enumerate(words + labels)}
     raw = Tokenizer(models.WordLevel(vocab, unk_token="[UNK]"))
     raw.pre_tokenizer = pre_tokenizers.Whitespace()
-    tokenizer = PreTrainedTokenizerFast(
-        tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]"
-    )
+    tokenizer = PreTrainedTokenizerFast(tokenizer_object=raw, unk_token="[UNK]", eos_token="[EOS]")
     torch.manual_seed(23)
-    backbone = GPT2LMHeadModel(GPT2Config(
-        vocab_size=len(vocab), n_positions=512, n_embd=32, n_layer=1, n_head=2,
-    ))
+    backbone = GPT2LMHeadModel(
+        GPT2Config(
+            vocab_size=len(vocab),
+            n_positions=512,
+            n_embd=32,
+            n_layer=1,
+            n_head=2,
+        )
+    )
     backbone.save_pretrained(path)
     tokenizer.save_pretrained(path)
-    (path / "decider_config.json").write_text(json.dumps({
-        "version": "4b-v2.1", "layout": "plain", "schema_first": False,
-        "isolated_levels": True, "max_options": 255,
-        "temperature_by_type": {"choice": 1.11, "noul": 1.56, "score": 1.287},
-    }), encoding="utf-8")
+    (path / "decider_config.json").write_text(
+        json.dumps(
+            {
+                "version": "4b-v2.1",
+                "layout": "plain",
+                "schema_first": False,
+                "isolated_levels": True,
+                "max_options": 255,
+                "temperature_by_type": {"choice": 1.11, "noul": 1.56, "score": 1.287},
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 class DeciderIntegrationTests(unittest.TestCase):
     def test_known_family_registry_and_fail_closed_loaders(self):
         self.assertEqual(len(FAMILIES), 12)
-        self.assertEqual({family.name for family in FAMILIES if family.training},
-                         {"bosun", "decider", "jpt", "eikos",
-                          "kev", "clef", "pplx-decider", "encoder"})
+        self.assertEqual(
+            {family.name for family in FAMILIES if family.training},
+            {"bosun", "decider", "jpt", "eikos", "kev", "clef", "pplx-decider", "encoder"},
+        )
         jpt = next(family for family in FAMILIES if family.name == "jpt")
         self.assertTrue(jpt.supports("kirp/jpt-4b", "training"))
         self.assertFalse(jpt.supports("kirp/jpt-35b-a3b", "training"))
         with patch("futurix_decision.models.decision_model.load_decision_config", return_value={}):
             with self.assertRaisesRegex(ValueError, "publisher's native"):
                 DecisionModel.from_pretrained("Cloudflare/clef")
-        with patch("futurix_decision.models.decision_model.load_decision_config",
-                   return_value={"architecture": "autojev"}):
+        with patch(
+            "futurix_decision.models.decision_model.load_decision_config",
+            return_value={"architecture": "autojev"},
+        ):
             with self.assertRaisesRegex(ValueError, "non-Futurix"):
                 DecisionModel.from_pretrained("example/unknown-native-decision-model")
 
@@ -78,16 +107,19 @@ class DeciderIntegrationTests(unittest.TestCase):
                 DecisionModel.from_pretrained(source)
             model = DecisionModel.from_decider(source, max_sequence_length=512)
             self.assertIsInstance(model, DeciderDecisionModel)
-            self.assertEqual(model._token_ids[:2], [
-                model.tokenizer.encode(c, add_special_tokens=False)[0] for c in "AB"
-            ])
+            self.assertEqual(
+                model._token_ids[:2],
+                [model.tokenizer.encode(c, add_special_tokens=False)[0] for c in "AB"],
+            )
             self.assertNotIn("<|decision_000|>", model.tokenizer.get_vocab())
             inputs = [
                 DecisionInput(state="review", question="Next?", options=["approve", "reject"]),
-                DecisionInput(kind="noul", state="review", question="Valid?",
-                              options=["false", "true"]),
-                DecisionInput(kind="score", state="review", question="Rate",
-                              options=["0", "1", "2"]),
+                DecisionInput(
+                    kind="noul", state="review", question="Valid?", options=["false", "true"]
+                ),
+                DecisionInput(
+                    kind="score", state="review", question="Rate", options=["0", "1", "2"]
+                ),
             ]
             prepared = prepare_decider_rows(inputs[2], model.tokenizer)
             self.assertEqual(len(prepared), 3)
@@ -104,9 +136,11 @@ class DeciderIntegrationTests(unittest.TestCase):
             self.assertEqual(batch.logits.shape, (3, 3))
             self.assertTrue(torch.isneginf(batch.logits[0, 2]))
             self.assertEqual(batch.slots, [[0, 1], [0, 1], [0, 1, 2]])
-            self.assertTrue(torch.isfinite(model.forward_decisions(
-                inputs, assignment_seed=71
-            ).logits[0, :2]).all())
+            self.assertTrue(
+                torch.isfinite(
+                    model.forward_decisions(inputs, assignment_seed=71).logits[0, :2]
+                ).all()
+            )
             probabilities = model.batch_decide(inputs)
             for prediction in probabilities:
                 self.assertAlmostEqual(sum(prediction.probabilities.values()), 1, places=6)
@@ -140,14 +174,24 @@ class DeciderIntegrationTests(unittest.TestCase):
             prepared = prepare_decider_rows(row, model.tokenizer)
             self.assertEqual(prepared[0].letter_ids, ids[:30])
             self.assertIn(ids[26], prepared[0].input_ids)
-            self.assertEqual(len(model.choice(
-                state="review", choices=[f"one {i}" for i in range(30)]
-            ).probabilities), 30)
+            self.assertEqual(
+                len(
+                    model.choice(
+                        state="review", choices=[f"one {i}" for i in range(30)]
+                    ).probabilities
+                ),
+                30,
+            )
             with self.assertRaisesRegex(ValueError, "at most 10 levels"):
-                prepare_decider_rows(DecisionInput(
-                    kind="score", state="review", question="Rate",
-                    options=[str(i) for i in range(11)],
-                ), model.tokenizer)
+                prepare_decider_rows(
+                    DecisionInput(
+                        kind="score",
+                        state="review",
+                        question="Rate",
+                        options=[str(i) for i in range(11)],
+                    ),
+                    model.tokenizer,
+                )
 
     def test_true_first_noul_is_reordered_and_unknown_ids_are_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -156,12 +200,17 @@ class DeciderIntegrationTests(unittest.TestCase):
             make_native(source)
             model = DecisionModel.from_decider(source, max_sequence_length=512)
             normal = DecisionInput(
-                kind="noul", state="review", question="Valid?",
+                kind="noul",
+                state="review",
+                question="Valid?",
                 options=["false", "true"],
             )
             reversed_row = DecisionInput(
-                kind="noul", state="review", question="Valid?",
-                options=["true", "false"], candidate_ids=["true", "false"],
+                kind="noul",
+                state="review",
+                question="Valid?",
+                options=["true", "false"],
+                candidate_ids=["true", "false"],
                 preserve_order=True,
             )
             before = model.decide(normal)
@@ -170,13 +219,15 @@ class DeciderIntegrationTests(unittest.TestCase):
                 prepare_decider_rows(normal, model.tokenizer)[0].input_ids,
                 prepare_decider_rows(reversed_row, model.tokenizer)[0].input_ids,
             )
-            self.assertAlmostEqual(
-                before.probabilities["false"], after.probabilities["false"]
-            )
+            self.assertAlmostEqual(before.probabilities["false"], after.probabilities["false"])
             invalid = DecisionInput(
-                kind="noul", state="review", question="Valid?",
-                options=["c0", "c1"], candidate_ids=["c0", "c1"],
-                candidate_labels=["Reject", "Approve"], preserve_order=True,
+                kind="noul",
+                state="review",
+                question="Valid?",
+                options=["c0", "c1"],
+                candidate_ids=["c0", "c1"],
+                candidate_labels=["Reject", "Approve"],
+                preserve_order=True,
             )
             with self.assertRaisesRegex(ValueError, "literal true/false"):
                 model.decide(invalid)
@@ -198,16 +249,28 @@ class DeciderIntegrationTests(unittest.TestCase):
                 def generate(self, prompts, sampling_params, use_tqdm=False):
                     self.prompts, self.params = prompts, sampling_params
                     return [
-                        SimpleNamespace(outputs=[SimpleNamespace(logprobs=[{
-                            token: SimpleNamespace(logprob=math.log(prob))
-                            for token, prob in zip(params.allowed_token_ids, (0.7, 0.3))
-                        }])])
+                        SimpleNamespace(
+                            outputs=[
+                                SimpleNamespace(
+                                    logprobs=[
+                                        {
+                                            token: SimpleNamespace(logprob=math.log(prob))
+                                            for token, prob in zip(
+                                                params.allowed_token_ids, (0.7, 0.3)
+                                            )
+                                        }
+                                    ]
+                                )
+                            ]
+                        )
                         for params in sampling_params
                     ]
 
             rows = [
                 DecisionInput(state="review", question="Next?", options=["approve", "reject"]),
-                DecisionInput(kind="score", state="review", question="Rate", options=["0", "1", "2"]),
+                DecisionInput(
+                    kind="score", state="review", question="Rate", options=["0", "1", "2"]
+                ),
             ]
             llm = FakeLLM()
             with patch.dict(sys.modules, {"vllm": SimpleNamespace(SamplingParams=SamplingParams)}):
@@ -224,9 +287,7 @@ class DeciderIntegrationTests(unittest.TestCase):
                 0.7 ** (1 / 1.11) / (0.7 ** (1 / 1.11) + 0.3 ** (1 / 1.11)),
             )
             self.assertTrue(all(params.max_tokens == 1 for params in llm.params))
-            self.assertTrue(all(
-                not hasattr(params, "logprob_token_ids") for params in llm.params
-            ))
+            self.assertTrue(all(not hasattr(params, "logprob_token_ids") for params in llm.params))
             self.assertAlmostEqual(result[1].probabilities["0"], 1 / 3)
 
     def test_wide_vllm_logprobs_do_not_exceed_explicit_id_limit(self):
@@ -246,10 +307,23 @@ class DeciderIntegrationTests(unittest.TestCase):
             class FakeLLM:
                 def generate(self, prompts, params, use_tqdm=False):
                     self.params = params
-                    return [SimpleNamespace(outputs=[SimpleNamespace(logprobs=[{
-                        token: SimpleNamespace(logprob=-math.log(len(p.allowed_token_ids)))
-                        for token in p.allowed_token_ids
-                    }])]) for p in params]
+                    return [
+                        SimpleNamespace(
+                            outputs=[
+                                SimpleNamespace(
+                                    logprobs=[
+                                        {
+                                            token: SimpleNamespace(
+                                                logprob=-math.log(len(p.allowed_token_ids))
+                                            )
+                                            for token in p.allowed_token_ids
+                                        }
+                                    ]
+                                )
+                            ]
+                        )
+                        for p in params
+                    ]
 
             fake = FakeLLM()
             with patch.dict(sys.modules, {"vllm": SimpleNamespace(SamplingParams=SamplingParams)}):
@@ -277,14 +351,27 @@ class DeciderIntegrationTests(unittest.TestCase):
             class FakeLLM:
                 def generate(self, prompts, params, use_tqdm=False):
                     selected = params[0].allowed_token_ids
-                    return [SimpleNamespace(outputs=[SimpleNamespace(logprobs=[{
-                        selected[0]: SimpleNamespace(logprob=math.log(0.8)),
-                        selected[1]: SimpleNamespace(logprob=math.log(0.2)),
-                    }])])]
+                    return [
+                        SimpleNamespace(
+                            outputs=[
+                                SimpleNamespace(
+                                    logprobs=[
+                                        {
+                                            selected[0]: SimpleNamespace(logprob=math.log(0.8)),
+                                            selected[1]: SimpleNamespace(logprob=math.log(0.2)),
+                                        }
+                                    ]
+                                )
+                            ]
+                        )
+                    ]
 
             row = DecisionInput(
-                kind="noul", state="review", question="Valid?",
-                options=["true", "false"], candidate_ids=["true", "false"],
+                kind="noul",
+                state="review",
+                question="Valid?",
+                options=["true", "false"],
+                candidate_ids=["true", "false"],
                 preserve_order=True,
             )
             with patch.dict(sys.modules, {"vllm": SimpleNamespace(SamplingParams=SamplingParams)}):
@@ -302,11 +389,18 @@ class DeciderIntegrationTests(unittest.TestCase):
             source.mkdir()
             make_native(source)
             tokenizer = AutoTokenizer.from_pretrained(source)
-            LlamaForCausalLM(LlamaConfig(
-                vocab_size=len(tokenizer), hidden_size=32, intermediate_size=64,
-                num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2,
-                max_position_embeddings=1024, tie_word_embeddings=False,
-            )).save_pretrained(source)
+            LlamaForCausalLM(
+                LlamaConfig(
+                    vocab_size=len(tokenizer),
+                    hidden_size=32,
+                    intermediate_size=64,
+                    num_hidden_layers=1,
+                    num_attention_heads=4,
+                    num_key_value_heads=2,
+                    max_position_embeddings=1024,
+                    tie_word_embeddings=False,
+                )
+            ).save_pretrained(source)
             model = DecisionModel.from_decider(source, max_sequence_length=1024)
             output = Path(temp) / "export"
             model.save_pretrained(output)
@@ -314,8 +408,11 @@ class DeciderIntegrationTests(unittest.TestCase):
             row = DecisionInput(state="review", question="Choose", options=options)
             reference = model.decide(row)
             engine = VLLMEngine(
-                output, max_model_len=1024, gpu_memory_utilization=0.04,
-                enforce_eager=True, dtype="float16",
+                output,
+                max_model_len=1024,
+                gpu_memory_utilization=0.04,
+                enforce_eager=True,
+                dtype="float16",
             )
             actual = engine.decide(row)
             for option in options:
@@ -349,26 +446,41 @@ class DeciderTrainingTests(unittest.TestCase):
             source.mkdir()
             make_native(source)
             from transformers import AutoTokenizer
+
             tokenizer = AutoTokenizer.from_pretrained(source)
-            LlamaForCausalLM(LlamaConfig(
-                vocab_size=len(tokenizer), hidden_size=32, intermediate_size=64,
-                num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2,
-                max_position_embeddings=512, tie_word_embeddings=False,
-            )).save_pretrained(source)
+            LlamaForCausalLM(
+                LlamaConfig(
+                    vocab_size=len(tokenizer),
+                    hidden_size=32,
+                    intermediate_size=64,
+                    num_hidden_layers=1,
+                    num_attention_heads=4,
+                    num_key_value_heads=2,
+                    max_position_embeddings=512,
+                    tie_word_embeddings=False,
+                )
+            ).save_pretrained(source)
             model = DecisionModel.from_decider(
-                source, max_sequence_length=512,
+                source,
+                max_sequence_length=512,
                 quantization_config=BitsAndBytesConfig(
-                    load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
                     bnb_4bit_compute_dtype=torch.bfloat16,
                 ),
                 device_map="cuda:0",
             )
             trainer = DecisionTrainer(
                 model=model,
-                dataset=[DecisionExample(
-                    id="x", state="review", question="Next?",
-                    options=["approve", "reject"], target="approve",
-                )],
+                dataset=[
+                    DecisionExample(
+                        id="x",
+                        state="review",
+                        question="Next?",
+                        options=["approve", "reject"],
+                        target="approve",
+                    )
+                ],
                 sft_config=SFTConfig(method="qlora", batch_size=1, lora_rank=2, lora_alpha=4),
             )
             trainer.train()
@@ -385,16 +497,36 @@ class DeciderTrainingTests(unittest.TestCase):
             source.mkdir()
             make_native(source)
             dataset = root / "data.jsonl"
-            dataset.write_text(json.dumps(DecisionExample(
-                id="train-1", state="review", question="Next?",
-                options=["approve", "reject"], target="approve",
-            ).model_dump()) + "\n")
+            dataset.write_text(
+                json.dumps(
+                    DecisionExample(
+                        id="train-1",
+                        state="review",
+                        question="Next?",
+                        options=["approve", "reject"],
+                        target="approve",
+                    ).model_dump()
+                )
+                + "\n"
+            )
             output = root / "export"
-            main([
-                "train", "--model", str(source), "--model-format", "decider",
-                "--dataset", str(dataset), "--output", str(output),
-                "--method", "sft", "--max-examples", "1",
-            ])
+            main(
+                [
+                    "train",
+                    "--model",
+                    str(source),
+                    "--model-format",
+                    "decider",
+                    "--dataset",
+                    str(dataset),
+                    "--output",
+                    str(output),
+                    "--method",
+                    "sft",
+                    "--max-examples",
+                    "1",
+                ]
+            )
             self.assertIsInstance(DecisionModel.from_pretrained(output), DeciderDecisionModel)
 
     def test_lora_finetuning_preserves_letter_contract(self):
@@ -405,10 +537,15 @@ class DeciderTrainingTests(unittest.TestCase):
             model = DecisionModel.from_decider(source, max_sequence_length=512)
             trainer = DecisionTrainer(
                 model=model,
-                dataset=[DecisionExample(
-                    id="one", state="review", question="Next?",
-                    options=["approve", "reject"], target="approve",
-                )],
+                dataset=[
+                    DecisionExample(
+                        id="one",
+                        state="review",
+                        question="Next?",
+                        options=["approve", "reject"],
+                        target="approve",
+                    )
+                ],
                 sft_config=SFTConfig(method="lora", lora_rank=2, lora_alpha=4, batch_size=1),
             )
             trainer.train(stages=["decision_sft"])
@@ -434,29 +571,32 @@ class DeciderTrainingTests(unittest.TestCase):
             source.mkdir()
             make_native(source)
             model = DecisionModel.from_decider(source, max_sequence_length=512)
-            rows = [DecisionExample(
-                id="x", state="review", question="Next?",
-                options=["approve", "reject"], target="approve",
-            )]
+            rows = [
+                DecisionExample(
+                    id="x",
+                    state="review",
+                    question="Next?",
+                    options=["approve", "reject"],
+                    target="approve",
+                )
+            ]
             config = SFTConfig(method="lora", lora_rank=2, lora_alpha=4, batch_size=1)
             trainer = DecisionTrainer(model=model, dataset=rows, sft_config=config)
             trainer.train()
             unmerged = Path(temp) / "adapter"
             trainer.export(unmerged, merge_lora=False)
-            self.assertEqual(json.loads(
-                (unmerged / "decision_config.json").read_text()
-            )["base_checkpoint"], str(source))
+            self.assertEqual(
+                json.loads((unmerged / "decision_config.json").read_text())["base_checkpoint"],
+                str(source),
+            )
             with self.assertRaisesRegex(ValueError, "trainable_adapter=True"):
                 DecisionTrainer(
                     model=DecisionModel.from_pretrained(unmerged),
-                    dataset=rows, sft_config=config,
+                    dataset=rows,
+                    sft_config=config,
                 ).train()
-            trainable = DecisionModel.from_pretrained(
-                unmerged, trainable_adapter=True
-            )
-            self.assertTrue(any(
-                param.requires_grad for param in trainable.backbone.parameters()
-            ))
+            trainable = DecisionModel.from_pretrained(unmerged, trainable_adapter=True)
+            self.assertTrue(any(param.requires_grad for param in trainable.backbone.parameters()))
             continued = DecisionTrainer(model=trainable, dataset=rows, sft_config=config)
             continued.train()
             output = Path(temp) / "merged"
@@ -473,30 +613,46 @@ class DeciderTrainingTests(unittest.TestCase):
             model = DecisionModel.from_decider(source, max_sequence_length=512)
             before = model.backbone.get_output_embeddings().weight.detach().clone()
             rows = [
-                DecisionExample(id=f"train-{i}", state=f"review {i}", question="Next?",
-                                options=["approve", "reject"], target="approve")
+                DecisionExample(
+                    id=f"train-{i}",
+                    state=f"review {i}",
+                    question="Next?",
+                    options=["approve", "reject"],
+                    target="approve",
+                )
                 for i in range(2)
             ]
             trainer = DecisionTrainer(
-                model=model, dataset=rows,
-                calibration_dataset=[DecisionExample(
-                    id="heldout", state="review", question="Next?",
-                    options=["approve", "reject"], target="approve",
-                )],
+                model=model,
+                dataset=rows,
+                calibration_dataset=[
+                    DecisionExample(
+                        id="heldout",
+                        state="review",
+                        question="Next?",
+                        options=["approve", "reject"],
+                        target="approve",
+                    )
+                ],
                 sft_config=SFTConfig(method="full", batch_size=1),
                 rlcd_config=RLCDConfig(method="full", batch_size=1, group_size=2, kl_beta=0),
                 checkpoint_dir=Path(temp) / "stages",
             )
             trainer.train(stages=["decision_sft", "calibration", "rlcd"])
-            self.assertFalse(torch.equal(
-                before, model.backbone.get_output_embeddings().weight.detach().cpu()
-            ))
+            self.assertFalse(
+                torch.equal(before, model.backbone.get_output_embeddings().weight.detach().cpu())
+            )
             for stage in ("decision_sft", "calibration", "rlcd"):
                 restored = DecisionModel.from_pretrained(Path(temp) / "stages" / stage)
                 self.assertIsInstance(restored, DeciderDecisionModel)
-                self.assertAlmostEqual(sum(restored.choice(
-                    state="review", choices=["approve", "reject"]
-                ).probabilities.values()), 1)
+                self.assertAlmostEqual(
+                    sum(
+                        restored.choice(
+                            state="review", choices=["approve", "reject"]
+                        ).probabilities.values()
+                    ),
+                    1,
+                )
 
 
 if __name__ == "__main__":

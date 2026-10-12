@@ -39,10 +39,13 @@ class BosunContractTests(unittest.TestCase):
             with self.subTest(checkpoint=checkpoint):
                 tiny = bosun_tiny_model()
                 package = SimpleNamespace(
-                    model=tiny.backbone, tokenizer=tiny.tokenizer,
+                    model=tiny.backbone,
+                    tokenizer=tiny.tokenizer,
                     config=SimpleNamespace(
-                        prompt_schema=BOSUN_PROMPT_SCHEMA, decision_token_count=256,
-                        null_token_index=255, base_model_name_or_path="Qwen/Qwen3-0.6B",
+                        prompt_schema=BOSUN_PROMPT_SCHEMA,
+                        decision_token_count=256,
+                        null_token_index=255,
+                        base_model_name_or_path="Qwen/Qwen3-0.6B",
                         base_model_revision="a" * 40,
                     ),
                 )
@@ -83,9 +86,12 @@ class BosunContractTests(unittest.TestCase):
         )
         model = DecisionModel(native.model, native.tokenizer, prompt_format="bosun-v3")
         row = DecisionExample(
-            id="example-1", state={"request": "Customer cannot access their account."},
-            question="Choose the best support route.", options=["billing", "access"],
-            target="access", candidate_labels=["Billing", "Account access"],
+            id="example-1",
+            state={"request": "Customer cannot access their account."},
+            question="Choose the best support route.",
+            options=["billing", "access"],
+            target="access",
+            candidate_labels=["Billing", "Account access"],
             candidate_descriptions=["Payment issue", "Login issue"],
         )
         prompt, slots = model._prompt_and_slots(row, None)
@@ -98,8 +104,12 @@ class BosunContractTests(unittest.TestCase):
     def test_stable_slots_chat_prompt_and_candidate_metadata(self):
         model = bosun_tiny_model()
         example = DecisionExample(
-            id="row-17", kind="choice", state={"ticket": "charge"}, question="Route it",
-            options=["billing", "access", "other"], target=[0.8, 0.1, 0.1],
+            id="row-17",
+            kind="choice",
+            state={"ticket": "charge"},
+            question="Route it",
+            options=["billing", "access", "other"],
+            target=[0.8, 0.1, 0.1],
             candidate_labels=["Billing", "Account access", "Other"],
             candidate_descriptions=["Payment issue", "Login issue", "Escalation"],
         )
@@ -125,7 +135,9 @@ class BosunContractTests(unittest.TestCase):
     def test_structured_descriptions_compact_as_bosun_does(self):
         model = bosun_tiny_model()
         example = DecisionInput(
-            state="record", question="Select", options=["a", "b"],
+            state="record",
+            question="Select",
+            options=["a", "b"],
             candidate_descriptions=['{"z":2,"a":"one"}', '{"z":4,"a":"two"}'],
         )
         prompt, _ = format_bosun_prompt(example, model.tokenizer)
@@ -144,18 +156,22 @@ class BosunContractTests(unittest.TestCase):
             self.assertEqual(restored.tokenizer.padding_side, "left")
             other = restored.choice(state="ready", choices=["a", "b"], question="Choose")
             for name in result.probabilities:
-                self.assertAlmostEqual(result.probabilities[name], other.probabilities[name], places=5)
+                self.assertAlmostEqual(
+                    result.probabilities[name], other.probabilities[name], places=5
+                )
 
     def test_typed_system_one_preserves_bosun_probabilities(self):
         model = bosun_tiny_model()
         questions = {
             "route": {
-                "type": "choice", "instructions": "Route this ticket",
+                "type": "choice",
+                "instructions": "Route this ticket",
                 "criteria": {"billing": "Payments", "technical": "App errors"},
             },
             "urgent": {"type": "noul", "instructions": "Urgent?"},
             "priority": {
-                "type": "score", "instructions": "Priority",
+                "type": "score",
+                "instructions": "Priority",
                 "criteria": ["Low", "Medium", "High"],
             },
         }
@@ -177,9 +193,7 @@ class BosunContractTests(unittest.TestCase):
                 None,
             )
         with self.assertRaisesRegex(ValueError, "candidate_labels"):
-            DecisionInput(
-                state="s", question="q", options=["a", "b"], candidate_labels=["A"]
-            )
+            DecisionInput(state="s", question="q", options=["a", "b"], candidate_labels=["A"])
 
     @unittest.skipUnless(importlib.util.find_spec("peft"), "PEFT not installed")
     def test_continuation_preserves_rows_and_trains_untied_output(self):
@@ -190,37 +204,45 @@ class BosunContractTests(unittest.TestCase):
         base = tiny_untied_model()
         base.tokenizer.chat_template = bosun_tiny_model().tokenizer.chat_template
         model = DecisionModel(
-            base.backbone, base.tokenizer, decision_tokens=256,
-            prompt_format="bosun-v3", max_sequence_length=256,
+            base.backbone,
+            base.tokenizer,
+            decision_tokens=256,
+            prompt_format="bosun-v3",
+            max_sequence_length=256,
         )
-        rows_before = model.backbone.get_input_embeddings().weight[
-            model._token_ids
-        ].detach().clone()
-        head_before = model.backbone.get_output_embeddings().weight[
-            model._token_ids
-        ].detach().clone()
+        rows_before = (
+            model.backbone.get_input_embeddings().weight[model._token_ids].detach().clone()
+        )
+        head_before = (
+            model.backbone.get_output_embeddings().weight[model._token_ids].detach().clone()
+        )
         model.backbone = get_peft_model(
             model.backbone,
             LoraConfig(task_type=TaskType.CAUSAL_LM, r=2, lora_alpha=4, target_modules=["q_proj"]),
         )
         example = DecisionExample(
-            id="continuation", state="ready", question="Choose",
-            options=["a", "b"], target=[0.1, 0.9],
+            id="continuation",
+            state="ready",
+            question="Choose",
+            options=["a", "b"],
+            target=[0.1, 0.9],
         )
         trainer = SFTTrainer(
-            model, config=SFTConfig(
-                method="lora", batch_size=1, learning_rate=0.01,
-                lora_rank=2, lora_alpha=4,
+            model,
+            config=SFTConfig(
+                method="lora",
+                batch_size=1,
+                learning_rate=0.01,
+                lora_rank=2,
+                lora_alpha=4,
             ),
         )
         trainer.train([example, example])
         self.assertTrue(model._bosun_continuation_prepared)
-        input_after = model.backbone.get_input_embeddings().weight[
-            model._token_ids
-        ].detach().cpu()
-        output_after = model.backbone.get_output_embeddings().weight[
-            model._token_ids
-        ].detach().cpu()
+        input_after = model.backbone.get_input_embeddings().weight[model._token_ids].detach().cpu()
+        output_after = (
+            model.backbone.get_output_embeddings().weight[model._token_ids].detach().cpu()
+        )
         self.assertGreater((input_after - rows_before.cpu()).abs().sum().item(), 0)
         self.assertGreater((output_after - head_before.cpu()).abs().sum().item(), 0)
         with tempfile.TemporaryDirectory() as path:
