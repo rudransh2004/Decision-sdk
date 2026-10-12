@@ -451,7 +451,8 @@ class NativeDecisionModel:
             runtime = (tokenizer, model)
         elif family == "openjev":
             raise ValueError(
-                "OpenJev's supported decision readout needs its vLLM System One helper; pass base_url"
+                "OpenJev's supported decision readout needs its vLLM System One helper; "
+                "pass base_url"
             )
         elif family == "clef":
             _pinned_remote(revision, trust_remote_code, family, local=local)

@@ -32,7 +32,8 @@ _SPLIT = frozenset(
         "BQ BZ CJ CQ CZ DQ DZ EJ EY FJ FQ FV FZ GJ GK GQ GZ HJ IY JF JG JH JL JN JQ JW JX JY JZ "
         "KJ KQ KX KZ LH LJ LQ LW LX LZ OJ OQ OY OZ PQ PZ QD QF QI QJ QK QO QV QW QX QY QZ "
         "RQ RZ TJ TQ UJ UO UQ UW VH VJ VQ VU VW VX VY VZ WJ WQ WU WV WY WZ XG XJ XK XN XO "
-        "XQ XU XV XW XZ YB YD YF YH YI YJ YK YQ YR YU YV YX ZB ZC ZD ZG ZJ ZK ZL ZM ZP ZQ ZS ZT ZU ZV"
+        "XQ XU XV XW XZ YB YD YF YH YI YJ YK YQ YR YU YV YX "
+        "ZB ZC ZD ZG ZJ ZK ZL ZM ZP ZQ ZS ZT ZU ZV"
     ).split()
 )
 _LABEL_CACHE: weakref.WeakKeyDictionary[Any, tuple[list[str], list[int]]] = (

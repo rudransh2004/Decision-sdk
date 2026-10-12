@@ -246,7 +246,8 @@ def require_checkpoint_files(
                 or not isinstance(tokenizer, dict)
             ):
                 raise ValueError(
-                    f"Decision {version} checkpoint is missing head/backbone/tokenizer metadata: {directory}"
+                    f"Decision {version} checkpoint is missing "
+                    f"head/backbone/tokenizer metadata: {directory}"
                 )
             for field, section in (
                 ("decision_head", head),

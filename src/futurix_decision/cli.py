@@ -124,11 +124,13 @@ def _train(args: argparse.Namespace) -> None:
     if source_format == "native":
         if args.resume or stages != ["decision_sft"] or args.finetune_method:
             raise ValueError(
-                "native fine-tuning supports a fresh decision_sft run; use publisher config for other recipes"
+                "native fine-tuning supports a fresh decision_sft run; "
+                "use publisher config for other recipes"
             )
         if args.calibration_dataset or args.validation_dataset or args.log_jsonl or checkpoint_dir:
             raise ValueError(
-                "native trainers manage their own checkpoints/calibration; use the Python API for customization"
+                "native trainers manage their own checkpoints/calibration; "
+                "use the Python API for customization"
             )
         native = load_model(
             checkpoint,
