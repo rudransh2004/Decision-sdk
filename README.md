@@ -164,10 +164,14 @@ and arbitrary multimodal LMs are not generic conversion targets.
 
 ## Installation
 
-Requires Python 3.10+ and PyTorch. From the repository root:
+Requires Python 3.10+. The base install is torch-free: schemas, dataset
+loading, metrics, and HTTP runtimes. Local models need PyTorch through the
+`torch` extra, which every model, `train`, `serve`, and `vllm` extra includes.
+From the repository root:
 
 ```bash
-python -m pip install -e .
+python -m pip install -e .            # core, no torch
+python -m pip install -e ".[torch]"   # local models
 python -m pip install -e ".[datasets,train,serve,dev]"
 # Optional, on supported NVIDIA GPUs:
 python -m pip install -e ".[qlora,vllm]"
@@ -503,8 +507,8 @@ CLI equivalents: `futurix-decision evaluate --model laya --model-format native
 --dataset decisions.jsonl` and `futurix-decision train --model laya
 --model-format native --dataset decisions.jsonl --output ./my-laya`.
 Publisher runtimes have **separate dependency/version requirements**:
-install the matching `.[laya]`, `.[gliner-train]`, `.[clef]`, `.[nox-lux]`,
-`.[liquid-d1]` or `.[native-http]` extra. Install Kev's `kev` and
+install the matching `.[laya]`, `.[gliner-train]`, `.[clef]`, `.[nox-lux]`
+or `.[liquid-d1]` extra; the HTTP runtime needs only the base install. Install Kev's `kev` and
 PPLX's `source/src/autojev` from their respective publishers in compatible
 environments; the SDK never downloads and executes that package code
 implicitly. OpenJev weights are CC BY-NC 4.0; d1 has Liquid's LFM Open

@@ -404,10 +404,8 @@ class NativeDecisionModel:
                 raise ValueError("GLiNER does not publish a System One HTTP runtime")
             if client is not None and api_key is not None:
                 raise ValueError("configure api_key headers on your supplied client")
-            try:
-                import httpx
-            except ImportError as exc:
-                raise _missing("httpx", "native-http") from exc
+            import httpx
+
             runtime = client or httpx.Client(
                 base_url=base_url,
                 timeout=60.0,
