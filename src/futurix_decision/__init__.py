@@ -52,7 +52,7 @@ if TYPE_CHECKING:
         SFTTrainer,
     )
 
-__getattr__ = lazy_exports(
+__getattr__, __dir__ = lazy_exports(
     __name__,
     {
         "evaluate": "futurix_decision.evaluation",

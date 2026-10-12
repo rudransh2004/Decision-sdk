@@ -24,6 +24,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   benchmarks (the README's run logs and results moved to `docs/benchmarks.md`). Install
   the new `docs` extra and run `mkdocs build --strict`; CI does. The API reference is
   generated from docstrings, and every public symbol now has one.
+- `dir()` on `futurix_decision` and its lazily exporting subpackages (`models`,
+  `trainers`, `evaluation`, `rewards`) lists the lazy names before they are imported.
 - `tests/test_docs_snippets.py` compiles the Python blocks in the README and docs and runs
   those marked `<!-- test -->`.
 - `DecisionModelConfig` (exported from the top-level package): a dataclass that holds a
@@ -178,7 +180,10 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ConfigError` that names the family. Bosun, Decider, JPT, Eikos, and Futurix
   checkpoints used to raise per-family messages.
 - The CLI loads every `--model-format` through the family registry. `--model-format`
-  accepts any registered family, and `serve` now accepts `bosun`. Other changes:
+  accepts `standard`, `native`, and every registered family except publisher runtimes
+  (`PublisherAdapter` subclasses such as Laya or Kev), which stay behind `native`; a
+  third-party family registered before the CLI parses its arguments is included.
+  `serve` now accepts `bosun`. Other changes:
   - `train` raises `ConfigError` for an unknown YAML `model.format`; it used to train it
     as `standard`.
   - `train --decision-tokens` with `decider`, `jpt`, or `eikos` is checked like the YAML

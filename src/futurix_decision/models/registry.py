@@ -1,8 +1,9 @@
 """Name -> ``FamilyAdapter``. ``load_model`` and the CLI dispatch through it. Imports without torch.
 
 Register a third-party family with ``register_family(MyAdapter())``; then
-``load_model(checkpoint, family="my-family")`` and
-``futurix-decision evaluate --model-format my-family`` both reach it.
+``load_model(checkpoint, family="my-family")`` reaches it, and so does
+``futurix-decision evaluate --model-format my-family`` unless the adapter is a
+``PublisherAdapter``, which the CLI reaches through ``--model-format native``.
 
 Every per-family lookup here (Hub IDs, aliases, local detection) reads the
 registered adapters' own attributes.

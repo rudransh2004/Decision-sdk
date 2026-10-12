@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from futurix_decision.trainers.rlcd import RLCDConfig, RLCDTrainer
     from futurix_decision.trainers.sft import SFTConfig, SFTTrainer
 
-__getattr__ = lazy_exports(
+__getattr__, __dir__ = lazy_exports(
     __name__,
     {
         "DecisionTrainer": "futurix_decision.trainers.base",

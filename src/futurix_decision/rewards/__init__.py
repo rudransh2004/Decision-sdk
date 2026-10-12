@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from futurix_decision.rewards.ranked_probability import RankedProbabilityScore
     from futurix_decision.rewards.spherical import SphericalScore
 
-__getattr__ = lazy_exports(
+__getattr__, __dir__ = lazy_exports(
     __name__,
     {
         "ProperScoringRule": "futurix_decision.rewards.base",

@@ -13,8 +13,8 @@ futurix-decision serve --model laya --model-format native --port 8000
 
 `--model` takes a Hub ID, an alias, or a local checkpoint. `--model-format`
 names the family (`standard` for a checkpoint you trained and exported,
-`bosun`, `decider`, `jpt`, `eikos`, any registered family, or `native` for a
-publisher runtime). `--backend vllm` serves an exported checkpoint through
+`bosun`, `decider`, `jpt`, `eikos`, a registered third-party family that is
+not a `PublisherAdapter`, or `native` for a publisher runtime). `--backend vllm` serves an exported checkpoint through
 `VLLMEngine`; see [inference backends](inference-backends.md). For a publisher
 helper such as OpenJev, pass `--native-base-url`.
 

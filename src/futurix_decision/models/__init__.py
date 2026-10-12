@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from futurix_decision.models.native import NativeCapabilities, NativeDecisionModel
     from futurix_decision.models.readouts import DecisionBatch, ReadoutStrategy
 
-__getattr__ = lazy_exports(
+__getattr__, __dir__ = lazy_exports(
     __name__,
     {
         "PointerDecisionHead": "futurix_decision.models.custom_head",

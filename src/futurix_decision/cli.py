@@ -60,7 +60,7 @@ def _rewards(config: dict[str, Any]):
 
 
 def _model_formats() -> list[str]:
-    """``--model-format`` values: ``standard``, each registered family, and ``native``.
+    """``--model-format`` values: ``standard``, registered non-publisher families, ``native``.
 
     ``standard`` is the ``futurix`` family. Publisher runtimes are reached
     through ``native``, which identifies the family from the checkpoint or

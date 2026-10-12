@@ -151,6 +151,26 @@ class CoreImportTests(unittest.TestCase):
         with self.assertRaises(AttributeError):
             futurix_decision.NotAName  # noqa: B018
 
+    def test_dir_lists_lazy_exports(self):
+        # A fresh interpreter, so no lazy name has been imported and cached yet.
+        script = textwrap.dedent(
+            """
+            import importlib
+
+            for package in ("futurix_decision", "futurix_decision.evaluation",
+                            "futurix_decision.models", "futurix_decision.rewards",
+                            "futurix_decision.trainers"):
+                module = importlib.import_module(package)
+                missing = set(module.__all__) - set(dir(module))
+                assert not missing, (package, sorted(missing))
+            print("ok")
+            """
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

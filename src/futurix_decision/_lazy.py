@@ -46,8 +46,14 @@ def require_transformers(extra: str, minimum: tuple[int, int]) -> None:
         )
 
 
-def lazy_exports(package: str, exports: Mapping[str, str]) -> Callable[[str], Any]:
-    """Return a module ``__getattr__`` that imports ``exports[name]`` on first access."""
+def lazy_exports(
+    package: str, exports: Mapping[str, str]
+) -> tuple[Callable[[str], Any], Callable[[], list[str]]]:
+    """Return a module's ``__getattr__`` and ``__dir__`` for lazily imported names.
+
+    ``__getattr__`` imports ``exports[name]`` on first access; ``__dir__``
+    lists the exports alongside the names the module already holds.
+    """
 
     def __getattr__(name: str) -> Any:
         module_name = exports.get(name)
@@ -59,4 +65,7 @@ def lazy_exports(package: str, exports: Mapping[str, str]) -> Callable[[str], An
         setattr(sys.modules[package], name, value)
         return value
 
-    return __getattr__
+    def __dir__() -> list[str]:
+        return sorted({*vars(sys.modules[package]), *exports})
+
+    return __getattr__, __dir__
