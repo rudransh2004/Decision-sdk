@@ -63,7 +63,7 @@ class SystemOneRequest(BaseModel):
     media: Any | None = None
 
 
-def _compat_input(
+def _system_one_input(
     state: Any,
     question_id: str,
     question: SystemOneQuestion,
@@ -235,7 +235,7 @@ def create_app(
             raise HTTPException(status_code=422, detail="unsupported demonstration_format")
         try:
             inputs = [
-                _compat_input(
+                _system_one_input(
                     body.state,
                     question_id,
                     question,

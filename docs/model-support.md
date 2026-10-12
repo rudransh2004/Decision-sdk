@@ -343,7 +343,7 @@ they must not guess the meaning of opaque benchmark IDs. If exporting an
 unmerged PEFT adapter for continued training, reload it with
 `DecisionModel.from_pretrained(path, trainable_adapter=True)`.
 
-The legacy `DecisionModel.from_pretrained` path rejects these publisher
+The generic `DecisionModel.from_pretrained` loader rejects these publisher
 checkpoints. Use `load_model`, which keeps each publisher's own decision
 readout. Loading an LM backbone in vLLM is not the same as serving its trained
 decision readout. JPT-35B-A3B is catalogued so that loading fails closed, but
