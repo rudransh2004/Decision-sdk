@@ -12,6 +12,8 @@ from huggingface_hub.errors import EntryNotFoundError
 
 from futurix_decision import DecisionModel, load_model
 from futurix_decision.errors import CheckpointError
+from futurix_decision.models.decider import DeciderDecisionModel
+from futurix_decision.models.registry import get_family
 from futurix_decision.models.sources import (
     checkpoint_source,
     infer_local_family,
@@ -287,7 +289,7 @@ class SourceTests(unittest.TestCase):
                         put(variant, "calib.json")
                     marker_value = object()
                     with patch.object(
-                        DecisionModel, f"from_{family}", return_value=marker_value
+                        get_family(family).model_class(), "from_native", return_value=marker_value
                     ) as loader:
                         self.assertIs(load_model(variant), marker_value)
                     loader.assert_called_once_with(str(variant))
@@ -461,7 +463,9 @@ class SourceTests(unittest.TestCase):
                 load_model("liquid-d1", revision="b" * 40, trust_remote_code=True)
 
     def test_supported_remote_letter_release_uses_its_native_importer(self):
-        with patch.object(DecisionModel, "from_decider", return_value="native-readout") as loader:
+        with patch.object(
+            DeciderDecisionModel, "from_native", return_value="native-readout"
+        ) as loader:
             self.assertEqual(load_model("Mapika/decider-4b"), "native-readout")
         loader.assert_called_once_with("Mapika/decider-4b")
         with self.assertRaisesRegex(ValueError, "unknown selected"):

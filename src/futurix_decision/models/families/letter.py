@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -17,56 +18,52 @@ from futurix_decision.models.sources import require_checkpoint_files
 
 if TYPE_CHECKING:
     from futurix_decision.models.decision_model import DecisionModel
+    from futurix_decision.models.label_readout import LabelReadoutModel
 
 
 class LetterAdapter(FamilyAdapter):
-    """One adapter class for the three letter families until they share a model base.
+    """Adapter for a family whose model subclasses ``LabelReadoutModel``.
 
-    ``prompt_format`` is the release's own prompt; training configs may not
-    change it. ``fixed_width`` is false when the release metadata sets the
-    option count. ``options`` are extra ``model:`` keys passed to the loader.
+    ``model`` names that class as ``"module:Class"``, so the registry imports
+    without torch. The release's prompt format, option width, and extra loader
+    options come from the class.
     """
 
-    def __init__(
-        self,
-        name: str,
-        *,
-        prompt_format: str,
-        fixed_width: bool = True,
-        options: tuple[str, ...] = (),
-    ) -> None:
+    def __init__(self, name: str, model: str) -> None:
         self.name = name
         self.checkpoints = supported_checkpoints(name)
         self.extra = name
-        self.prompt_format = prompt_format
-        self.fixed_width = fixed_width
-        self.options = options
+        self._model = model
+
+    def model_class(self) -> type[LabelReadoutModel]:
+        module, _, attribute = self._model.partition(":")
+        model: type[LabelReadoutModel] = getattr(importlib.import_module(module), attribute)
+        return model
 
     def load(self, checkpoint: str, *, device: str | None = None, **kwargs: Any) -> DecisionModel:
         reject_futurix_options(kwargs, self.name)
-        from futurix_decision.models.decision_model import DecisionModel
-
-        loader = getattr(DecisionModel, f"from_{self.name}")
-        return on_device(loader(checkpoint, **kwargs), device)
+        return on_device(self.model_class().from_native(checkpoint, **kwargs), device)
 
     def requires(self, path: Path) -> None:
         require_checkpoint_files(path, self.name)
 
     def training_kwargs(self, section: Mapping[str, Any], *, method: str) -> dict[str, Any]:
+        model = self.model_class()
         if section.get("head_type", "tokens") != "tokens" or section.get("head_config"):
             raise ConfigError(
                 "native letter models use their trained readout, not a new decision head"
             )
-        if not self.fixed_width and "decision_tokens" in section:
+        if model.default_width is None:
+            if "decision_tokens" in section:
+                raise ConfigError(f"{model.family} one-pass width comes from the release metadata")
+        elif section.get("decision_tokens", model.default_width) != model.default_width:
             raise ConfigError(
-                f"{self.name.capitalize()} one-pass width comes from the release metadata"
+                f"native letter models support {model.default_width} existing option labels"
             )
-        if self.fixed_width and section.get("decision_tokens", 255) != 255:
-            raise ConfigError("native letter models support 255 existing option labels")
-        if section.get("prompt_format", self.prompt_format) != self.prompt_format:
+        if section.get("prompt_format", model.release_format) != model.release_format:
             raise ConfigError(f"{self.name} requires its native prompt")
         return {
             key: section[key]
-            for key in ("max_sequence_length", "seed", *self.options)
+            for key in ("max_sequence_length", "seed", *model.native_options)
             if key in section
         }

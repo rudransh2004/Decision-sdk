@@ -132,6 +132,11 @@ class LabelReadoutModel(DecisionModel):
             kwargs.setdefault("decision_tokens", self.default_width)
         super().__init__(backbone, tokenizer, **kwargs)
 
+    @classmethod
+    def from_native(cls, checkpoint: str | Path, **kwargs: Any) -> LabelReadoutModel:
+        """Load the publisher's release, checking that it uses this readout contract."""
+        raise NotImplementedError
+
     def _label_token_ids(self) -> list[int]:
         """Token IDs of the first ``decision_tokens`` option labels."""
         raise NotImplementedError

@@ -54,9 +54,9 @@ def family_for_checkpoint(checkpoint: str) -> FamilyAdapter | None:
 for _adapter in (
     FuturixAdapter(),
     BosunAdapter(),
-    LetterAdapter("decider", prompt_format="decider-v2.1"),
-    LetterAdapter("jpt", prompt_format="jpt-llm2jev-chat", options=("temperature",)),
-    LetterAdapter("eikos", prompt_format="eikos-letter-v1-semif", fixed_width=False),
+    LetterAdapter("decider", "futurix_decision.models.decider:DeciderDecisionModel"),
+    LetterAdapter("jpt", "futurix_decision.models.jpt:JPTDecisionModel"),
+    LetterAdapter("eikos", "futurix_decision.models.eikos:EikosDecisionModel"),
     PublisherAdapter("kev", extra="kev-native"),
     PublisherAdapter("laya", extra="laya"),
     PublisherAdapter("gliner", extra="gliner"),
