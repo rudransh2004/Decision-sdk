@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from futurix_decision.errors import ConfigError
 from futurix_decision.models.families.base import FamilyAdapter, reject_futurix_options
 from futurix_decision.models.protocol import DecisionBackend
-from futurix_decision.models.sources import require_checkpoint_files
+from futurix_decision.models.sources import CheckpointFiles
 
 if TYPE_CHECKING:
     from futurix_decision.models.native import NativeDecisionModel
@@ -34,18 +34,12 @@ PUBLISHER_CHECKPOINTS = {
 
 
 class PublisherAdapter(FamilyAdapter):
-    """Delegates to ``NativeDecisionModel``, which still branches on the family.
+    """One publisher runtime. Subclasses set ``name`` and ``extra`` and list their files."""
 
-    ``local_files`` is false for OpenJev, which the SDK only reaches over HTTP.
-    """
-
-    def __init__(self, name: str, *, extra: str | None, local_files: bool = True) -> None:
-        self.name = name
+    def __init__(self) -> None:
         self.checkpoints = tuple(
-            checkpoint for checkpoint, family in PUBLISHER_CHECKPOINTS.items() if family == name
+            hub_id for hub_id, family in PUBLISHER_CHECKPOINTS.items() if family == self.name
         )
-        self.extra = extra
-        self.local_files = local_files
 
     def load(
         self, checkpoint: str, *, device: str | None = None, **kwargs: Any
@@ -57,9 +51,14 @@ class PublisherAdapter(FamilyAdapter):
             checkpoint, family=self.name, device=device or "cpu", **kwargs
         )
 
-    def requires(self, path: Path) -> None:
-        if self.local_files:
-            require_checkpoint_files(path, self.name)
+    def requires(self, path: Path, *, source: str | None = None) -> None:
+        """Check a local copy or Hub snapshot; ``source`` names the Hub ID in the error."""
+        files = CheckpointFiles(path)
+        self.files(files)
+        files.check(self.name, source=source)
+
+    def files(self, files: CheckpointFiles) -> None:
+        """Mark each file the publisher loader reads. The default needs none."""
 
     def finetune(
         self, model: DecisionBackend, dataset: Any, output_dir: str | Path, **kwargs: Any

@@ -40,7 +40,7 @@ from futurix_decision.models.letter_code import (
     enable_qwen_noncausal_attention,
     format_letter_code_prompt,
 )
-from futurix_decision.models.sources import checkpoint_source, require_checkpoint_files
+from futurix_decision.models.sources import checkpoint_source
 from futurix_decision.models.tokenizer import (
     format_decision_prompt,
     format_head_prompt,
@@ -566,6 +566,7 @@ class DecisionModel:
         revision: str | None = None,
         max_sequence_length: int = 4096,
         learn_abstain: bool = False,
+        check_files: bool = True,
         **hf_kwargs: Any,
     ) -> DecisionModel:
         """Load a pinned Hub release or a trusted local Bosun copy with its readout.
@@ -573,7 +574,8 @@ class DecisionModel:
         Bosun is not a plain LM repository: its custom loader reconstructs a
         Qwen base, a PEFT adapter, and two sets of trained decision-token rows.
         Local copies still need their referenced Qwen base available on disk
-        or downloadable by Transformers.
+        or downloadable by Transformers. ``check_files=False`` skips the local
+        file check for callers that already ran it, such as ``load_model``.
         """
         source, local = checkpoint_source(checkpoint)
         revision = revision or BOSUN_RELEASES.get(source)
@@ -585,8 +587,10 @@ class DecisionModel:
             )
         ):
             raise ConfigError("pin the Bosun repository to a full 40-character commit revision")
-        if local:
-            require_checkpoint_files(Path(source), "bosun")
+        if local and check_files:
+            from futurix_decision.models.registry import get_family
+
+            get_family("bosun").requires(Path(source))
         package = AutoModelForCausalLM.from_pretrained(
             source,
             trust_remote_code=True,

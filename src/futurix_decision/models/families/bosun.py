@@ -13,7 +13,7 @@ from futurix_decision.models.families.base import (
     supported_checkpoints,
 )
 from futurix_decision.models.families.futurix import on_device
-from futurix_decision.models.sources import require_checkpoint_files
+from futurix_decision.models.sources import CheckpointFiles, read_checkpoint_json
 
 if TYPE_CHECKING:
     from futurix_decision.models.decision_model import DecisionModel
@@ -28,10 +28,23 @@ class BosunAdapter(FamilyAdapter):
         reject_futurix_options(kwargs, self.name)
         from futurix_decision.models.decision_model import DecisionModel
 
-        return on_device(DecisionModel.from_bosun(checkpoint, **kwargs), device)
+        # load_model already ran ``requires`` on a local copy.
+        return on_device(DecisionModel.from_bosun(checkpoint, check_files=False, **kwargs), device)
 
     def requires(self, path: Path) -> None:
-        require_checkpoint_files(path, "bosun")
+        files = CheckpointFiles(path)
+        files.require("config.json")
+        if files.has("config.json"):
+            config = read_checkpoint_json(path / "config.json")
+            files.require(
+                str(config.get("decision_embeddings_file") or "decision_embeddings.safetensors")
+            )
+            adapter = str(config.get("adapter_subfolder") or "adapter")
+            tokenizer = str(config.get("tokenizer_subfolder") or "tokenizer")
+            files.require(f"{adapter}/adapter_config.json")
+            files.one_of(f"{adapter}/adapter_model.safetensors", f"{adapter}/adapter_model.bin")
+            files.one_of(f"{tokenizer}/tokenizer.json", f"{tokenizer}/vocab.json")
+        files.check(self.name)
 
     def training_kwargs(self, section: Mapping[str, Any], *, method: str) -> dict[str, Any]:
         if section.get("head_type", "tokens") != "tokens":

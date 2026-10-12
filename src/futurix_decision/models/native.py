@@ -50,14 +50,13 @@ from futurix_decision.models.families import (
     server_calibration,
 )
 from futurix_decision.models.families.futurix import QWEN35, on_device
-from futurix_decision.models.families.publisher import PUBLISHER_CHECKPOINTS
+from futurix_decision.models.families.publisher import PUBLISHER_CHECKPOINTS, PublisherAdapter
 from futurix_decision.models.protocol import DecisionBackend
 from futurix_decision.models.registry import family_for_checkpoint, get_family
 from futurix_decision.models.sources import (
     checkpoint_source,
     infer_local_family,
     read_checkpoint_json,
-    require_checkpoint_files,
 )
 
 if TYPE_CHECKING:
@@ -454,8 +453,10 @@ class NativeDecisionModel:
             raise ConfigError("client needs base_url for a native System One server")
         if api_key is not None:
             raise ConfigError("api_key is only for a native System One server")
-        if local and family != "openjev":
-            require_checkpoint_files(Path(name), family, source=name)
+        adapter = get_family(family)
+        assert isinstance(adapter, PublisherAdapter)
+        if local:
+            adapter.requires(Path(name), source=name)
         if family == "laya":
             try:
                 import laya
@@ -509,7 +510,7 @@ class NativeDecisionModel:
                     "joint_head.safetensors",
                 )
             directory = Path(name) if local else Path(snapshot_download(name, revision=revision))
-            require_checkpoint_files(directory, family, source=name)
+            adapter.requires(directory, source=name)
             source = directory / "joint_schema_model.py"
             module_name = (
                 "futurix_native_clef_"
@@ -543,7 +544,7 @@ class NativeDecisionModel:
                     name, family, revision, "decision_config.json", "readout.safetensors"
                 )
             directory = Path(name) if local else Path(snapshot_download(name, revision=revision))
-            require_checkpoint_files(directory, family, source=name)
+            adapter.requires(directory, source=name)
             runtime = PplxModel(checkpoint=directory, train=False, device=device, **native_kwargs)
         else:
             _pinned_remote(revision, trust_remote_code, family, local=local)
@@ -557,7 +558,7 @@ class NativeDecisionModel:
             # Inspect the complete, immutable publisher package before remote
             # code can silently load an incomplete head/backbone as a base LM.
             directory = Path(name) if local else Path(snapshot_download(name, revision=revision))
-            require_checkpoint_files(directory, family, source=name)
+            adapter.requires(directory, source=name)
             runtime = AutoModel.from_pretrained(
                 str(directory), trust_remote_code=True, **native_kwargs
             ).to(device)

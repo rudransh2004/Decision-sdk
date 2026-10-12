@@ -10,9 +10,16 @@ from __future__ import annotations
 from futurix_decision.errors import ConfigError
 from futurix_decision.models.families.base import FamilyAdapter
 from futurix_decision.models.families.bosun import BosunAdapter
+from futurix_decision.models.families.clef import ClefAdapter
 from futurix_decision.models.families.futurix import FuturixAdapter
+from futurix_decision.models.families.gliner import GlinerAdapter
+from futurix_decision.models.families.kev import KevAdapter
+from futurix_decision.models.families.laya import LayaAdapter
 from futurix_decision.models.families.letter import LetterAdapter
-from futurix_decision.models.families.publisher import PublisherAdapter
+from futurix_decision.models.families.liquid import LiquidAdapter
+from futurix_decision.models.families.nox_lux import NoxLuxAdapter
+from futurix_decision.models.families.openjev import OpenJevAdapter
+from futurix_decision.models.families.pplx import PplxAdapter
 
 # "standard" and "native" are CLI --model-format values with their own meaning.
 _RESERVED = frozenset({"standard", "native"})
@@ -54,17 +61,25 @@ def family_for_checkpoint(checkpoint: str) -> FamilyAdapter | None:
 for _adapter in (
     FuturixAdapter(),
     BosunAdapter(),
-    LetterAdapter("decider", "futurix_decision.models.decider:DeciderDecisionModel"),
-    LetterAdapter("jpt", "futurix_decision.models.jpt:JPTDecisionModel"),
-    LetterAdapter("eikos", "futurix_decision.models.eikos:EikosDecisionModel"),
-    PublisherAdapter("kev", extra="kev-native"),
-    PublisherAdapter("laya", extra="laya"),
-    PublisherAdapter("gliner", extra="gliner"),
-    PublisherAdapter("clef", extra="clef"),
-    PublisherAdapter("pplx-decider", extra="pplx-decider"),
-    PublisherAdapter("openjev", extra=None, local_files=False),
-    PublisherAdapter("nox", extra="nox-lux"),
-    PublisherAdapter("lux", extra="nox-lux"),
-    PublisherAdapter("liquid-d1", extra="liquid-d1"),
+    LetterAdapter(
+        "decider",
+        "futurix_decision.models.decider:DeciderDecisionModel",
+        markers=("decider_config.json",),
+    ),
+    LetterAdapter("jpt", "futurix_decision.models.jpt:JPTDecisionModel", markers=("README.md",)),
+    LetterAdapter(
+        "eikos",
+        "futurix_decision.models.eikos:EikosDecisionModel",
+        markers=("decision_config.json", "calib.json"),
+    ),
+    KevAdapter(),
+    LayaAdapter(),
+    GlinerAdapter(),
+    ClefAdapter(),
+    PplxAdapter(),
+    OpenJevAdapter(),
+    NoxLuxAdapter("nox"),
+    NoxLuxAdapter("lux"),
+    LiquidAdapter(),
 ):
     register_family(_adapter)

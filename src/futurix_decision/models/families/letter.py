@@ -14,7 +14,7 @@ from futurix_decision.models.families.base import (
     supported_checkpoints,
 )
 from futurix_decision.models.families.futurix import on_device
-from futurix_decision.models.sources import require_checkpoint_files
+from futurix_decision.models.sources import CheckpointFiles
 
 if TYPE_CHECKING:
     from futurix_decision.models.decision_model import DecisionModel
@@ -26,14 +26,16 @@ class LetterAdapter(FamilyAdapter):
 
     ``model`` names that class as ``"module:Class"``, so the registry imports
     without torch. The release's prompt format, option width, and extra loader
-    options come from the class.
+    options come from the class. ``markers`` are the release files besides the
+    config, tokenizer, and weights that every local copy needs.
     """
 
-    def __init__(self, name: str, model: str) -> None:
+    def __init__(self, name: str, model: str, *, markers: tuple[str, ...]) -> None:
         self.name = name
         self.checkpoints = supported_checkpoints(name)
         self.extra = name
         self._model = model
+        self._markers = markers
 
     def model_class(self) -> type[LabelReadoutModel]:
         module, _, attribute = self._model.partition(":")
@@ -45,7 +47,11 @@ class LetterAdapter(FamilyAdapter):
         return on_device(self.model_class().from_native(checkpoint, **kwargs), device)
 
     def requires(self, path: Path) -> None:
-        require_checkpoint_files(path, self.name)
+        files = CheckpointFiles(path)
+        files.require(*self._markers, "config.json")
+        files.tokenizer()
+        files.weights()
+        files.check(self.name)
 
     def training_kwargs(self, section: Mapping[str, Any], *, method: str) -> dict[str, Any]:
         model = self.model_class()

@@ -6,8 +6,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from futurix_decision.errors import CheckpointError
 from futurix_decision.models.families.base import FamilyAdapter
-from futurix_decision.models.sources import read_checkpoint_json, require_checkpoint_files
+from futurix_decision.models.sources import CheckpointFiles, read_checkpoint_json
 
 if TYPE_CHECKING:
     from futurix_decision.models.decision_model import DecisionModel
@@ -36,8 +37,22 @@ class FuturixAdapter(FamilyAdapter):
         return on_device(DecisionModel.from_pretrained(checkpoint, **kwargs), device)
 
     def requires(self, path: Path) -> None:
-        require_checkpoint_files(path, "futurix")
-        metadata = read_checkpoint_json(path / "decision_config.json")
+        files = CheckpointFiles(path)
+        files.require("decision_config.json")
+        metadata: dict[str, Any] = {}
+        if files.has("decision_config.json"):
+            metadata = read_checkpoint_json(path / "decision_config.json")
+            if metadata.get("architecture") != "futurix-decision":
+                raise CheckpointError(f"not a Futurix decision checkpoint: {path}")
+            if metadata.get("head_type", "tokens") != "tokens":
+                files.require("decision_head.safetensors")
+        if files.has("adapter_config.json"):
+            files.one_of("adapter_model.safetensors", "adapter_model.bin")
+        else:
+            files.require("config.json")
+            files.weights()
+        files.tokenizer()
+        files.check(self.name)
         if metadata.get("source_checkpoint") in QWEN35:
             from futurix_decision.models.native import _requires_transformers
 

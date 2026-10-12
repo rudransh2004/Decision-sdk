@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from futurix_decision.errors import CheckpointError, ConfigError
+from futurix_decision.errors import CheckpointError
 from futurix_decision.models.families import FAMILIES
 
 
@@ -105,37 +105,45 @@ def infer_local_family(directory: Path) -> str | None:
     return None
 
 
-def require_checkpoint_files(
-    directory: Path,
-    family: str,
-    *,
-    source: str | None = None,
-) -> None:
-    """Check the native readout and complete local weight set before loading.
+class CheckpointFiles:
+    """Collect the files a local checkpoint directory is missing, then raise once.
 
-    This runs on disk paths and on downloaded Hub snapshots. Publisher loaders
-    remain responsible for architecture-specific config and tensor validation.
+    Adapters' ``requires`` methods call ``require``, ``one_of``, ``tokenizer``,
+    and ``weights`` for each file their loader reads, then ``check``. This runs
+    on disk paths and on downloaded Hub snapshots; publisher loaders remain
+    responsible for architecture-specific config and tensor validation.
     """
-    missing: list[str] = []
 
-    def safe(relative: str) -> None:
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self.missing: list[str] = []
+
+    def _inside(self, relative: str) -> None:
         if Path(relative).is_absolute() or ".." in Path(relative).parts:
             raise CheckpointError(f"checkpoint file must be inside its directory: {relative!r}")
 
-    def require(relative: str) -> None:
-        safe(relative)
-        if not (directory / relative).is_file():
-            missing.append(relative)
+    def has(self, relative: str) -> bool:
+        return (self.directory / relative).is_file()
 
-    def one_of(*alternatives: str) -> None:
-        for filename in alternatives:
-            safe(filename)
-        if not any((directory / name).is_file() for name in alternatives):
-            missing.append(" or ".join(alternatives))
+    def require(self, *relatives: str) -> None:
+        for relative in relatives:
+            self._inside(relative)
+            if not self.has(relative):
+                self.missing.append(relative)
 
-    def weights() -> None:
+    def one_of(self, *alternatives: str) -> None:
+        for relative in alternatives:
+            self._inside(relative)
+        if not any(self.has(relative) for relative in alternatives):
+            self.missing.append(" or ".join(alternatives))
+
+    def tokenizer(self) -> None:
+        self.one_of("tokenizer.json", "tokenizer.model", "vocab.json")
+
+    def weights(self) -> None:
+        """Every shard a sharded index names, or one unsharded weight file."""
         for index_name in ("model.safetensors.index.json", "pytorch_model.bin.index.json"):
-            index = directory / index_name
+            index = self.directory / index_name
             if index.is_file():
                 files = read_checkpoint_json(index).get("weight_map")
                 if (
@@ -146,175 +154,13 @@ def require_checkpoint_files(
                     )
                 ):
                     raise CheckpointError(f"invalid weight_map in {index}")
-                for filename in sorted(set(files.values())):
-                    require(filename)
+                self.require(*sorted(set(files.values())))
                 return
-        one_of("model.safetensors", "pytorch_model.bin", "model.safetensors.index.json")
+        self.one_of("model.safetensors", "pytorch_model.bin", "model.safetensors.index.json")
 
-    if family == "clef":
-        for filename in (
-            "config.json",
-            "joint_schema_model.py",
-            "joint_head_config.json",
-            "joint_head.safetensors",
-        ):
-            require(filename)
-        one_of("tokenizer.json", "tokenizer.model", "vocab.json")
-        weights()
-    elif family == "pplx-decider":
-        for filename in ("config.json", "decision_config.json", "readout.safetensors"):
-            require(filename)
-        one_of("tokenizer.json", "tokenizer.model", "vocab.json")
-        weights()
-    elif family == "kev":
-        require("head.pt")
-        if (directory / "adapter_config.json").is_file():
-            one_of("adapter_model.safetensors", "adapter_model.bin")
-        else:
-            require("config.json")
-            weights()
-    elif family == "laya":
-        require("rl_agent_config.json")
-        require("model.safetensors")
-    elif family == "gliner":
-        require("config.json")
-        require("encoder_config/config.json")
-        one_of("model.safetensors", "pytorch_model.bin")
-    elif family == "bosun":
-        require("config.json")
-        if (directory / "config.json").is_file():
-            config = read_checkpoint_json(directory / "config.json")
-            require(
-                str(config.get("decision_embeddings_file") or "decision_embeddings.safetensors")
+    def check(self, family: str, *, source: str | None = None) -> None:
+        if self.missing:
+            raise CheckpointError(
+                f"incomplete {family} checkpoint {source or str(self.directory)!r}; "
+                f"missing: {', '.join(self.missing)}"
             )
-            adapter = str(config.get("adapter_subfolder") or "adapter")
-            tokenizer = str(config.get("tokenizer_subfolder") or "tokenizer")
-            require(f"{adapter}/adapter_config.json")
-            one_of(f"{adapter}/adapter_model.safetensors", f"{adapter}/adapter_model.bin")
-            one_of(f"{tokenizer}/tokenizer.json", f"{tokenizer}/vocab.json")
-    elif family == "decider":
-        require("decider_config.json")
-        require("config.json")
-        one_of("tokenizer.json", "tokenizer.model", "vocab.json")
-        weights()
-    elif family == "eikos":
-        require("decision_config.json")
-        require("calib.json")
-        require("config.json")
-        one_of("tokenizer.json", "tokenizer.model", "vocab.json")
-        weights()
-    elif family == "jpt":
-        require("README.md")
-        require("config.json")
-        one_of("tokenizer.json", "tokenizer.model", "vocab.json")
-        weights()
-    elif family == "futurix":
-        require("decision_config.json")
-        if (directory / "decision_config.json").is_file():
-            metadata = read_checkpoint_json(directory / "decision_config.json")
-            if metadata.get("architecture") != "futurix-decision":
-                raise CheckpointError(f"not a Futurix decision checkpoint: {directory}")
-            if metadata.get("head_type", "tokens") != "tokens":
-                require("decision_head.safetensors")
-        if (directory / "adapter_config.json").is_file():
-            one_of("adapter_model.safetensors", "adapter_model.bin")
-        else:
-            require("config.json")
-            weights()
-        one_of("tokenizer.json", "tokenizer.model", "vocab.json")
-    elif family in ("nox", "lux"):
-        require("config.json")
-        if (directory / "config.json").is_file():
-            config = read_checkpoint_json(directory / "config.json")
-            if config.get("decision_format") != "vllm-sr-decision":
-                raise CheckpointError(f"{directory} is not a vLLM Semantic Router decision release")
-            version = config.get("format_version")
-            if version not in (1, 2):
-                raise CheckpointError(
-                    f"unsupported Decision release format {version!r}: {directory}"
-                )
-            for field in ("model_config", "manifest") if version == 2 else ("model_config",):
-                filename = config.get(field)
-                if not isinstance(filename, str) or not filename:
-                    raise CheckpointError(
-                        f"Decision {version} checkpoint is missing {field}: {directory}"
-                    )
-                require(filename)
-            head = config.get("decision_weights")
-            backbone = config.get("backbone")
-            tokenizer = config.get("tokenizer")
-            if (
-                not isinstance(head, dict)
-                or not isinstance(backbone, dict)
-                or not isinstance(tokenizer, dict)
-            ):
-                raise CheckpointError(
-                    f"Decision {version} checkpoint is missing "
-                    f"head/backbone/tokenizer metadata: {directory}"
-                )
-            for field, section in (
-                ("decision_head", head),
-                ("config", backbone),
-                ("index", backbone),
-                ("json", tokenizer),
-                ("config", tokenizer),
-                ("chat_template", tokenizer),
-            ):
-                filename = section.get(field)
-                if not isinstance(filename, str) or not filename:
-                    raise CheckpointError(
-                        f"Decision {version} checkpoint is missing {field} metadata: {directory}"
-                    )
-                require(filename)
-            filenames = backbone.get("weights")
-            if (
-                not isinstance(filenames, list)
-                or not filenames
-                or not all(isinstance(filename, str) and filename for filename in filenames)
-            ):
-                raise CheckpointError(
-                    f"Decision {version} checkpoint has no backbone shard list: {directory}"
-                )
-            for filename in filenames:
-                require(filename)
-            index = directory / backbone["index"]
-            if index.is_file():
-                mapping = read_checkpoint_json(index).get("weight_map")
-                if not isinstance(mapping, dict) or not mapping:
-                    raise CheckpointError(f"invalid backbone weight_map in {index}")
-                for filename in set(mapping.values()):
-                    if not isinstance(filename, str) or not filename:
-                        raise CheckpointError(f"invalid backbone shard in {index}")
-                    relative = Path(filename)
-                    if relative.parts[:1] != Path(backbone["index"]).parts[:1]:
-                        relative = Path(backbone["index"]).parent / relative
-                    require(str(relative))
-            calibration = config.get("calibration")
-            if isinstance(calibration, dict) and calibration.get("temperature_file"):
-                filename = calibration["temperature_file"]
-                if not isinstance(filename, str):
-                    raise CheckpointError(f"Decision calibration filename is invalid: {directory}")
-                require(filename)
-    elif family == "liquid-d1":
-        for filename in (
-            "config.json",
-            "modeling_d1.py",
-            "lfm2_vl.py",
-            "runner.py",
-            "hybrid.py",
-            "api.py",
-            "prompt.py",
-            "tokenizer.json",
-            "tokenizer_config.json",
-            "processor_config.json",
-            "chat_template.jinja",
-        ):
-            require(filename)
-        weights()
-    else:
-        raise ConfigError(f"unsupported decision-model family: {family}")
-    if missing:
-        raise CheckpointError(
-            f"incomplete {family} checkpoint {source or str(directory)!r}; "
-            f"missing: {', '.join(missing)}"
-        )

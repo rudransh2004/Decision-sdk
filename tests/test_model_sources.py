@@ -17,7 +17,6 @@ from futurix_decision.models.registry import get_family
 from futurix_decision.models.sources import (
     checkpoint_source,
     infer_local_family,
-    require_checkpoint_files,
 )
 from test_bosun import bosun_tiny_model
 from test_decision_model import tiny_checkpoint
@@ -172,7 +171,7 @@ class SourceTests(unittest.TestCase):
                 ),
             )
             with self.assertRaisesRegex(CheckpointError, "inside its directory"):
-                require_checkpoint_files(root, "pplx-decider")
+                get_family("pplx-decider").requires(root)
             (root / "model.safetensors.index.json").unlink()
             put(root, "model.safetensors")
             (root / "readout.safetensors").unlink()
@@ -370,17 +369,17 @@ class SourceTests(unittest.TestCase):
                     )
                     put(root, "temperature.json" if version == 1 else "MODEL_MANIFEST.json")
                     self.assertEqual(infer_local_family(root), family)
-                    require_checkpoint_files(root, family)
+                    get_family(family).requires(root)
                     (root / "decision_head.safetensors").unlink()
                     with self.assertRaisesRegex(CheckpointError, "decision_head.safetensors"):
-                        require_checkpoint_files(root, family)
+                        get_family(family).requires(root)
                     put(root, "decision_head.safetensors")
                     (root / "backbone/model-00001-of-00001.safetensors").unlink()
                     with self.assertRaisesRegex(
                         CheckpointError,
                         "backbone/model-00001-of-00001.safetensors",
                     ):
-                        require_checkpoint_files(root, family)
+                        get_family(family).requires(root)
 
     def test_liquid_local_package_preserves_remote_code_and_backbone(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -393,7 +392,7 @@ class SourceTests(unittest.TestCase):
             put(root, "model.safetensors")
             self.assertEqual(infer_local_family(root), "liquid-d1")
             with self.assertRaisesRegex(CheckpointError, "modeling_d1.py"):
-                require_checkpoint_files(root, "liquid-d1")
+                get_family("liquid-d1").requires(root)
             for filename in (
                 "modeling_d1.py",
                 "lfm2_vl.py",
@@ -407,10 +406,10 @@ class SourceTests(unittest.TestCase):
                 "chat_template.jinja",
             ):
                 put(root, filename)
-            require_checkpoint_files(root, "liquid-d1")
+            get_family("liquid-d1").requires(root)
             (root / "tokenizer.json").unlink()
             with self.assertRaisesRegex(CheckpointError, "tokenizer.json"):
-                require_checkpoint_files(root, "liquid-d1")
+                get_family("liquid-d1").requires(root)
 
     def test_new_hub_releases_reject_incomplete_snapshots_before_model_execution(self):
         with (
