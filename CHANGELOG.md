@@ -236,7 +236,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `BackendError`.
   - Missing optional packages raise `MissingDependencyError`, still an `ImportError`.
     `load_model` on a transformers checkpoint without torch raises it instead of
-    `ModuleNotFoundError`.
+    `ModuleNotFoundError`. Only a missing top-level `torch` or `transformers` counts: a
+    broken install (a missing `torch._C`, say) still raises its own `ModuleNotFoundError`.
 - **Breaking:** the base install no longer depends on torch or transformers. It needs
   only `pydantic`, `httpx`, `pyyaml`, and `huggingface-hub`. Install
   `futurix-decision[torch]` (or a model-family extra) to run local models.

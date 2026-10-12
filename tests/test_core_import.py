@@ -98,8 +98,44 @@ SCRIPT = textwrap.dedent(
     """
 )
 
+# torch is installed but broken: its compiled extension fails to import.
+BROKEN_TORCH = textwrap.dedent(
+    """
+    import importlib.abc
+    import sys
+
+    class Block(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name == "torch._C" or name.startswith("torch._C."):
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+            return None
+
+    sys.meta_path.insert(0, Block())
+
+    import futurix_decision
+    from futurix_decision import MissingDependencyError
+
+    try:
+        futurix_decision.DecisionModel
+    except MissingDependencyError as error:
+        raise AssertionError(f"a broken torch was reported as missing: {error}")
+    except ModuleNotFoundError as error:
+        assert error.name == "torch._C", error.name
+    else:
+        raise AssertionError("DecisionModel imported without torch._C")
+    print("ok")
+    """
+)
+
 
 class CoreImportTests(unittest.TestCase):
+    def test_a_broken_torch_is_not_reported_as_missing(self):
+        completed = subprocess.run(
+            [sys.executable, "-c", BROKEN_TORCH], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "ok")
+
     def test_core_imports_without_torch(self):
         completed = subprocess.run(
             [sys.executable, "-c", SCRIPT], capture_output=True, text=True, timeout=120

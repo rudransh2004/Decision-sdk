@@ -17,11 +17,15 @@ _TORCH_MODULES = frozenset({"torch", "transformers"})
 
 @contextmanager
 def torch_required(feature: str) -> Iterator[None]:
-    """Turn a missing torch or transformers import into ``MissingDependencyError``."""
+    """Turn a missing torch or transformers import into ``MissingDependencyError``.
+
+    Only the absence of the top-level package counts: a missing submodule such
+    as ``torch._C`` means a broken install, so that error propagates unchanged.
+    """
     try:
         yield
     except ModuleNotFoundError as error:
-        if (error.name or "").partition(".")[0] not in _TORCH_MODULES:
+        if error.name not in _TORCH_MODULES:
             raise
         raise MissingDependencyError(
             f"{feature} needs {error.name}: install futurix-decision[torch]"
