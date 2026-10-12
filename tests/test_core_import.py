@@ -26,6 +26,7 @@ SCRIPT = textwrap.dedent(
     from futurix_decision import DecisionInput, DecisionResult, MissingDependencyError
     from futurix_decision.evaluation import compute_metrics
     from futurix_decision.utils.config import load_config
+    from futurix_decision import FamilyAdapter, register_family
 
     example = DecisionInput(state="sky", question="Which color?", options=["blue", "red"])
     assert example.options == ["blue", "red"]

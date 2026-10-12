@@ -8,6 +8,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `FamilyAdapter` and `register_family`, exported from the top-level package (no torch
+  needed). An adapter names a family, lists the Hub IDs it loads, names its pip extra,
+  and implements `load`; `requires`, `finetune`, and `training_kwargs` are optional.
+  `load_model(checkpoint, family=...)` dispatches through the registry, so a registered
+  third-party family loads like a built-in one.
 - `DecisionBackend`, a runtime-checkable protocol exported from the top-level package
   (no torch needed): `decide`, `batch_decide`, `choice`, `noul`, `score`, and `close`.
   `DecisionModel`, `NativeDecisionModel`, `VLLMEngine`, `DecisionClient`, and
@@ -67,6 +72,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ConfigError`. Migration: drop `head_type` and `train_backbone` where a release
   rejects them, and narrow the result with `isinstance` before calling
   family-specific methods such as `NativeDecisionModel.finetune`.
+- `load_model(..., convert=True)` on any known decision-model family raises one
+  `ConfigError` that names the family. Bosun, Decider, JPT, Eikos, and Futurix
+  checkpoints used to raise per-family messages.
 - `evaluate` and `fit_temperature` take any `DecisionBackend`. `max_batch_tokens` in
   `evaluate` needs a `DecisionModel` or `VLLMEngine` (optionally inside `Calibrated`) and
   raises `ConfigError` for other backends.
@@ -111,6 +119,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **Breaking:** `futurix_decision.models.registry.register_backend` and `create_backend`.
+  Nothing in the SDK called them. Migration: implement a `FamilyAdapter` and call
+  `register_family`.
 - **Breaking:** the `pplx` strategy and head-type alias and the `pplx-v1` prompt-version
   alias, in `load_model`, `DecisionModel`, and `futurix-decision train
   --convert-strategy`. Migration: use `letter_code` and `letter-code-v1`. A checkpoint

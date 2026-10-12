@@ -2,7 +2,9 @@ from typing import TYPE_CHECKING
 
 from futurix_decision._lazy import lazy_exports
 from futurix_decision.models.calibrated import Calibrated
+from futurix_decision.models.families.base import FamilyAdapter
 from futurix_decision.models.protocol import DecisionBackend
+from futurix_decision.models.registry import get_family, register_family
 
 if TYPE_CHECKING:
     from futurix_decision.models.custom_head import PointerDecisionHead, register_decision_head
@@ -27,9 +29,12 @@ __all__ = [
     "DecisionBackend",
     "DecisionBatch",
     "DecisionModel",
+    "FamilyAdapter",
     "NativeCapabilities",
     "NativeDecisionModel",
     "PointerDecisionHead",
+    "get_family",
     "load_model",
     "register_decision_head",
+    "register_family",
 ]

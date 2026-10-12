@@ -110,7 +110,9 @@ module = [
   "futurix_decision.client.*",
   "futurix_decision.errors",
   "futurix_decision.models.calibrated",
+  "futurix_decision.models.families.*",
   "futurix_decision.models.protocol",
+  "futurix_decision.models.registry",
 ]
 disallow_untyped_defs = true
 

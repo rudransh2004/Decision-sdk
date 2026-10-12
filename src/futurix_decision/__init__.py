@@ -25,7 +25,7 @@ from futurix_decision.errors import (
     MissingDependencyError,
 )
 from futurix_decision.inference import DecisionResult
-from futurix_decision.models import Calibrated, DecisionBackend
+from futurix_decision.models import Calibrated, DecisionBackend, FamilyAdapter, register_family
 
 if TYPE_CHECKING:
     from futurix_decision.evaluation import evaluate, fit_temperature
@@ -82,6 +82,7 @@ __all__ = [
     "DecisionExample",
     "DecisionInput",
     "DecisionModel",
+    "FamilyAdapter",
     "NativeCapabilities",
     "NativeDecisionModel",
     "PointerDecisionHead",
@@ -102,4 +103,5 @@ __all__ = [
     "load_model",
     "load_open_decisions",
     "register_decision_head",
+    "register_family",
 ]
