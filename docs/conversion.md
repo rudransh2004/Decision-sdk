@@ -4,9 +4,6 @@
 [Datasets and training](datasets-and-training.md) ·
 [Supported released decision models](model-support.md)
 
-> This public repository is a documentation preview. The SDK source and
-> packaging files have not yet been published here.
-
 `load_model(base, convert=True, strategy=...)` starts with an **ordinary,
 untrained-for-decisions LM**. Choose its readout, train on labeled decisions,
 evaluate on untouched cases, then calibrate. None of these strategies imports

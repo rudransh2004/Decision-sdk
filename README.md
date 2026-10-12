@@ -13,11 +13,10 @@ data**. Ask it to choose among your candidates instead of generating a
 free-form answer. One SDK spans dataset loading, decision SFT, calibration,
 RLCD, export, and inference.
 
-> **Documentation preview:** This public repo currently contains docs only.
-> SDK source and packaging files will be published once the ongoing work is
-> ready. Commands below become runnable from this repo after that release.
-> “Jev-style” describes the typed-decision workflow, not guaranteed parity
-> with Jev or any publisher's model.
+> **Source release:** The SDK and installable package are in this repository;
+> model weights are downloaded separately when needed. “Jev-style” describes
+> the typed-decision workflow, not guaranteed parity with Jev or any
+> publisher's model.
 
 ## Make it yours
 
@@ -30,7 +29,7 @@ and other native releases while preserving their own readouts.
 **03 · Infer and deploy** — run `choice`, `noul` (yes/no), and `score`;
 batch, evaluate, export, or serve through supported backends.
 
-After the source release, install the training extra with
+Install the training extra from a clone with
 `python -m pip install -e ".[train]"`. Save a labeled row as
 `decisions.jsonl`:
 
@@ -64,7 +63,7 @@ calibrate on separate held-out data; one demo row cannot establish quality.
 Already have a decision model? Continue its **native** readout instead:
 
 ```python
-released = load_model("laya")  # install .[laya] after source release
+released = load_model("laya")  # install .[laya] for this model
 tuned = released.finetune("decisions.jsonl", "./my-laya")
 print(tuned.choice(state="Customer was charged twice",
                    choices=["billing", "technical"]).decision)

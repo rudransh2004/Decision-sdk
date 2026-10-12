@@ -4,9 +4,6 @@
 [Supported models](model-support.md) ·
 [LLM conversion](conversion.md)
 
-> This public repository is a documentation preview; the SDK source and
-> installation files have not yet been published here.
-
 **“Loads in vLLM” is not the same as “makes the trained decision.”** A
 publisher's decision model may require a separate head, a specialized
 prompt, a temperature, or an external server. Serving only its LM weights
@@ -49,7 +46,7 @@ would discard those trained readouts.
 
 ## Minimal export-to-API flow
 
-Once the SDK source is published, export in a Bosun-compatible environment:
+Export in a Bosun-compatible environment:
 
 ```bash
 python -m pip install -e ".[bosun]"

@@ -6,9 +6,6 @@
 [LLM conversion](conversion.md) ·
 [vLLM and inference](inference-backends.md)
 
-> The public repository is a documentation preview; installation commands
-> require the SDK source, which will be published separately once ready.
-
 Decision SDK is a Python package named `futurix-decision`; import it as
 `futurix_decision`. Python 3.10+ and PyTorch are required.
 
