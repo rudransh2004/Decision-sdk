@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import torch
 
+from futurix_decision.errors import ConfigError
 from futurix_decision.rewards import (
     BrierScore,
     LogScore,
@@ -129,7 +130,7 @@ class RLCDTrainingTests(unittest.TestCase):
 
         model = tiny_model()
         trainer = RLCDTrainer(model, reference_model=model)
-        with self.assertRaisesRegex(ValueError, "separate frozen"):
+        with self.assertRaisesRegex(ConfigError, "separate frozen"):
             trainer.train([example()])
 
     def test_one_transformer_forward_for_all_reports(self):

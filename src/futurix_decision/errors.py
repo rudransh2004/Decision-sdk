@@ -7,11 +7,8 @@ class FuturixError(Exception):
     """Base class for errors raised by the SDK."""
 
 
-class ConfigError(FuturixError, ValueError):
-    """Bad arguments or configuration.
-
-    Subclasses ``ValueError``, so existing ``except ValueError`` blocks still catch it.
-    """
+class ConfigError(FuturixError):
+    """Bad arguments or configuration."""
 
 
 class CheckpointError(FuturixError):

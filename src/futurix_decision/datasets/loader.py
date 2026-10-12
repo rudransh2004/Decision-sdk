@@ -160,7 +160,7 @@ def load_decisions(
                         yield normalize_decision(question, index=index)
                 else:
                     yield normalize_decision(row, index=index)
-            except (ValueError, TypeError) as exc:
+            except (ConfigError, ValueError, TypeError) as exc:
                 raise ConfigError(f"row {index}: {exc}") from exc
 
     return validated() if streaming else list(validated())

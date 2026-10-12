@@ -22,6 +22,7 @@ from transformers import (
 
 from futurix_decision import DecisionModel, DecisionTrainer, SFTConfig, SFTTrainer
 from futurix_decision.datasets import DecisionExample
+from futurix_decision.errors import ConfigError
 from futurix_decision.models import DecisionBatch
 from futurix_decision.trainers import decision_sft_loss, hard_cross_entropy, soft_cross_entropy
 from futurix_decision.trainers.sft import _representative_rows
@@ -74,7 +75,7 @@ class SFTLossTests(unittest.TestCase):
         self.assertAlmostEqual(loss.item(), F.cross_entropy(logits, target).item())
         loss.backward()
         self.assertTrue(torch.any(logits.grad != 0))
-        with self.assertRaisesRegex(ValueError, "integer"):
+        with self.assertRaisesRegex(ConfigError, "integer"):
             hard_cross_entropy(logits, torch.tensor([0.3, 0.7]))
 
     def test_soft_ce_and_smoothing(self):
@@ -116,7 +117,7 @@ class SFTLossTests(unittest.TestCase):
         self.assertEqual(raw.grad[0, 0].item(), 0.0)
         self.assertEqual(raw.grad[1, 1].item(), 0.0)
         self.assertNotEqual(raw.grad[0, 1].item(), 0.0)
-        with self.assertRaisesRegex(ValueError, "hard loss"):
+        with self.assertRaisesRegex(ConfigError, "hard loss"):
             decision_sft_loss(batch, [hard, soft], mode="hard")
 
     def test_one_hot_hard_and_soft_are_equivalent(self):
@@ -151,7 +152,7 @@ class SFTTrainingTests(unittest.TestCase):
             dataset=[example("approve", "a"), example("reject", "b")] * 3,
             sft_config=config,
         )
-        with self.assertRaisesRegex(ValueError, "calibration_dataset"):
+        with self.assertRaisesRegex(ConfigError, "calibration_dataset"):
             trainer.train(stages=["decision_sft", "calibration"])
         history = trainer.train(stages=["decision_sft"])
         self.assertTrue(history)
@@ -196,7 +197,7 @@ class SFTTrainingTests(unittest.TestCase):
             tiny_model(), config=SFTConfig(epochs=2, batch_size=2, learning_rate=0.002)
         )
         self.assertTrue(trainer.train(Repeatable()))
-        with self.assertRaisesRegex(ValueError, "one-shot"):
+        with self.assertRaisesRegex(ConfigError, "one-shot"):
             SFTTrainer(tiny_model(), config=SFTConfig(epochs=2)).train(source())
 
     def test_jsonl_reopens_for_multiple_epochs(self):
@@ -209,7 +210,7 @@ class SFTTrainingTests(unittest.TestCase):
             self.assertEqual(len(trainer.train(path)), 2)
 
     def test_empty_data_is_an_error(self):
-        with self.assertRaisesRegex(ValueError, "empty"):
+        with self.assertRaisesRegex(ConfigError, "empty"):
             SFTTrainer(tiny_model()).train([])
 
     def test_gradient_checkpointing_training(self):
@@ -261,7 +262,7 @@ class SFTTrainingTests(unittest.TestCase):
             )
 
     def test_qlora_requires_4_bit_checkpoint(self):
-        with self.assertRaisesRegex(ValueError, "4-bit"):
+        with self.assertRaisesRegex(ConfigError, "4-bit"):
             SFTTrainer(tiny_model(), config=SFTConfig(method="qlora")).train([example()])
 
     @unittest.skipUnless(

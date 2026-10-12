@@ -25,6 +25,11 @@ checkpoints and APIs is gone.
   head_type=...)`, and Qwen3.5 `convert=True`, which used to add the marker token.
   `head_prompt_version` defaults from `head_type`, and a value that does not match it
   raises `ConfigError`. Checkpoints with `marker-v1` pointer heads no longer load.
+- **Breaking:** `ConfigError` no longer subclasses `ValueError`; that base only kept 0.1's
+  `except ValueError` handlers working. Catch `ConfigError` (or `FuturixError`). Invalid
+  `DecisionInput` and `DecisionExample` fields, including bad targets, still raise
+  pydantic's `ValidationError`, and `load_decisions` still raises `ConfigError` naming the
+  row. `MissingDependencyError` keeps its `ImportError` base, which describes what it is.
 
 ## [0.2.0] — 2026-10-12
 

@@ -11,6 +11,7 @@ from transformers import AutoModelForCausalLM
 
 from futurix_decision import DecisionInput, DecisionModel, load_model
 from futurix_decision.datasets import DecisionExample
+from futurix_decision.errors import ConfigError
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA, format_bosun_prompt
 from futurix_decision.models.families.bosun import BOSUN_RELEASES
 from futurix_decision.models.registry import family_for_checkpoint
@@ -62,7 +63,9 @@ class BosunContractTests(unittest.TestCase):
                 self.assertEqual(model.config.source_revision, revision)
                 adapter = family_for_checkpoint(checkpoint)
                 self.assertEqual((adapter.name, adapter.trainable), ("bosun", True))
-                with self.assertRaisesRegex(ValueError, "already contains a trained decision head"):
+                with self.assertRaisesRegex(
+                    ConfigError, "already contains a trained decision head"
+                ):
                     load_model(checkpoint, convert=True)
 
     @unittest.skipUnless(os.environ.get("FUTURIX_LIVE_BOSUN") == "1", "opt-in model integration")
@@ -183,12 +186,12 @@ class BosunContractTests(unittest.TestCase):
         self.assertEqual(answers["urgent"]["noul"], answers["urgent"]["probabilities"]["true"])
         self.assertGreaterEqual(answers["priority"]["score"], 0)
         self.assertLessEqual(answers["priority"]["score"], 2)
-        with self.assertRaisesRegex(ValueError, "noul criteria"):
+        with self.assertRaisesRegex(ConfigError, "noul criteria"):
             model.system_one("record", {"bad": {"type": "noul", "criteria": {"yes": "y"}}})
 
     def test_null_slot_reserved_and_metadata_must_align(self):
         model = bosun_tiny_model()
-        with self.assertRaisesRegex(ValueError, "reserves slot 255"):
+        with self.assertRaisesRegex(ConfigError, "reserves slot 255"):
             model.readout.prompt(
                 DecisionInput(state="s", question="q", options=[str(i) for i in range(256)]),
                 None,

@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 
 from futurix_decision import NativeDecisionModel, NativeSFTConfig
+from futurix_decision.errors import ConfigError
 from test_systemone_dataset import GROUP
 
 
@@ -104,7 +105,7 @@ class NativeTrainingTests(unittest.TestCase):
         ):
             model = NativeDecisionModel.from_runtime("fastino/GLiNER2.5-Decide", "gliner", object())
             with tempfile.TemporaryDirectory() as temp:
-                with self.assertRaisesRegex(ValueError, "only accepts hard labels"):
+                with self.assertRaisesRegex(ConfigError, "only accepts hard labels"):
                     model.finetune([GROUP], Path(temp) / "bad")
                 output = Path(temp) / "good"
                 tuned = model.finetune([GROUP], output, target_policy="argmax")
@@ -117,7 +118,7 @@ class NativeTrainingTests(unittest.TestCase):
                     config=NativeSFTConfig(epochs=1, batch_size=2),
                 )
                 self.assertEqual(tuned.family, "gliner")
-                with self.assertRaisesRegex(ValueError, "readout-only"):
+                with self.assertRaisesRegex(ConfigError, "readout-only"):
                     model.finetune(
                         [GROUP],
                         Path(temp) / "unsupported",

@@ -10,7 +10,7 @@ from unittest.mock import patch
 from huggingface_hub.errors import EntryNotFoundError
 
 from futurix_decision import DecisionModel, load_model
-from futurix_decision.errors import CheckpointError
+from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.decider import DeciderDecisionModel
 from futurix_decision.models.registry import get_family, infer_local_family
 from futurix_decision.models.sources import checkpoint_source
@@ -97,7 +97,7 @@ class SourceTests(unittest.TestCase):
                 self.assertEqual(loaded.checkpoint, str(root))
                 with self.assertRaisesRegex(CheckpointError, "belongs to clef"):
                     load_model(root, family="pplx-decider", trust_remote_code=True)
-                with self.assertRaisesRegex(ValueError, "trust_remote_code=True"):
+                with self.assertRaisesRegex(ConfigError, "trust_remote_code=True"):
                     load_model(root)
             (root / "joint_head.safetensors").unlink()
             with self.assertRaisesRegex(CheckpointError, "joint_head.safetensors"):
@@ -464,7 +464,7 @@ class SourceTests(unittest.TestCase):
         ) as loader:
             self.assertIs(load_model("Mapika/decider-4b"), native)
         loader.assert_called_once_with("Mapika/decider-4b")
-        with self.assertRaisesRegex(ValueError, "unknown selected"):
+        with self.assertRaisesRegex(ConfigError, "unknown selected"):
             load_model("Cloudflare/clef-omni")
 
     def test_hub_futurix_export_is_detected_without_replacing_its_decision_head(self):
@@ -539,7 +539,7 @@ class SourceTests(unittest.TestCase):
             raw.vision_config = object()
             with self.assertRaisesRegex(CheckpointError, "multimodal"):
                 load_model("example/vision", convert=True)
-            with self.assertRaisesRegex(ValueError, "40-character revision"):
+            with self.assertRaisesRegex(ConfigError, "40-character revision"):
                 load_model("example/custom", convert=True, trust_remote_code=True)
 
     def test_qwen_multimodal_conversion_accepts_explicit_bosun_strategy(self):
@@ -559,7 +559,7 @@ class SourceTests(unittest.TestCase):
                 bosun_template_fallback=True,
                 train_backbone=True,
             )
-            with self.assertRaisesRegex(ValueError, "head_type='tokens'"):
+            with self.assertRaisesRegex(ConfigError, "head_type='tokens'"):
                 load_model(
                     "qwen3.5-9b",
                     convert=True,
@@ -568,12 +568,12 @@ class SourceTests(unittest.TestCase):
                 )
 
     def test_conversion_never_replaces_a_known_native_or_saved_decision_head(self):
-        with self.assertRaisesRegex(ValueError, "discard its native readout"):
+        with self.assertRaisesRegex(ConfigError, "discard its native readout"):
             load_model("Cloudflare/clef", convert=True)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             put(root, "head.pt")
-            with self.assertRaisesRegex(ValueError, "discard its native readout"):
+            with self.assertRaisesRegex(ConfigError, "discard its native readout"):
                 load_model(root, convert=True)
         with patch(
             "futurix_decision.utils.config.load_decision_config",
@@ -581,7 +581,7 @@ class SourceTests(unittest.TestCase):
                 "architecture": "futurix-decision",
             },
         ):
-            with self.assertRaisesRegex(ValueError, "already a trained Futurix"):
+            with self.assertRaisesRegex(ConfigError, "already a trained Futurix"):
                 load_model("example/trained", convert=True)
 
     def test_a_head_only_futurix_copy_is_detected_and_never_converted(self):
@@ -589,7 +589,7 @@ class SourceTests(unittest.TestCase):
             root = Path(temp)
             put(root, "decision_head.safetensors", "")
             self.assertEqual(infer_local_family(root), "futurix")
-            with self.assertRaisesRegex(ValueError, "discard its native readout"):
+            with self.assertRaisesRegex(ConfigError, "discard its native readout"):
                 load_model(root, convert=True)
 
     def test_detection_precedence_for_directories_with_several_families_files(self):

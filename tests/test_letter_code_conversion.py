@@ -23,7 +23,7 @@ from futurix_decision import (
     evaluate,
     load_model,
 )
-from futurix_decision.errors import CheckpointError
+from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.letter_code import answer_codes
 from test_model_sources import Loaded
 
@@ -386,20 +386,20 @@ class LetterCodeConversionTests(unittest.TestCase):
             config.architectures = ["MiMoV2ForConditionalGeneration"]
             with self.assertRaisesRegex(CheckpointError, "multimodal"):
                 load_model("XiaomiMiMo/MiMo-V2.6-Flash-RL", convert=True, strategy="letter_code")
-        with self.assertRaisesRegex(ValueError, "known decision-model family"):
+        with self.assertRaisesRegex(ConfigError, "known decision-model family"):
             load_model("perplexity-ai/pplx-decider-v1.1-27b", convert=True, strategy="letter_code")
 
     def test_codebook_and_attention_fail_before_large_model_loading(self):
         raw = Tokenizer(models.WordLevel({"[UNK]": 0, "A": 1}, unk_token="[UNK]"))
         raw.pre_tokenizer = pre_tokenizers.Whitespace()
         tokenizer = PreTrainedTokenizerFast(tokenizer_object=raw, unk_token="[UNK]")
-        with self.assertRaisesRegex(ValueError, "only 1 distinct"):
+        with self.assertRaisesRegex(ConfigError, "only 1 distinct"):
             answer_codes(tokenizer, 4)
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp) / "base"
             base.mkdir()
             raw_checkpoint(base)
-            with self.assertRaisesRegex(ValueError, "Qwen3.5-family"):
+            with self.assertRaisesRegex(ConfigError, "Qwen3.5-family"):
                 load_model(
                     base,
                     convert=True,

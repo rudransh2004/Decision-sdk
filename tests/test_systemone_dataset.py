@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from futurix_decision import DecisionTrainer, SFTConfig, evaluate, load_decisions
+from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation.evaluator import iter_examples
 from futurix_decision.trainers.sft import _canonical_rows
 from test_sft import tiny_model
@@ -92,9 +93,9 @@ class DatasetInterchangeTests(unittest.TestCase):
             {**GROUP, "questions": {**GROUP["questions"], "new": {"type": "choice"}}},
         ]
         for row in invalid:
-            with self.subTest(row=row), self.assertRaises(ValueError):
+            with self.subTest(row=row), self.assertRaises(ConfigError):
                 load_decisions(row)
-        with self.assertRaisesRegex(ValueError, "JSON-serializable"):
+        with self.assertRaisesRegex(ConfigError, "JSON-serializable"):
             load_decisions({**GROUP, "state": [{"broken": float("nan")}]})
 
     def test_grouped_questions_keep_structured_native_contract(self):
@@ -122,9 +123,9 @@ class DatasetInterchangeTests(unittest.TestCase):
     def test_image_references_survive_for_supported_native_models(self):
         row = {**GROUP, "images": ["./invoice.png"]}
         self.assertTrue(all(item.images == ["./invoice.png"] for item in load_decisions(row)))
-        with self.assertRaisesRegex(ValueError, "video and generic media"):
+        with self.assertRaisesRegex(ConfigError, "video and generic media"):
             load_decisions({**GROUP, "videos": ["./clip.mp4"]})
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ConfigError):
             load_decisions({**GROUP, "images": [""]})
 
     def test_grouped_rows_train_the_existing_futurix_head(self):
@@ -134,7 +135,7 @@ class DatasetInterchangeTests(unittest.TestCase):
             sft_config=SFTConfig(epochs=1, batch_size=1, max_examples=3),
         )
         self.assertEqual(len(trainer.train()), 3)
-        with self.assertRaisesRegex(ValueError, "text-only"):
+        with self.assertRaisesRegex(ConfigError, "text-only"):
             DecisionTrainer(
                 model=tiny_model(),
                 dataset=[{**GROUP, "images": ["./invoice.png"]}],

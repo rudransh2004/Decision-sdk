@@ -195,7 +195,7 @@ class DeciderIntegrationTests(unittest.TestCase):
                 ),
                 30,
             )
-            with self.assertRaisesRegex(ValueError, "at most 10 levels"):
+            with self.assertRaisesRegex(ConfigError, "at most 10 levels"):
                 prepare_decider_rows(
                     DecisionInput(
                         kind="score",
@@ -242,7 +242,7 @@ class DeciderIntegrationTests(unittest.TestCase):
                 candidate_labels=["Reject", "Approve"],
                 preserve_order=True,
             )
-            with self.assertRaisesRegex(ValueError, "literal true/false"):
+            with self.assertRaisesRegex(ConfigError, "literal true/false"):
                 model.decide(invalid)
 
     def test_batched_vllm_uses_the_same_prompt_and_temperature(self):
@@ -602,7 +602,7 @@ class DeciderTrainingTests(unittest.TestCase):
                 json.loads((unmerged / "decision_config.json").read_text())["base_checkpoint"],
                 str(source),
             )
-            with self.assertRaisesRegex(ValueError, "trainable_adapter=True"):
+            with self.assertRaisesRegex(ConfigError, "trainable_adapter=True"):
                 DecisionTrainer(
                     model=DecisionModel.from_pretrained(unmerged),
                     dataset=rows,

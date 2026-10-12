@@ -7,7 +7,7 @@ import httpx
 
 from futurix_decision import DecisionInput, NativeDecisionModel, load_model
 from futurix_decision.datasets.systemone import native_question
-from futurix_decision.errors import BackendError, InvalidOutputError
+from futurix_decision.errors import BackendError, ConfigError, InvalidOutputError
 
 CHOICE = DecisionInput(
     state={"ticket": "duplicate charge"},
@@ -109,7 +109,7 @@ class NativeInferenceTests(unittest.TestCase):
         self.assertTrue(model.capabilities.vllm_inference)
         with self.assertRaisesRegex(BackendError, "does not serve"):
             load_model("openjev", base_url="http://localhost:3000", client=client)
-        with self.assertRaisesRegex(ValueError, "base_url"):
+        with self.assertRaisesRegex(ConfigError, "base_url"):
             load_model("openjev")
 
     @patch("time.sleep")
@@ -227,9 +227,9 @@ class NativeInferenceTests(unittest.TestCase):
         )
         self.assertEqual(clef.decide(CHOICE).decision, "billing")
         self.assertTrue(clef.capabilities.training)
-        with self.assertRaisesRegex(ValueError, "40-character revision"):
+        with self.assertRaisesRegex(ConfigError, "40-character revision"):
             load_model("nox", trust_remote_code=True, revision="main")
-        with self.assertRaisesRegex(ValueError, "not decision-trained"):
+        with self.assertRaisesRegex(ConfigError, "not decision-trained"):
             load_model("qwen3.5-9b")
 
     def test_candidate_and_verbalizer_runtimes_require_keyword_only_system_one(self):
@@ -268,7 +268,7 @@ class NativeInferenceTests(unittest.TestCase):
     def test_native_question_does_not_reorder_choices(self):
         request = native_question(CHOICE)
         self.assertEqual(list(request["criteria"]), CHOICE.options)
-        with self.assertRaisesRegex(ValueError, "explicit false/true"):
+        with self.assertRaisesRegex(ConfigError, "explicit false/true"):
             NativeDecisionModel.from_runtime(
                 "convaiinnovations/laya",
                 "laya",
@@ -302,7 +302,7 @@ class NativeInferenceTests(unittest.TestCase):
                 "billing",
             )
         self.assertEqual(vision.images, ["loaded image"])
-        with self.assertRaisesRegex(ValueError, "does not expose an image"):
+        with self.assertRaisesRegex(ConfigError, "does not expose an image"):
             NativeDecisionModel.from_runtime(
                 "convaiinnovations/laya", "laya", types.SimpleNamespace(predict=answer)
             ).decide(row)

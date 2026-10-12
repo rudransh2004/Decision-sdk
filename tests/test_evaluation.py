@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from futurix_decision import DecisionResult
+from futurix_decision.errors import ConfigError
 from futurix_decision.evaluation import compute_metrics, evaluate, fit_temperature_from_logits
 from futurix_decision.models import DecisionBatch
 
@@ -134,7 +135,7 @@ class EvaluatorTrainerTests(unittest.TestCase):
                 self.assertEqual(forward.call_count, 1)
             self.assertEqual(resumed["count"], 3)
             self.assertAlmostEqual(resumed["accuracy"], evaluate(model, rows)["accuracy"], places=6)
-            with self.assertRaisesRegex(ValueError, "identity differs"):
+            with self.assertRaisesRegex(ConfigError, "identity differs"):
                 evaluate(model, rows, predictions_output=journal, run_id="different", resume=True)
 
     def test_calibration_trainer_stores_a_temperature_within_bounds(self):

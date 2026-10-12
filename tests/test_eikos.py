@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from futurix_decision import DecisionInput, DecisionModel, DecisionTrainer, SFTConfig
 from futurix_decision.datasets.schema import DecisionExample
-from futurix_decision.errors import CheckpointError
+from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.eikos import EikosDecisionModel, eikos_label_table, prepare_eikos_row
 from futurix_decision.vllm.engine import VLLMEngine
 from test_decider import make_native
@@ -108,7 +108,7 @@ class EikosTests(unittest.TestCase):
                     self.assertAlmostEqual(
                         before.probabilities[option], after.probabilities[option]
                     )
-            with self.assertRaisesRegex(ValueError, "at most 100 options"):
+            with self.assertRaisesRegex(ConfigError, "at most 100 options"):
                 prepare_eikos_row(
                     DecisionInput(
                         state="review", question="Pick", options=[f"option {i}" for i in range(101)]

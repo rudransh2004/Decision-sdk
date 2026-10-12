@@ -10,6 +10,7 @@ from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import GPT2Config, GPT2LMHeadModel, PreTrainedTokenizerFast
 
 from futurix_decision import DecisionInput, DecisionModel
+from futurix_decision.errors import ConfigError
 from futurix_decision.models.decision_head import (
     assign_slots,
     decision_token,
@@ -116,9 +117,9 @@ class DecisionModelTests(unittest.TestCase):
         score = self.model.score(state="ready")
         self.assertIsInstance(score.decision, int)
         self.assertEqual(set(score.probabilities), {str(i) for i in range(6)})
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ConfigError):
             self.model.score(state="ready", min_score=0, max_score=20)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ConfigError):
             self.model.noul(state="ready", confidence_threshold=1.1)
 
     def test_one_forward_per_batch_and_seed_changes_mapping(self):
@@ -182,7 +183,7 @@ class DecisionModelTests(unittest.TestCase):
         old_maximum = self.model.config.max_sequence_length
         try:
             self.model.config.max_sequence_length = 5
-            with self.assertRaisesRegex(ValueError, "max_sequence_length"):
+            with self.assertRaisesRegex(ConfigError, "max_sequence_length"):
                 self.model.choice(state="too long", choices=["a", "b"])
         finally:
             self.model.config.max_sequence_length = old_maximum

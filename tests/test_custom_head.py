@@ -29,7 +29,7 @@ from futurix_decision import (
     load_model,
     register_decision_head,
 )
-from futurix_decision.errors import CheckpointError
+from futurix_decision.errors import CheckpointError, ConfigError
 from futurix_decision.models.bosun import BOSUN_PROMPT_SCHEMA
 from futurix_decision.models.custom_head import HEAD_WEIGHTS
 from futurix_decision.trainers import RLCDConfig
@@ -135,7 +135,7 @@ class CustomHeadTests(unittest.TestCase):
                     self.assertAlmostEqual(
                         original.probabilities[option], other.probabilities[option], places=6
                     )
-            with self.assertRaisesRegex(ValueError, "cannot override"):
+            with self.assertRaisesRegex(ConfigError, "cannot override"):
                 DecisionModel.from_pretrained(temp, head_type="tokens")
             (Path(temp) / HEAD_WEIGHTS).unlink()
             with self.assertRaisesRegex(CheckpointError, "missing decision_head.safetensors"):
@@ -143,9 +143,9 @@ class CustomHeadTests(unittest.TestCase):
 
     def test_unregistered_heads_and_bosun_prompts_are_rejected(self):
         model = make_model()
-        with self.assertRaisesRegex(ValueError, "unknown decision head"):
+        with self.assertRaisesRegex(ConfigError, "unknown decision head"):
             make_model(head_type="unregistered")
-        with self.assertRaisesRegex(ValueError, "require prompt_format"):
+        with self.assertRaisesRegex(ConfigError, "require prompt_format"):
             DecisionModel(
                 model.backbone, model.tokenizer, head_type="pointer", prompt_format="bosun-v3"
             )
@@ -163,7 +163,7 @@ class CustomHeadTests(unittest.TestCase):
                 ).squeeze(-1)
 
         register_decision_head("test_additive", AdditiveHead)
-        with self.assertRaisesRegex(ValueError, "already registered"):
+        with self.assertRaisesRegex(ConfigError, "already registered"):
             register_decision_head("test_additive", AdditiveHead)
         model = make_model(head_type="test_additive", head_config={"width": 4})
         with tempfile.TemporaryDirectory() as temp:
@@ -182,7 +182,7 @@ class CustomHeadTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             make_model().save_pretrained(temp)
-            with self.assertRaisesRegex(ValueError, "does not support custom"):
+            with self.assertRaisesRegex(ConfigError, "does not support custom"):
                 VLLMEngine(temp)
 
 
@@ -266,7 +266,7 @@ class GeneralConversionTests(unittest.TestCase):
                             probability,
                             places=6,
                         )
-                    with self.assertRaisesRegex(ValueError, "head_prompt_version"):
+                    with self.assertRaisesRegex(ConfigError, "head_prompt_version"):
                         DecisionModel.from_pretrained(output, head_prompt_version="marker-v1")
 
     def test_quantized_pointer_initialization_needs_no_tokenizer_resize(self):
@@ -344,22 +344,22 @@ class GeneralConversionTests(unittest.TestCase):
             base = Path(temp) / "raw"
             base.mkdir()
             self._raw_checkpoint(base, "gpt2")
-            with self.assertRaisesRegex(ValueError, "exactly 256"):
+            with self.assertRaisesRegex(ConfigError, "exactly 256"):
                 load_model(base, convert=True, strategy="bosun", decision_tokens=16)
-            with self.assertRaisesRegex(ValueError, "head_type='tokens'"):
+            with self.assertRaisesRegex(ConfigError, "head_type='tokens'"):
                 load_model(base, convert=True, strategy="bosun", head_type="pointer")
-            with self.assertRaisesRegex(ValueError, "before quantizing"):
+            with self.assertRaisesRegex(ConfigError, "before quantizing"):
                 load_model(
                     base,
                     convert=True,
                     strategy="bosun",
                     quantization_config=SimpleNamespace(load_in_4bit=True),
                 )
-            with self.assertRaisesRegex(ValueError, "only for converting"):
+            with self.assertRaisesRegex(ConfigError, "only for converting"):
                 load_model(base, strategy="bosun")
-            with self.assertRaisesRegex(ValueError, "strategy must be"):
+            with self.assertRaisesRegex(ConfigError, "strategy must be"):
                 load_model(base, convert=True, strategy="unknown")
-            with self.assertRaisesRegex(ValueError, "already contains a trained"):
+            with self.assertRaisesRegex(ConfigError, "already contains a trained"):
                 load_model("Hanno-Labs/bosun-v3.1-0.6b", convert=True, strategy="bosun")
 
     @unittest.skipUnless(importlib.util.find_spec("accelerate"), "train extra not installed")

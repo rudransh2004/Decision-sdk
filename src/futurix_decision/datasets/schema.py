@@ -128,7 +128,11 @@ class DecisionExample(DecisionInput):
 
     @model_validator(mode="after")
     def check_target(self) -> DecisionExample:
-        self.target_distribution(include_abstain=True)
+        # Pydantic reports a ValueError as a ValidationError; a ConfigError would escape it.
+        try:
+            self.target_distribution(include_abstain=True)
+        except ConfigError as exc:
+            raise ValueError(str(exc)) from exc
         return self
 
     def target_distribution(self, *, include_abstain: bool = False) -> list[float]:
