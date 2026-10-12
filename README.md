@@ -1,69 +1,107 @@
 # Decision SDK
 
-**A Python toolkit for decision models, from data to deployment.** Built by
-FuturixAI for typed choices, yes/no decisions, and ordinal scores with
-runtime-defined candidates.
+![Decision SDK: from a language model to a trained decision readout and runtime choices](docs/assets/decision-sdk-hero.svg)
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![MIT license](https://img.shields.io/badge/License-MIT-2ea44f)
 
-> **Documentation preview:** The public GitHub repository currently contains
-> documentation, not the SDK source or packaging files. The installation and
-> code examples below become runnable there after the in-progress source is
-> ready to publish. This notice will be removed with the source release.
+### Build your own Jev-style decision model.
 
-Load selected published decision checkpoints with their native readouts, or
-convert a compatible text causal LM using a candidate-aware pointer head or
-Bosun-style decision tokens. Use one dataset interface for training, fine-tuning,
-calibration, evaluation, and export. Serve supported checkpoints through
-PyTorch, the SDK's vLLM adapter, or its Decision API.
+**Train. Fine-tune. Infer.** Turn a compatible open text LLM into a decision
+model, or continue training a released decision checkpoint on **your decision
+data**. Ask it to choose among your candidates instead of generating a
+free-form answer. One SDK spans dataset loading, decision SFT, calibration,
+RLCD, export, and inference.
 
-> **Before you use it:** Converting an LM initializes a new decision readout;
-> it does **not** create a trained decision model. Some integrations require
-> publisher packages, pinned remote code, or substantial GPU memory. Check
-> each model's license and verify performance on your own held-out data before
-> relying on its outputs.
+> **Documentation preview:** This public repo currently contains docs only.
+> SDK source and packaging files will be published once the ongoing work is
+> ready. Commands below become runnable from this repo after that release.
+> “Jev-style” describes the typed-decision workflow, not guaranteed parity
+> with Jev or any publisher's model.
 
-## Start here
+## Make it yours
 
-```bash
-python -m pip install -e ".[laya]"
-```
+**01 · Train a new decision model** — attach a pointer head or Bosun-style
+decision tokens to a compatible causal LM, then fit it on labeled decisions.
+
+**02 · Fine-tune a decision model** — adapt supported Bosun, Laya, Clef, Kev
+and other native releases while preserving their own readouts.
+
+**03 · Infer and deploy** — run `choice`, `noul` (yes/no), and `score`;
+batch, evaluate, export, or serve through supported backends.
 
 ```python
-from futurix_decision import load_model
+from futurix_decision import DecisionTrainer, SFTConfig, load_model
 
-# Downloads the supported checkpoint on first use; later loads reuse the cache.
-model = load_model("laya")
-result = model.choice(
-    state="The customer was charged twice.",
-    question="Which team should handle this?",
+# A plain LLM becomes a trainable decision model; it is not trained yet.
+model = load_model("HuggingFaceTB/SmolLM2-135M", convert=True, strategy="pointer")
+trainer = DecisionTrainer(
+    model=model, dataset="decisions.jsonl",
+    sft_config=SFTConfig(method="full"),  # trains the pointer head by default
+)
+trainer.train(stages=["decision_sft"])
+trainer.export("./my-decision-model")
+
+result = load_model("./my-decision-model").choice(
+    state="A customer was charged twice",
     choices=["billing", "technical"],
 )
 print(result.decision, result.probabilities)
 ```
 
-Next: [getting started](docs/getting-started.md) ·
-[datasets and training](docs/datasets-and-training.md) ·
-[model support and limits](docs/model-support.md) ·
-[detailed reference below](#canonical-data).
+Already have a decision model? `load_model("laya").finetune("decisions.jsonl",
+"./my-laya")` continues its native training path. See
+[getting started](docs/getting-started.md) and
+[datasets and training](docs/datasets-and-training.md).
 
-## What is included
+## Supported decision models
 
-- **One decision format:** local JSON/JSONL, in-memory records, and Hugging
-  Face datasets, with hard or probabilistic targets.
-- **Model choices:** native decision checkpoints and opt-in conversion of
-  compatible causal LMs; original native readouts are never silently replaced.
-- **Training workflow:** decision SFT, held-out calibration, RLCD, full
-  fine-tuning, LoRA, and supported QLoRA paths.
-- **Deployment:** batch inference, checkpoint export/reload, CLI, FastAPI, and
-  model-specific vLLM adapters where implemented.
+| Released decision model | Inference | Train on your dataset | Fine-tune release |
+|:--|:--:|:--:|:--:|
+| [Bosun v3.1 0.6B](https://huggingface.co/Hanno-Labs/bosun-v3.1-0.6b) / [1.7B](https://huggingface.co/Hanno-Labs/bosun-v3.1-1.7b) | ✅ | ✅ SFT / RLCD | ✅ |
+| [Laya](https://huggingface.co/convaiinnovations/laya) / [Multilingual](https://huggingface.co/convaiinnovations/laya-multilingual) | ✅ | ✅ native | ✅ |
+| [Kev 9B](https://huggingface.co/jaredpalmer/kev-9b) | ✅ | ✅ native | ✅ |
+| [Clef](https://huggingface.co/Cloudflare/clef) / [Clef-Flash](https://huggingface.co/Cloudflare/clef-flash) | ✅ | ✅ native | ✅ |
+| [GLiNER2.5-Decide](https://huggingface.co/fastino/GLiNER2.5-Decide) | ✅ | ✅ hard labels | ✅ |
+| [Perplexity Decider 27B](https://huggingface.co/perplexity-ai/pplx-decider-v1.1-27b) | ✅ | ✅ native | ✅ |
+| [Decider 4B](https://huggingface.co/Mapika/decider-4b) | ✅ | ✅ SFT / RLCD | ✅ |
+| [JPT 4B](https://huggingface.co/kirp/jpt-4b) / [9B](https://huggingface.co/kirp/jpt-9b) | ✅ text | ✅ SFT / RLCD | ✅ |
+| [Eikos 4B](https://huggingface.co/caiovicentino1/Eikos-4B) / [27B](https://huggingface.co/caiovicentino1/Eikos-27B) | ✅ text | ✅ SFT / RLCD | ✅ |
+| Nox [1.0](https://huggingface.co/vllm-sr/Decision-1.0-Nox-4B) / [2.0](https://huggingface.co/vllm-sr/Decision-2.0-Nox-4B) | ✅ | — | — |
+| Lux [1.0](https://huggingface.co/vllm-sr/Decision-1.0-Lux-9B) / [2.0](https://huggingface.co/vllm-sr/Decision-2.0-Lux-9B) | ✅ | — | — |
+| [Liquid d1 3B](https://huggingface.co/LiquidAI/d1-3B) | ✅ | — | — |
+| [OpenJev](https://huggingface.co/openjev/openjev) / [Flash 9B](https://huggingface.co/openjev/OpenJev-Flash-9B) | ✅ server | — | — |
 
-The package is `futurix-decision` and the Python import is `futurix_decision`.
-The forthcoming source release includes SDK code and tiny test fixtures,
-**not** the published models or datasets. The technical sections below
-describe verified paths and their limitations; published model weights retain
-their own licenses.
+“Train” means an SDK path for training **on labeled decision data**, not
+pretraining a publisher architecture from scratch. A checkmark is
+model-specific: some paths need publisher packages, pinned remote code,
+substantial GPU memory, or hard labels. OpenJev requires its running
+publisher server; Nox, Lux, and d1 remain inference-only here.
+[See requirements and limits](docs/model-support.md).
+
+## Convert an LLM into a decision model
+
+```python
+from futurix_decision import load_model
+
+pointer = load_model("your-org/text-causal-lm", convert=True, strategy="pointer")
+bosun_style = load_model("your-org/text-causal-lm", convert=True, strategy="bosun")
+```
+
+**Pointer** adds a candidate-aware head without new vocabulary rows;
+**Bosun-style** adds 256 decision tokens with stable candidate slots. Both
+need decision-data training, and neither copies an existing publisher's
+trained decision ability. Conversion applies to *compatible* Hugging Face
+causal text LMs; model size is limited by your hardware, not the SDK API.
+We'll document specific convertible LLM families separately.
+[Conversion guide and code](docs/datasets-and-training.md#convert-and-train-a-compatible-causal-lm).
+
+[Quickstart](docs/getting-started.md) ·
+[Training guide](docs/datasets-and-training.md) ·
+[Model requirements](docs/model-support.md)
+
+<details>
+<summary><strong>Open full technical reference</strong> · datasets, architectures, experiments, CLI and API</summary>
 
 ## Installation
 
@@ -1111,3 +1149,5 @@ RLCD convergence toward soft targets, export/reload, API, and batching.
 Optional live vLLM testing needs free GPU memory. No pretrained Futurix
 model, full-corpus training, 1.7B checkpoint, multi-GPU run, or benchmark
 numbers are included.
+
+</details>
