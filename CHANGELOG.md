@@ -19,6 +19,13 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The documentation is rewritten for the 0.2 API and builds as a site: a short README, plus
+  `docs/` pages for running decisions, serving, training, conversion, model support, and
+  benchmarks (the README's run logs and results moved to `docs/benchmarks.md`). Install
+  the new `docs` extra and run `mkdocs build --strict`; CI does. The API reference is
+  generated from docstrings, and every public symbol now has one.
+- `tests/test_docs_snippets.py` compiles the Python blocks in the README and docs and runs
+  those marked `<!-- test -->`.
 - `DecisionModelConfig` (exported from the top-level package): a dataclass that holds a
   `DecisionModel`'s settings, validates them, and is what `decision_config.json` stores.
   Checkpoints saved by earlier versions load unchanged.

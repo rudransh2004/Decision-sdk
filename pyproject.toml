@@ -54,6 +54,8 @@ qlora = [
 serve = ["futurix-decision[torch]", "fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
 vllm = ["futurix-decision[torch]", "vllm>=0.30,<1"]
 wandb = ["wandb>=0.19,<1"]
+# Documentation site: mkdocs build --strict. MkDocs 2.0 drops plugins, so stay on 1.x.
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5,<10", "mkdocstrings[python]>=1,<2"]
 dev = [
   "futurix-decision[torch]",
   "pytest>=8,<10",

@@ -42,6 +42,24 @@ To hide the bulk formatting commit from `git blame`, run this once:
 git config blame.ignoreRevsFile .git-blame-ignore-revs
 ```
 
+## Write docs
+
+The docs are Markdown in `docs/`, built with MkDocs Material and mkdocstrings. The API
+reference reads docstrings, so every public symbol needs one (a test checks this).
+
+```bash
+uv pip install -e ".[docs]"
+mkdocs serve          # preview
+mkdocs build --strict # what CI runs; any warning fails
+```
+
+`tests/test_docs_snippets.py` compiles every ```` ```python ```` block in `README.md` and
+`docs/*.md`. A block preceded by a `<!-- test -->` line also runs, against a tiny local
+model and an in-process server, so keep those blocks self-contained. Put
+`<!-- test-skip: reason -->` before a block that looks runnable but needs a GPU or a
+download. The test also checks that each `futurix-decision` flag in a `bash` block exists,
+and that `docs/api.md` lists every name in `futurix_decision.__all__`.
+
 ## Check an extra
 
 CI installs each extra on its own and imports what it provides. To check one locally:
